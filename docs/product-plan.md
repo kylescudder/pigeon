@@ -80,6 +80,7 @@ Tauri remains provisional until Linux rendering, hostile-content isolation, pack
 - Top level: an estate overview showing account unread counts, connection/sync health, pending outgoing work, and saved searches.
 - From the overview, support both merged mail views and individual-account views. The estate overview is distinct from the merged inbox.
 - A practical three-pane interface with adjustable density, light/dark themes, keyboard navigation, and a command palette remains the functional baseline.
+- The visual direction is a compact Raycast/iOS-inspired desktop interface: layered surfaces, restrained rounding, grouped controls, and clear typography. The foundation shell now includes a composed empty overview, persistent theme/density settings, keyboard command navigation, and a secondary Diagnostics view. Mail connections remain unavailable in this build.
 - Message grouping and conversation threading are deferred; use a flat message list initially.
 - Closing the window keeps the application running and synchronising by default. Make this configurable and provide an explicit Quit action and optional launch-at-login.
 - Desktop notifications omit message bodies by default.

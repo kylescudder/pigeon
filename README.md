@@ -22,6 +22,12 @@ This is the foundation build, not a working mail client yet. Follow the
 to check the real desktop, keyring, viewer isolation, and window lifecycle.
 The x86_64 build and NixOS desktop behaviour still need verification.
 
+## Interface
+
+Use `Ctrl+K` (`Cmd+K` on macOS) to open the command menu. Appearance settings
+provide light, dark, and system themes plus comfortable or compact spacing;
+these preferences are saved on the device. Foundation checks are under Diagnostics.
+
 ## Development
 
 ```sh
@@ -32,3 +38,9 @@ nix flake check -L   # package, tests, and native self-test
 ```
 
 After changing `bun.lock`, run `tools/update-node-modules-hash.sh`.
+
+The frontend browser suite is `bun run test:e2e` (install Chromium with
+`bunx --no-install playwright install chromium` on a compatible browser-test host).
+CI runs it on Ubuntu in dark, light, and narrow layouts. Native-command test
+fixtures exercise frontend feedback; real keyring and viewer-isolation checks
+remain part of the native self-test.

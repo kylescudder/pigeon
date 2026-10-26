@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - run: bun install --frozen-lockfile
+      - run: bunx --no-install playwright install --with-deps chromium
+      - run: bun run test:e2e
   nix:
     # x86_64-linux is the supported target.
     runs-on: ubuntu-latest

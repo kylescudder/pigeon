@@ -61,10 +61,10 @@ docker run --rm -v "$PWD":/src pigeon-linux-dev tools/linux-dev/selftest.sh
 ## To finish Milestone 0 on the NixOS machine
 
 1. `nix flake check -L`, then `nix run`. Confirm that the window opens under Wayland, and again with `GDK_BACKEND=x11`.
-2. Open Foundation checks and confirm the keyring/store rows pass against the real login keyring. Lock the keyring, re-run the checks, and confirm the store reports locked rather than failing.
+2. Open Diagnostics and confirm the keyring/store rows pass against the real login keyring. Lock the keyring, re-run the checks, and confirm the store reports locked rather than failing.
 3. Open the isolation probe. Every row should read PASS, then re-run checks and confirm "probe completed".
 4. Open the sanitised fixture and confirm no remote images, forms, or frames are visible.
-5. Navigate to Foundation checks, then reload (Ctrl+R) and confirm the route survives.
+5. Navigate to Diagnostics, then reload (Ctrl+R) and confirm the route survives.
 6. Close the window and confirm the process keeps running. Relaunch from the launcher and confirm the same instance reappears. Use Quit Pigeon and confirm it exits.
 7. Check display scaling and dark mode.
 

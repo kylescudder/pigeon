@@ -28,6 +28,8 @@ let
       ../bun.lock
       ../tsconfig.json
       ../vite.config.ts
+      ../playwright.config.ts
+      ../tests/e2e
       ../src
       ../crates
       ../src-tauri/Cargo.toml
@@ -65,8 +67,8 @@ let
     outputHashAlgo = "sha256";
     outputHash =
       {
-        x86_64-linux = "sha256-Pp3Z5knIHAmpap5neD4Vt4l/UVbTasj2JkfkQ4ZMFXw=";
-        aarch64-linux = "sha256-CyfXvlPfNBjBOyyAEhuCs/g4q+WtxI5y43Aml5bIwJ8=";
+        x86_64-linux = "sha256-XHYBL7EugJDnme6phAGfhJK+crJfk8fYExOCnUz0Tjk=";
+        aarch64-linux = "sha256-ZSRWnSDQEg8XQH2zVPHdxroy9dSzB+Swuh4jJdqocQY=";
       }
       .${stdenvNoCC.hostPlatform.system};
   };
