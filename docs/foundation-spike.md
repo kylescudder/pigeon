@@ -1,8 +1,14 @@
 # Milestone 0: foundation spike
 
-Status: in progress. Every gate that can be exercised without NixOS hardware passes. Real NixOS launch, Wayland/X11, deep-link reloads, and background/reopen behaviour still need a run on the user's machine.
+Status: native diagnostics user-verified on NixOS, **13 of 13 passed** on 2026-10-26. Agent-run Linux checks also pass. The remaining desktop checklist items, including both Wayland/X11 environments, native deep-link reload, and background/reopen behaviour, remain unverified.
 
 Validation source: foundation working tree on top of `7c2f0242dd29ae229a65bcc6e6e939175df7e900`, exercised on 2026-10-23 before its first commit. The results below describe those runs, not a completed x86_64 or NixOS desktop validation.
+
+## User native validation, 2026-10-26
+
+After publishing `b779cce`, the user ran the app on their NixOS machine, opened the isolation probe, and reran diagnostics. Their supplied screenshot shows **13 of 13 passed**, including an unlocked keyring, the existing encrypted store, SQLCipher/FTS5, in-memory temporary storage, WAL, schema migration, and viewer command denial. All four attempted native commands were denied, and the remote fetch failed.
+
+The screenshot is retained unmodified with provenance under the ignored `evidence/native-validation/2026-10-26/` directory. It does not embed the exact binary revision, CPU architecture, or compositor. Treat it as user-provided runtime evidence for the reported checks, not proof of every desktop checklist item or an independent security audit.
 
 ## What exists
 
@@ -39,7 +45,7 @@ Validation source: foundation working tree on top of `7c2f0242dd29ae229a65bcc6e6
 | Viewer native-command denial | **Pass** | Probe in real WebKitGTK under Xvfb, using both the Debian debug build and the Nix release build in the sandbox. `viewer_probe_reached`, `foundation_report`, `quit_app`, and `plugin:window\|close` were all denied by the ACL, and the backend breach flag stayed false. |
 | Remote-content policy | **Pass (partial)** | Sanitiser and CSP tests pass and the probe's `fetch` failed. In the Nix sandbox there is no network at all, so only the Docker run is evidence that the CSP did the blocking. Image-loading behaviour has not been checked by eye. |
 | Static assets and route navigation | **Partial** | `bun run build` produces `index.html` plus assets, and the Nix `frontend` check runs typecheck and build. In-app navigation and reloading on a deep link inside Tauri have not been checked. |
-| Real NixOS launch and Wayland/X11 | **Not run** | No NixOS machine is available to the agent. |
+| Real NixOS launch and Wayland/X11 | **Partial, user-verified** | The user supplied a running native app screenshot with 13/13 diagnostics passed. Both compositor environments have not been individually confirmed. |
 | Background and reopen | **Not run** | Implemented: closing hides the main window, relaunching through single-instance re-shows it, and Quit exits. The behaviour has not been observed on a desktop. |
 | x86_64-linux build | **Not run** | Everything above ran on aarch64-linux (Docker on Apple silicon). The x86_64 node_modules hash was computed cross-architecture with the pinned Bun, but the package has not been built on x86_64. CI covers this once pushed. |
 
@@ -68,4 +74,4 @@ docker run --rm -v "$PWD":/src pigeon-linux-dev tools/linux-dev/selftest.sh
 6. Close the window and confirm the process keeps running. Relaunch from the launcher and confirm the same instance reappears. Use Quit Pigeon and confirm it exits.
 7. Check display scaling and dark mode.
 
-Once these pass, Milestone 1 (IMAP sync, persistence, search) can start. The provisional `messages` schema will be replaced by the sync schema.
+The native storage and viewer-denial diagnostics are now user-verified. Milestone 1 mail-engine work (IMAP sync, persistence, search) can proceed while the remaining desktop checks stay explicit release gates. The provisional `messages` schema will be replaced by the sync schema.
