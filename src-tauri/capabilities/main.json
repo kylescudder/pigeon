@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Privileged application window. Message viewers are deliberately absent: they get no capabilities at all.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-foundation-report",
+    "allow-open-viewer-fixture",
+    "allow-open-viewer-probe",
+    "allow-quit-app"
+  ]
+}

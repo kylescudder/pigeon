@@ -1,0 +1,382 @@
+//! Desktop shell: a thin adapter between the interface and `pigeon-core`.
+
+use std::borrow::Cow;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+use pigeon_core::diagnostics::Check;
+use pigeon_core::secrets::{KeyringState, SecretStore};
+use pigeon_core::unlock::{UnlockOutcome, open_store};
+use pigeon_core::viewer::{self, RemoteContent};
+use serde::Serialize;
+use tauri::http::{Request, Response, StatusCode, header};
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
+
+const MAIN: &str = "main";
+const VIEWER_SCHEME: &str = "pigeon-viewer";
+const VIEWER_PREFIX: &str = "viewer-";
+const HOSTILE_FIXTURE: &str = include_str!("../../crates/pigeon-core/tests/fixtures/hostile.html");
+
+#[derive(Default)]
+struct ShellState {
+    viewer_count: AtomicU32,
+    probe_opened: AtomicBool,
+    /// Set if a viewer ever reaches a native command. Must stay false.
+    probe_breached: AtomicBool,
+    /// What the probe page saw, delivered by navigating to `/probe-done`
+    /// rather than over IPC (which the viewer cannot use).
+    probe_results: Mutex<Option<Vec<ProbeResult>>>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+struct ProbeResult {
+    name: String,
+    ok: bool,
+    detail: String,
+}
+
+#[derive(Serialize)]
+struct FoundationReport {
+    checks: Vec<Check>,
+}
+
+/// Defence in depth for Tauri's documented Linux limitation: capability checks
+/// cannot tell frames apart, so every command also checks the calling webview.
+fn require_main(webview: &tauri::Webview) -> Result<(), String> {
+    if webview.label() == MAIN {
+        Ok(())
+    } else {
+        Err("command not available to this view".into())
+    }
+}
+
+fn secret_store() -> Box<dyn SecretStore> {
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(pigeon_core::secrets::SecretServiceStore)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Box::new(pigeon_core::secrets::MemoryStore::new(
+            KeyringState::Unavailable("Secret Service is only supported on Linux".into()),
+        ))
+    }
+}
+
+#[tauri::command]
+async fn foundation_report(
+    app: AppHandle,
+    webview: tauri::Webview,
+) -> Result<FoundationReport, String> {
+    require_main(&webview)?;
+    Ok(FoundationReport {
+        checks: collect_checks(&app).await?,
+    })
+}
+
+async fn collect_checks(app: &AppHandle) -> Result<Vec<Check>, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let db_path = data_dir.join("mail.db");
+
+    let mut checks = tauri::async_runtime::spawn_blocking(move || store_checks(&db_path))
+        .await
+        .map_err(|e| e.to_string())?;
+    checks.extend(viewer_checks(&app.state::<ShellState>()));
+    Ok(checks)
+}
+
+fn store_checks(db_path: &std::path::Path) -> Vec<Check> {
+    let secrets = secret_store();
+    let mut checks = Vec::new();
+    let state = secrets.state();
+    checks.push(Check::new(
+        "Keyring",
+        state == KeyringState::Unlocked,
+        match &state {
+            KeyringState::Unlocked => "unlocked".to_owned(),
+            KeyringState::Locked => "locked: unlock the desktop keyring to continue".to_owned(),
+            KeyringState::Unavailable(why) => format!("unavailable: {why}"),
+        },
+    ));
+    match open_store(secrets.as_ref(), db_path) {
+        UnlockOutcome::Opened { store, created } => {
+            checks.push(Check::new(
+                "Encrypted store opened",
+                true,
+                if created {
+                    "created with a new keyring-held key"
+                } else {
+                    "existing store"
+                },
+            ));
+            match store.diagnostics() {
+                Ok(more) => checks.extend(more),
+                Err(e) => checks.push(Check::new("Store diagnostics", false, e.to_string())),
+            }
+        }
+        UnlockOutcome::Blocked(reason) => {
+            checks.push(Check::new(
+                "Encrypted store opened",
+                false,
+                format!("{reason:?}"),
+            ));
+        }
+    }
+    checks
+}
+
+fn viewer_checks(state: &ShellState) -> Vec<Check> {
+    let breached = state.probe_breached.load(Ordering::SeqCst);
+    let results = state.probe_results.lock().unwrap().clone();
+    let mut checks = vec![Check::new(
+        "Viewer native-command denial",
+        !breached && results.is_some(),
+        match (
+            state.probe_opened.load(Ordering::SeqCst),
+            breached,
+            &results,
+        ) {
+            (_, true, _) => "BREACH: a viewer reached a native command",
+            (_, false, Some(_)) => "probe completed; no native command reached from the viewer",
+            (true, false, None) => "probe opened; waiting for it to finish",
+            (false, false, None) => "probe not run yet",
+        },
+    )];
+    for result in results.into_iter().flatten() {
+        checks.push(Check::new(
+            format!("Probe: {}", result.name),
+            result.ok,
+            result.detail,
+        ));
+    }
+    checks
+}
+
+#[tauri::command]
+fn open_viewer_fixture(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    require_main(&webview)?;
+    open_viewer(&app, "fixture", "Hostile fixture (sanitised)")
+}
+
+/// Opens a page that assumes the attacker already has script execution in the
+/// viewer, then attempts native IPC. The capability layer must reject it.
+#[tauri::command]
+fn open_viewer_probe(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    require_main(&webview)?;
+    app.state::<ShellState>()
+        .probe_opened
+        .store(true, Ordering::SeqCst);
+    open_viewer(&app, "probe", "Viewer isolation probe")
+}
+
+/// Granted to no capability. If this body ever runs, isolation failed.
+#[tauri::command]
+fn viewer_probe_reached(app: AppHandle) {
+    app.state::<ShellState>()
+        .probe_breached
+        .store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    require_main(&webview)?;
+    app.exit(0);
+    Ok(())
+}
+
+fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<(), String> {
+    let n = app
+        .state::<ShellState>()
+        .viewer_count
+        .fetch_add(1, Ordering::SeqCst);
+    let url =
+        Url::parse(&format!("{VIEWER_SCHEME}://localhost/{page}")).map_err(|e| e.to_string())?;
+    let handle = app.clone();
+    WebviewWindowBuilder::new(
+        app,
+        format!("{VIEWER_PREFIX}{n}"),
+        WebviewUrl::CustomProtocol(url),
+    )
+    .title(title)
+    .inner_size(800.0, 700.0)
+    .on_navigation(move |url| {
+        if url.scheme() == VIEWER_SCHEME {
+            return true;
+        }
+        // Links leave the app for the user's normal browser.
+        if matches!(url.scheme(), "https" | "http" | "mailto") {
+            let _ = handle.opener().open_url(url.as_str(), None::<&str>);
+        }
+        false
+    })
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn viewer_response(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+    let (body, csp) = match request.uri().path() {
+        "/probe-done" => {
+            let results = Url::parse(&request.uri().to_string())
+                .ok()
+                .and_then(|u| {
+                    u.query_pairs()
+                        .find(|(k, _)| k == "r")
+                        .map(|(_, v)| v.into_owned())
+                })
+                .and_then(|json| serde_json::from_str::<Vec<ProbeResult>>(&json).ok());
+            if let Some(results) = results {
+                *app.state::<ShellState>().probe_results.lock().unwrap() = Some(results);
+            }
+            (
+                "<!doctype html><p>Probe complete. Re-run the foundation checks.</p>".to_owned(),
+                viewer::content_security_policy(RemoteContent::Blocked),
+            )
+        }
+        "/fixture" => (
+            viewer::document(
+                &viewer::sanitise(HOSTILE_FIXTURE, RemoteContent::Blocked),
+                RemoteContent::Blocked,
+            ),
+            viewer::content_security_policy(RemoteContent::Blocked),
+        ),
+        "/probe" => (PROBE_PAGE.to_owned(), PROBE_CSP.to_owned()),
+        _ => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Cow::Borrowed(&b""[..]))
+                .unwrap();
+        }
+    };
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(header::CONTENT_SECURITY_POLICY, csp)
+        .header("Referrer-Policy", "no-referrer")
+        .header("X-Content-Type-Options", "nosniff")
+        .body(Cow::Owned(body.into_bytes()))
+        .unwrap()
+}
+
+// Scripts and IPC connections are permitted here on purpose, so the probe
+// exercises the capability layer rather than being stopped by CSP first.
+const PROBE_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; \
+    connect-src ipc: http://ipc.localhost; style-src 'unsafe-inline'";
+
+const PROBE_PAGE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>probe</title>
+<style>body{font-family:monospace;margin:1rem}.ok{color:#1a7f37}.bad{color:#cf222e}</style></head>
+<body><h1>Viewer isolation probe</h1><ul id="out"></ul>
+<script>
+const out = document.getElementById("out");
+const results = [];
+function report(name, ok, detail) {
+  results.push({ name, ok, detail });
+  const li = document.createElement("li");
+  li.className = ok ? "ok" : "bad";
+  li.textContent = (ok ? "PASS " : "FAIL ") + name + ": " + detail;
+  out.appendChild(li);
+}
+async function attempt(name, cmd, args) {
+  const ipc = window.__TAURI_INTERNALS__;
+  if (!ipc) { report(name, true, "no IPC bridge injected"); return; }
+  try {
+    const value = await ipc.invoke(cmd, args || {});
+    report(name, false, "command ran: " + JSON.stringify(value));
+  } catch (e) {
+    report(name, true, "denied: " + String(e));
+  }
+}
+(async () => {
+  await attempt("viewer_probe_reached", "viewer_probe_reached");
+  await attempt("foundation_report", "foundation_report");
+  await attempt("quit_app", "quit_app");
+  await attempt("core window close", "plugin:window|close", { label: "main" });
+  try {
+    await fetch("https://example.org/");
+    report("remote fetch", false, "request succeeded");
+  } catch (e) {
+    report("remote fetch", true, "blocked: " + String(e));
+  }
+  // Report back by navigation, the only channel a viewer has.
+  location.href = "/probe-done?r=" + encodeURIComponent(JSON.stringify(results));
+})();
+</script></body></html>"#;
+
+/// Headless foundation check for CI and native verification: runs the probe in
+/// a real viewer webview, prints every check as JSON, and exits non-zero on
+/// any failure. Uses the normal data directory and keyring, so run it with a
+/// throwaway HOME and keyring session.
+fn start_selftest(app: AppHandle) {
+    std::thread::spawn(move || {
+        let state = app.state::<ShellState>();
+        state.probe_opened.store(true, Ordering::SeqCst);
+        let opened = {
+            let app = app.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = app.clone().run_on_main_thread(move || {
+                let _ = tx.send(open_viewer(&app, "probe", "Viewer isolation probe"));
+            });
+            rx.recv_timeout(Duration::from_secs(10))
+                .unwrap_or_else(|_| Err("timed out".into()))
+        };
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while opened.is_ok()
+            && state.probe_results.lock().unwrap().is_none()
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let mut checks = tauri::async_runtime::block_on(collect_checks(&app))
+            .unwrap_or_else(|e| vec![Check::new("Collect checks", false, e)]);
+        if let Err(e) = opened {
+            checks.push(Check::new("Open probe viewer", false, e));
+        }
+        let ok = checks.iter().all(|c| c.ok);
+        println!("{}", serde_json::to_string_pretty(&checks).unwrap());
+        app.exit(if ok { 0 } else { 1 });
+    });
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        // Relaunching from the desktop launcher reopens the running instance.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window(MAIN) {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_opener::init())
+        .manage(ShellState::default())
+        .register_uri_scheme_protocol(VIEWER_SCHEME, |ctx, request| {
+            viewer_response(ctx.app_handle(), &request)
+        })
+        .setup(|app| {
+            if std::env::var_os("PIGEON_SELFTEST").is_some() {
+                start_selftest(app.handle().clone());
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing the main window keeps Pigeon running in the background.
+            if let WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == MAIN
+            {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            foundation_report,
+            open_viewer_fixture,
+            open_viewer_probe,
+            viewer_probe_reached,
+            quit_app,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Pigeon");
+}

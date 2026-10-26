@@ -1,0 +1,18 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  --border: color-mix(in srgb, currentColor 15%, transparent);
+}
+body { margin: 0; }
+.app { display: grid; grid-template-columns: 14rem 1fr; min-height: 100vh; }
+.sidebar { display: flex; flex-direction: column; gap: 0.5rem; padding: 1rem; border-right: 1px solid var(--border); }
+.sidebar a { color: inherit; text-decoration: none; }
+.sidebar a[data-status="active"] { font-weight: 600; }
+.brand { margin-bottom: 1rem; }
+.content { padding: 1.5rem 2rem; }
+table { border-collapse: collapse; }
+td { padding: 0.25rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.ok { color: #1a7f37; }
+.bad { color: #cf222e; }
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.quit { margin-top: auto; }

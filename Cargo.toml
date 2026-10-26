@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["crates/pigeon-core", "src-tauri"]
+
+[workspace.package]
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+ammonia = "4.2"
+hex = "0.4"
+getrandom = "0.4"
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher"] }
+secret-service = { version = "5.2", features = ["rt-tokio-crypto-rust"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+zeroize = "1.9"

@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  nix:
+    # x86_64-linux is the supported target.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v31
+      - name: Flake checks (package, core and keyring tests, frontend, native self-test)
+        run: nix flake check -L
+      - name: Formatting
+        run: |
+          nix fmt -- --check flake.nix nix/*.nix
+          nix develop -c cargo fmt --all --check
+      - name: Clippy
+        run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
