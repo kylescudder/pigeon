@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-// Typed wrappers for the narrowly scoped native commands. Secrets never cross
-// this boundary; the backend returns status only.
+// Typed wrappers for narrowly scoped native commands. Account passwords cross
+// into Rust only when submitted; credentials and database keys are never returned.
 
 export type Check = { name: string; ok: boolean; detail: string };
 export type FoundationReport = { checks: Check[] };
@@ -25,3 +25,131 @@ export function openViewerProbe(): Promise<void> {
 export function quitApp(): Promise<void> {
   return invoke<void>("quit_app");
 }
+
+export type AccountConfig = {
+  name: string;
+  address: string;
+  host: string;
+  port: number;
+  username: string;
+  security: "tls" | "start_tls";
+  ca_certificate: string | null;
+};
+export type MailAccount = {
+  id: string;
+  config: AccountConfig;
+  status: string;
+  error: string | null;
+  last_synced: number | null;
+  sync_folder: string | null;
+  sync_cached: number;
+  sync_total: number;
+};
+export type MailFolder = {
+  id: string;
+  account_id: string;
+  name: string;
+  kind: string;
+  total: number;
+  cached: number;
+  unread: number;
+};
+export type SearchQuery = {
+  text: string;
+  account_id?: string | null;
+  folder?: string | null;
+  unread_only?: boolean;
+  has_attachments?: boolean;
+  include_junk_trash?: boolean;
+  limit?: number | null;
+  offset?: number | null;
+};
+export type SavedSearch = { id: string; name: string; query: SearchQuery };
+export type MailState = {
+  accounts: MailAccount[];
+  folders: MailFolder[];
+  saved_searches: SavedSearch[];
+};
+export type MessageSummary = {
+  id: number;
+  account_id: string;
+  folder: string;
+  sender: string;
+  recipients: string;
+  subject: string;
+  preview: string;
+  date: number;
+  unread: boolean;
+  has_attachments: boolean;
+};
+export type Attachment = {
+  part: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  content_id: string | null;
+};
+export type MailMessage = {
+  summary: MessageSummary;
+  body_text: string;
+  has_html: boolean;
+  attachments: Attachment[];
+};
+export type SearchResults = { messages: MessageSummary[]; total: number };
+
+export function errorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  )
+    return error.message;
+  return "The operation could not be completed. Try again.";
+}
+export function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+export const mailState = () => invoke<MailState>("mail_state");
+export const addMailAccount = (config: AccountConfig, password: string) =>
+  invoke<MailAccount>("add_mail_account", { config, password });
+export const syncMailAccount = (id: string) =>
+  invoke<void>("sync_mail_account", { id });
+export const cancelMailSync = (id: string) =>
+  invoke<void>("cancel_mail_sync", { id });
+export async function searchMail(
+  query: SearchQuery,
+  signal?: AbortSignal,
+): Promise<SearchResults> {
+  const requestId = crypto.randomUUID();
+  if (signal?.aborted) throw new DOMException("Search cancelled", "AbortError");
+  const cancel = () => {
+    void invoke("cancel_mail_search", { requestId }).catch(() => {});
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    return await invoke<SearchResults>("search_mail", { query, requestId });
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+  }
+}
+export const readMailMessage = (id: number) =>
+  invoke<MailMessage>("read_mail_message", { id });
+export const openMailMessage = (id: number) =>
+  invoke<void>("open_mail_message", { id });
+export const saveMailSearch = (name: string, query: SearchQuery) =>
+  invoke<SavedSearch>("save_mail_search", { name, query });
+export const deleteMailSearch = (id: string) =>
+  invoke<void>("delete_mail_search", { id });
+export const removeMailAccount = (id: string) =>
+  invoke<void>("remove_mail_account", { id });
+export const updateMailPassword = (id: string, password: string) =>
+  invoke<void>("update_mail_password", { id, password });
+export const unlockMail = () => invoke<void>("unlock_mail");

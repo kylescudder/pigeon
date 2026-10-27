@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Workspace } from "../components/workspace";
+import { MailProvider } from "../components/mail-provider";
 import css from "../styles.css?url";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
@@ -50,9 +51,7 @@ function RootLayout() {
           </div>
         }
       >
-        <Workspace>
-          <Outlet />
-        </Workspace>
+        <MailProvider><Workspace><Outlet /></Workspace></MailProvider>
       </ClientOnly>
     </QueryClientProvider>
   );

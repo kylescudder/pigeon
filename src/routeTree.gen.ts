@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FoundationRouteImport } from './routes/foundation'
+import { Route as MailRouteImport } from './routes/mail'
 import { Route as SettingsRouteImport } from './routes/settings'
 
 const IndexRoute = IndexRouteImport.update({
@@ -23,6 +24,11 @@ const FoundationRoute = FoundationRouteImport.update({
   path: '/foundation',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MailRoute = MailRouteImport.update({
+  id: '/mail',
+  path: '/mail',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -32,30 +38,34 @@ const SettingsRoute = SettingsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/foundation': typeof FoundationRoute
+  '/mail': typeof MailRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/foundation': typeof FoundationRoute
+  '/mail': typeof MailRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/foundation': typeof FoundationRoute
+  '/mail': typeof MailRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/foundation' | '/settings'
+  fullPaths: '/' | '/foundation' | '/mail' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/foundation' | '/settings'
-  id: '__root__' | '/' | '/foundation' | '/settings'
+  to: '/' | '/foundation' | '/mail' | '/settings'
+  id: '__root__' | '/' | '/foundation' | '/mail' | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   FoundationRoute: typeof FoundationRoute
+  MailRoute: typeof MailRoute
   SettingsRoute: typeof SettingsRoute
 }
 
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FoundationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mail': {
+      id: '/mail'
+      path: '/mail'
+      fullPath: '/mail'
+      preLoaderRoute: typeof MailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   FoundationRoute: FoundationRoute,
+  MailRoute: MailRoute,
   SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport

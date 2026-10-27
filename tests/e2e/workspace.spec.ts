@@ -8,15 +8,15 @@ test("first run explains the preview and opens real diagnostics", async ({
     page.getByRole("heading", { name: "Your inbox starts here." }),
   ).toBeVisible();
   await expect(
-    page.getByText("Account connections are coming next."),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Explore this preview" }).click();
+    page.getByRole("button", { name: "Connect an account", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "About Pigeon", exact: true }).click();
   const dialog = page.getByRole("dialog", {
     name: "A better home for your mail",
   });
   await expect(dialog).toBeVisible();
   await expect(
-    dialog.getByText(/Account setup, mail sync, and sending are coming next/),
+    dialog.getByText(/This build receives and searches mail/),
   ).toBeVisible();
   await dialog.getByRole("button", { name: "Open diagnostics" }).click();
   await expect(dialog).not.toBeVisible();
@@ -185,6 +185,7 @@ test("native results, retry, and viewer failures remain visible and actionable",
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       value: {
         invoke: async (command: string) => {
+          if (command === "mail_state") return { accounts: [], folders: [], saved_searches: [] };
           if (command === "foundation_report") {
             checks++;
             if (checks === 1)

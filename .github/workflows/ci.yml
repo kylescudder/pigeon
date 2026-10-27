@@ -30,3 +30,9 @@ jobs:
           nix develop -c cargo fmt --all --check
       - name: Clippy
         run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+  imap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verified TLS, STARTTLS, MIME, read-only sync, and attachment transfer checks
+        run: tools/mail-test/run.sh

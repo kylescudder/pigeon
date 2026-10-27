@@ -2,6 +2,7 @@
 //! every state the interface must show.
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use serde::Serialize;
 
@@ -10,6 +11,9 @@ use crate::store::{DbKey, Store, StoreError};
 
 pub const DB_KEY_NAME: &str = "database-key";
 const DB_KEY_LABEL: &str = "Pigeon mail store key";
+// Engine polling and diagnostics can initialise storage concurrently. Do not
+// let both observe a missing key and overwrite one another's generated key.
+static OPEN_LOCK: Mutex<()> = Mutex::new(());
 
 /// Why the store could not be opened. Each variant is a distinct interface
 /// state; none of them falls back to an unencrypted or regenerated store.
@@ -31,6 +35,14 @@ pub enum UnlockOutcome {
 }
 
 pub fn open_store(secrets: &dyn SecretStore, path: &Path) -> UnlockOutcome {
+    let _guard = match OPEN_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return blocked(StoreBlocked::Failed(
+                "store initialisation lock unavailable".into(),
+            ));
+        }
+    };
     match secrets.state() {
         KeyringState::Unavailable(why) => return blocked(StoreBlocked::KeyringUnavailable(why)),
         KeyringState::Locked => return blocked(StoreBlocked::KeyringLocked),

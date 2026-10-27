@@ -6,7 +6,7 @@
     "dev": "vite dev --port 1420 --strictPort",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "bun test src",
+    "test": "bun run typecheck && bun run test:e2e",
     "test:e2e": "playwright test",
     "tauri": "tauri"
   },

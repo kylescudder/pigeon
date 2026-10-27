@@ -5,11 +5,12 @@
 A modern, local-first IMAP/SMTP email client for NixOS. It uses an encrypted local store, fast search, and a Tauri + TanStack desktop shell.
 
 - [Product and delivery plan](docs/product-plan.md)
+- [Receiving/search implementation and verification](docs/mail-engine.md)
 - [Milestone 0 foundation spike](docs/foundation-spike.md)
 
-## Test the foundation on NixOS
+## Try it on NixOS
 
-From the updated checkout:
+Quit the previous background instance with **Quit Pigeon**, then from the checkout:
 
 ```sh
 git pull --ff-only
@@ -17,10 +18,16 @@ nix flake check -L
 nix run
 ```
 
-This is the foundation build, not a working mail client yet. Follow the
-[NixOS verification checklist](docs/foundation-spike.md#to-finish-milestone-0-on-the-nixos-machine)
-to check the real desktop, keyring, viewer isolation, and window lifecycle.
-The x86_64 build and NixOS desktop behaviour still need verification.
+This build connects IMAP accounts, downloads text bodies into SQLCipher,
+reads cached mail offline, and searches across accounts/folders with saved
+queries. Choose **Connect an account** and use the provider’s IMAP settings and
+password/app password. The desktop Secret Service must be unlocked. TLS and
+STARTTLS validate certificates; OAuth-only providers are not supported yet.
+
+The receiving preview is read-only: opening mail does not mark it read on the
+server. Sending, mailbox changes, and attachment downloads come in later
+milestones. See the [receiving guide and test results](docs/mail-engine.md) for
+progress/recovery behaviour, limits, and the NixOS verification checklist.
 
 ## Interface
 
@@ -39,8 +46,16 @@ nix flake check -L   # package, tests, and native self-test
 
 After changing `bun.lock`, run `tools/update-node-modules-hash.sh`.
 
-The frontend browser suite is `bun run test:e2e` (install Chromium with
-`bunx --no-install playwright install chromium` on a compatible browser-test host).
+Run `bun run test` for typecheck and the production-build browser suite,
+or `bun run test:e2e` for the browser suite alone. Install Chromium with
+`bunx --no-install playwright install chromium` on a compatible browser-test host.
 CI runs it on Ubuntu in dark, light, and narrow layouts. Native-command test
 fixtures exercise frontend feedback; real keyring and viewer-isolation checks
 remain part of the native self-test.
+
+Run `tools/mail-test/run.sh` with Docker for six isolated Dovecot/TLS integration
+tests. The explicit 100k-message search gate is:
+
+```sh
+cargo test --release --locked -p pigeon-core --test search_benchmark -- --ignored --nocapture
+```

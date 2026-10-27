@@ -92,6 +92,37 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO messages_fts(rowid, sender, recipients, subject, body_text)
         VALUES (new.id, new.sender, new.recipients, new.subject, new.body_text);
     END;",
+    "CREATE TABLE mail_accounts (
+        id TEXT PRIMARY KEY, config TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'idle', last_error TEXT,
+        last_synced INTEGER, sync_folder TEXT, sync_cached INTEGER NOT NULL DEFAULT 0,
+        sync_total INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE mail_folders (
+        account TEXT NOT NULL REFERENCES mail_accounts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'other',
+        uid_validity INTEGER, total INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account, name)
+    );
+    ALTER TABLE messages ADD COLUMN uid INTEGER;
+    ALTER TABLE messages ADD COLUMN uid_validity INTEGER;
+    ALTER TABLE messages ADD COLUMN body_html TEXT;
+    ALTER TABLE messages ADD COLUMN message_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+    CREATE UNIQUE INDEX messages_remote_identity ON messages(account,folder,uid_validity,uid);
+    CREATE INDEX messages_date ON messages(date DESC,id DESC);
+    CREATE INDEX messages_unread_date ON messages(unread,date DESC,id DESC);
+    CREATE TABLE saved_searches (id TEXT PRIMARY KEY, name TEXT NOT NULL, query TEXT NOT NULL);",
+    // Keep search candidates in a compact covering index. Full message bodies
+    // must be read only after pagination, not for every full-text match.
+    "CREATE INDEX messages_search_metadata ON messages(id,account,folder,uid_validity,date,unread,has_attachments,sender,recipients,subject);",
+    "CREATE INDEX messages_folder_counts ON messages(account,folder,uid_validity,unread);
+    ALTER TABLE mail_folders ADD COLUMN id TEXT;
+    UPDATE mail_folders SET id=lower(hex(randomblob(16)));
+    CREATE UNIQUE INDEX mail_folder_ids ON mail_folders(id);
+    CREATE TRIGGER mail_folders_ai AFTER INSERT ON mail_folders WHEN new.id IS NULL BEGIN
+        UPDATE mail_folders SET id=lower(hex(randomblob(16))) WHERE rowid=new.rowid;
+    END;",
 ];
 
 impl Store {

@@ -1,4 +1,10 @@
 const paths = {
+  plus: <path d="M12 5v14M5 12h14" />,
+  close: <path d="m6 6 12 12M6 18 18 6" />,
+  inbox: <><path d="m4 5-2 9v5h20v-5l-2-9Z" /><path d="M2 14h6l2 3h4l2-3h6" /></>,
+  archive: <><rect x="3" y="3" width="18" height="5" rx="1.5" /><path d="M5 8v12h14V8M10 12h4" /></>,
+  trash: <><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></>,
+  file: <><path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8m-8 4h6" /></>,
   grid: (
     <>
       <rect x="3.5" y="3.5" width="6" height="6" rx="1.4" />

@@ -4,12 +4,14 @@ import {
   useContext,
   useEffect,
   useId,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { isDesktop, quitApp } from "../lib/native";
 import { AppMark, Icon, type IconName } from "./icon";
+import { Modal } from "./modal";
+import { MailSidebar } from "./mail-sidebar";
+import { useMail } from "./mail-provider";
 
 type Theme = "system" | "light" | "dark";
 type Density = "comfortable" | "compact";
@@ -46,6 +48,7 @@ function writePreference(key: string, value: string) {
 }
 
 export function Workspace({ children }: { children: ReactNode }) {
+  const mail = useMail();
   const navigate = useNavigate();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
@@ -88,7 +91,12 @@ export function Workspace({ children }: { children: ReactNode }) {
         event.key.toLowerCase() === "k"
       ) {
         event.preventDefault();
-        if (!aboutOpen) setCommandsOpen((open) => !open);
+        const dialog = document.querySelector("dialog[open]");
+        if (
+          !aboutOpen &&
+          (!dialog || dialog.classList.contains("command-dialog"))
+        )
+          setCommandsOpen((open) => !open);
       }
     }
     window.addEventListener("keydown", keydown);
@@ -104,7 +112,9 @@ export function Workspace({ children }: { children: ReactNode }) {
       ? "Diagnostics"
       : pathname === "/settings"
         ? "Appearance"
-        : "Overview";
+        : pathname === "/mail"
+          ? "Mail"
+          : "Overview";
 
   return (
     <WorkspaceContext.Provider
@@ -159,18 +169,28 @@ export function Workspace({ children }: { children: ReactNode }) {
               <span className="sidebar-label">Overview</span>
               <span className="nav-active-dot" />
             </Link>
+            <Link
+              to="/mail"
+              search={{ view: "inbox" }}
+              activeOptions={{ exact: true }}
+              className="nav-item"
+              title="All inboxes"
+            >
+              <Icon name="inbox" />
+              <span className="sidebar-label">All inboxes</span>
+            </Link>
+            <Link
+              to="/mail"
+              search={{ view: "all" }}
+              activeOptions={{ exact: true }}
+              className="nav-item"
+              title="All mail"
+            >
+              <Icon name="mail" />
+              <span className="sidebar-label">All mail</span>
+            </Link>
           </nav>
-          <div className="accounts-section">
-            <span className="section-label">Accounts</span>
-            <div className="sidebar-account-empty">
-              <span className="account-placeholder">
-                <Icon name="mail" size={16} />
-              </span>
-              <div>
-                No accounts yet<span>All your mail belongs here.</span>
-              </div>
-            </div>
-          </div>
+          <MailSidebar />
           <div className="sidebar-bottom">
             <nav aria-label="Preferences" className="secondary-navigation">
               <Link to="/settings" className="nav-item" title="Appearance">
@@ -209,7 +229,7 @@ export function Workspace({ children }: { children: ReactNode }) {
             </nav>
             <div className="sidebar-build">
               <span className="build-dot" />
-              <span className="sidebar-label">Foundation preview</span>
+              <span className="sidebar-label">Mail preview</span>
               <span className="build-version sidebar-label">0.1</span>
             </div>
           </div>
@@ -248,6 +268,15 @@ export function Workspace({ children }: { children: ReactNode }) {
                 Could not quit Pigeon: {quitError}
               </div>
             )}
+            {mail.actionError && (
+              <div className="mail-action-error" role="alert">
+                <Icon name="alert" size={15} />
+                <span>{mail.actionError}</span>
+                <button type="button" onClick={mail.clearActionError}>
+                  Dismiss
+                </button>
+              </div>
+            )}
             {children}
           </main>
           <footer className="workspace-footer">
@@ -274,18 +303,19 @@ export function Workspace({ children }: { children: ReactNode }) {
         className="about-dialog"
       >
         <AppMark />
-        <span className="preview-pill">Foundation preview</span>
+        <span className="preview-pill">Read-only mail preview</span>
         <h2>A better home for your mail</h2>
         <p>
-          Pigeon brings your accounts into one private, local workspace. This
-          first build lets you test encrypted storage and the isolated message
-          viewer.
+          Pigeon brings your IMAP accounts into one private, local workspace.
+          Connect accounts, read cached messages offline, and search your
+          encrypted mail store.
         </p>
         <div className="about-note">
           <Icon name="info" />
           <p>
-            Account setup, mail sync, and sending are coming next. There are no
-            connected accounts or sample emails in this build.
+            This build receives and searches mail. Sending, mailbox
+            organisation, attachment downloads, and embedded-image handling are
+            coming next.
           </p>
         </div>
         <div className="modal-actions">
@@ -332,41 +362,6 @@ export function PageHeading({
   );
 }
 
-function Modal({
-  open,
-  onDismiss,
-  title,
-  children,
-  className = "",
-}: {
-  open: boolean;
-  onDismiss: () => void;
-  title: string;
-  children: ReactNode;
-  className?: string;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (open && !dialog?.open) dialog?.showModal();
-    else if (!open && dialog?.open) dialog.close();
-  }, [open]);
-  return (
-    <dialog
-      ref={ref}
-      className={`modal ${className}`}
-      aria-label={title}
-      onCancel={onDismiss}
-      onClose={onDismiss}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onDismiss();
-      }}
-    >
-      <div className="modal-content">{children}</div>
-    </dialog>
-  );
-}
-
 function CommandMenu({
   open,
   onDismiss,
@@ -392,6 +387,14 @@ function CommandMenu({
     icon: IconName;
     run: () => void;
   }[] = [
+    {
+      label: "Search mail",
+      detail: "Search your local mail",
+      icon: "search",
+      run: () => {
+        void navigate({ to: "/mail", search: {} });
+      },
+    },
     {
       label: "Overview",
       detail: "All your accounts",

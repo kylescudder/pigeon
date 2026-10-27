@@ -1,6 +1,6 @@
 # Pigeon product and delivery plan
 
-Status: confirmed by the user on 2026-10-23. Scope, architecture, acceptance gates, and service-first delivery order are agreed. Milestone 0 is in progress; see [the foundation spike](foundation-spike.md).
+Status: confirmed by the user on 2026-10-23. Scope, architecture, acceptance gates, and service-first delivery order are agreed. Milestone 0 native diagnostics are user-verified. Milestone 1 receiving/search is implemented for local testing; see [mail-engine results](mail-engine.md) and [foundation results](foundation-spike.md) for checks and remaining desktop gates.
 
 Planning baseline: `7c2f0242dd29ae229a65bcc6e6e939175df7e900`.
 
@@ -19,7 +19,7 @@ The application connects directly to the user's IMAP and SMTP servers. There is 
 - Bun for frontend package management, scripts, builds, and tests. Commit `bun.lock`, preserve dependency version ranges, and use a consistent Bun version with frozen-lockfile installs in CI/builds.
 - Tauri as the provisional desktop shell. A Rust backend owns mail connections, synchronisation, database access, credentials, queued operations, and desktop integration.
 - Embedded SQLite with FTS5 for search, using SQLCipher to encrypt the local store. The Rust layer owns database migrations and writes.
-- Typed, narrowly scoped native commands connect the interface to the backend. Mail credentials and database keys stay out of frontend state and bundles.
+- Typed, narrowly scoped native commands connect the interface to the backend. Database keys and stored credentials stay out of frontend state and bundles; an entered account password is held briefly in the setup form and passed once to Rust, then cleared.
 
 TanStack Start produces the static frontend; runtime mail operations use native commands. Start server functions do not run inside a static Tauri frontend without a separately packaged server runtime. The foundation milestone must prove static assets, route navigation, reloads, and desktop launch work together. Bun is development/build tooling in this design; a Bun server process is not part of the agreed runtime.
 
@@ -80,7 +80,7 @@ Tauri remains provisional until Linux rendering, hostile-content isolation, pack
 - Top level: an estate overview showing account unread counts, connection/sync health, pending outgoing work, and saved searches.
 - From the overview, support both merged mail views and individual-account views. The estate overview is distinct from the merged inbox.
 - A practical three-pane interface with adjustable density, light/dark themes, keyboard navigation, and a command palette remains the functional baseline.
-- The visual direction is a compact Raycast/iOS-inspired desktop interface: layered surfaces, restrained rounding, grouped controls, and clear typography. The foundation shell now includes a composed empty overview, persistent theme/density settings, keyboard command navigation, and a secondary Diagnostics view. Mail connections remain unavailable in this build.
+- The visual direction is a compact Raycast/iOS-inspired desktop interface: layered surfaces, restrained rounding, grouped controls, and clear typography. The foundation shell now includes a composed empty overview, persistent theme/density settings, keyboard command navigation, and a secondary Diagnostics view. The receiving build adds real account setup, estate/account views, cached reading, and search.
 - Message grouping and conversation threading are deferred; use a flat message list initially.
 - Closing the window keeps the application running and synchronising by default. Make this configurable and provide an explicit Quit action and optional launch-at-login.
 - Desktop notifications omit message bodies by default.
@@ -167,4 +167,4 @@ Primary references used for the provisional design:
 - [SMTP duplicate-delivery ambiguity, RFC 5321 section 4.5.3.2.6](https://www.rfc-editor.org/rfc/rfc5321.html#section-4.5.3.2.6).
 - [Remote content privacy](https://support.mozilla.org/en-US/kb/remote-content-in-messages).
 
-Specific protocol libraries, backup format, and further module interfaces will be selected and tested as implementation progresses. See [foundation results](foundation-spike.md) for the implementation versions, checks already exercised, and remaining gaps. Search performance, mail-server compatibility, the x86_64 build, and actual NixOS desktop behaviour are not yet verified.
+Specific protocol libraries, backup format, and further module interfaces will be selected and tested as implementation progresses. See [foundation results](foundation-spike.md) for the implementation versions, checks already exercised, and remaining gaps. The [mail-engine results](mail-engine.md) record search measurements, Dovecot compatibility, recovery checks, and the remaining target-desktop/provider verification.

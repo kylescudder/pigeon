@@ -1,4 +1,5 @@
 @import url("./theme.css");
+@import url("./mail.css");
 
 * {
   box-sizing: border-box;
@@ -18,7 +19,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 button,

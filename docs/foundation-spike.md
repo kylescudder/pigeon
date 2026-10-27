@@ -74,4 +74,4 @@ docker run --rm -v "$PWD":/src pigeon-linux-dev tools/linux-dev/selftest.sh
 6. Close the window and confirm the process keeps running. Relaunch from the launcher and confirm the same instance reappears. Use Quit Pigeon and confirm it exits.
 7. Check display scaling and dark mode.
 
-The native storage and viewer-denial diagnostics are now user-verified. Milestone 1 mail-engine work (IMAP sync, persistence, search) can proceed while the remaining desktop checks stay explicit release gates. The provisional `messages` schema will be replaced by the sync schema.
+The native storage and viewer-denial diagnostics are now user-verified. Milestone 1 mail-engine work (IMAP sync, persistence, search) can proceed while the remaining desktop checks stay explicit release gates. The sync schema now extends the provisional `messages` table through migrations. See [Milestone 1 results](mail-engine.md) for the receiving engine and expanded native command boundary.

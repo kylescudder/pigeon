@@ -1,11 +1,14 @@
 //! Desktop shell: a thin adapter between the interface and `pigeon-core`.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use pigeon_core::diagnostics::Check;
+use pigeon_core::mail::MailEngine;
 use pigeon_core::secrets::{KeyringState, SecretStore};
 use pigeon_core::unlock::{UnlockOutcome, open_store};
 use pigeon_core::viewer::{self, RemoteContent};
@@ -13,6 +16,8 @@ use serde::Serialize;
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
+
+mod mail;
 
 const MAIN: &str = "main";
 const VIEWER_SCHEME: &str = "pigeon-viewer";
@@ -28,6 +33,7 @@ struct ShellState {
     /// What the probe page saw, delivered by navigating to `/probe-done`
     /// rather than over IPC (which the viewer cannot use).
     probe_results: Mutex<Option<Vec<ProbeResult>>>,
+    viewer_documents: Mutex<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -195,7 +201,7 @@ fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<(), String> {
     let url =
         Url::parse(&format!("{VIEWER_SCHEME}://localhost/{page}")).map_err(|e| e.to_string())?;
     let handle = app.clone();
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         format!("{VIEWER_PREFIX}{n}"),
         WebviewUrl::CustomProtocol(url),
@@ -214,6 +220,18 @@ fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<(), String> {
     })
     .build()
     .map_err(|e| e.to_string())?;
+    let handle = app.clone();
+    let page = page.to_owned();
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            handle
+                .state::<ShellState>()
+                .viewer_documents
+                .lock()
+                .unwrap()
+                .remove(&page);
+        }
+    });
     Ok(())
 }
 
@@ -245,6 +263,25 @@ fn viewer_response(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Cow<
         ),
         "/probe" => (PROBE_PAGE.to_owned(), PROBE_CSP.to_owned()),
         _ => {
+            if let Some(document) = app
+                .state::<ShellState>()
+                .viewer_documents
+                .lock()
+                .unwrap()
+                .get(request.uri().path().trim_start_matches('/'))
+                .cloned()
+            {
+                return Response::builder()
+                    .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                    .header(
+                        header::CONTENT_SECURITY_POLICY,
+                        viewer::content_security_policy(RemoteContent::Blocked),
+                    )
+                    .header("Referrer-Policy", "no-referrer")
+                    .header("X-Content-Type-Options", "nosniff")
+                    .body(Cow::Owned(document.into_bytes()))
+                    .unwrap();
+            }
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body(Cow::Borrowed(&b""[..]))
@@ -293,6 +330,19 @@ async function attempt(name, cmd, args) {
   await attempt("foundation_report", "foundation_report");
   await attempt("quit_app", "quit_app");
   await attempt("core window close", "plugin:window|close", { label: "main" });
+  await attempt("mail state", "mail_state");
+  await attempt("search mail", "search_mail", { query: { text: "" }, requestId: "probe" });
+  await attempt("cancel search", "cancel_mail_search", { requestId: "probe" });
+  await attempt("read mail", "read_mail_message", { id: 1 });
+  await attempt("sync mail", "sync_mail_account", { id: "probe" });
+  await attempt("cancel sync", "cancel_mail_sync", { id: "probe" });
+  await attempt("unlock mail", "unlock_mail");
+  await attempt("open mail", "open_mail_message", { id: 1 });
+  await attempt("save search", "save_mail_search", { name: "Probe", query: { text: "" } });
+  await attempt("delete search", "delete_mail_search", { id: "probe" });
+  await attempt("remove account", "remove_mail_account", { id: "probe" });
+  await attempt("update password", "update_mail_password", { id: "probe", password: "synthetic-probe-value" });
+  await attempt("add account", "add_mail_account", { config: { name: "Probe", address: "probe@example.test", host: "example.test", port: 993, username: "probe", security: "tls", ca_certificate: null }, password: "synthetic-probe-value" });
   try {
     await fetch("https://example.org/");
     report("remote fetch", false, "request succeeded");
@@ -356,8 +406,29 @@ pub fn run() {
             viewer_response(ctx.app_handle(), &request)
         })
         .setup(|app| {
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            let engine = Arc::new(MailEngine::new(
+                data_dir.join("mail.db"),
+                Arc::from(secret_store()),
+            ));
+            app.manage(engine.clone());
             if std::env::var_os("PIGEON_SELFTEST").is_some() {
                 start_selftest(app.handle().clone());
+            } else {
+                // A single background coordinator keeps account refreshes from
+                // multiplying when windows or routes mount. Network work never
+                // holds the store mutex; the interface can keep reading/searching.
+                std::thread::spawn(move || {
+                    loop {
+                        if let Ok(accounts) = engine.accounts() {
+                            for account in accounts {
+                                let _ = engine.sync_account(&account.id);
+                            }
+                        }
+                        std::thread::sleep(Duration::from_secs(60));
+                    }
+                });
             }
             Ok(())
         })
@@ -376,6 +447,19 @@ pub fn run() {
             open_viewer_probe,
             viewer_probe_reached,
             quit_app,
+            mail::mail_state,
+            mail::add_mail_account,
+            mail::sync_mail_account,
+            mail::cancel_mail_sync,
+            mail::search_mail,
+            mail::cancel_mail_search,
+            mail::read_mail_message,
+            mail::save_mail_search,
+            mail::delete_mail_search,
+            mail::remove_mail_account,
+            mail::update_mail_password,
+            mail::unlock_mail,
+            mail::open_mail_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pigeon");

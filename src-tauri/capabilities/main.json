@@ -8,6 +8,19 @@
     "allow-foundation-report",
     "allow-open-viewer-fixture",
     "allow-open-viewer-probe",
-    "allow-quit-app"
+    "allow-quit-app",
+    "allow-mail-state",
+    "allow-add-mail-account",
+    "allow-sync-mail-account",
+    "allow-cancel-mail-sync",
+    "allow-search-mail",
+    "allow-cancel-mail-search",
+    "allow-read-mail-message",
+    "allow-save-mail-search",
+    "allow-delete-mail-search",
+    "allow-remove-mail-account",
+    "allow-update-mail-password",
+    "allow-unlock-mail",
+    "allow-open-mail-message"
   ]
 }

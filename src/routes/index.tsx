@@ -1,11 +1,189 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Icon } from "../components/icon";
 import { PageHeading, useWorkspace } from "../components/workspace";
+import { MailGate, useMail } from "../components/mail-provider";
+import { ManageAccount } from "../components/manage-account";
+import { useState } from "react";
+import type { MailAccount } from "../lib/native";
 
 export const Route = createFileRoute("/")({ component: Overview });
 
 function Overview() {
   const { openCommands, openAbout, shortcut, theme } = useWorkspace();
+  const mail = useMail();
+  const [managed, setManaged] = useState<MailAccount | null>(null);
+  if (mail.desktop && (mail.loading || mail.error))
+    return (
+      <MailGate>
+        <span />
+      </MailGate>
+    );
+  if (mail.state?.accounts.length) {
+    const folders = mail.state.folders;
+    const cached = folders.reduce((sum, folder) => sum + folder.cached, 0);
+    const unread = folders
+      .filter((folder) => folder.kind === "inbox")
+      .reduce((sum, folder) => sum + folder.unread, 0);
+    return (
+      <section className="page overview-page connected-overview">
+        <PageHeading
+          title="Overview"
+          description="All your accounts. One clear view."
+        >
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={mail.connect}
+          >
+            <Icon name="plus" size={15} />
+            Connect another account
+          </button>
+        </PageHeading>
+        <div className="estate-summary">
+          <div>
+            <span>Connected accounts</span>
+            <strong>{mail.state.accounts.length}</strong>
+          </div>
+          <div>
+            <span>Unread in inboxes</span>
+            <strong>{unread.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Cached messages</span>
+            <strong>{cached.toLocaleString()}</strong>
+          </div>
+          <Link
+            to="/mail"
+            search={{ view: "inbox" }}
+            className="button button-secondary"
+          >
+            Open all inboxes
+            <Icon name="chevron" size={14} />
+          </Link>
+        </div>
+        <div className="section-heading">
+          <h2>Your accounts</h2>
+          <span>Read and search downloaded mail offline</span>
+        </div>
+        <div className="account-cards">
+          {mail.state.accounts.map((account, index) => {
+            const accountFolders = folders.filter(
+              (folder) => folder.account_id === account.id,
+            );
+            const cached = accountFolders.reduce(
+              (sum, folder) => sum + folder.cached,
+              0,
+            );
+            const unread = accountFolders
+              .filter((folder) => folder.kind === "inbox")
+              .reduce((sum, folder) => sum + folder.unread, 0);
+            const syncing =
+              account.status === "syncing" || mail.active.has(account.id);
+            return (
+              <article className="account-card" key={account.id}>
+                <div className="account-card-heading">
+                  <span className={`account-avatar avatar-${index % 4}`}>
+                    {account.config.name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <div>
+                    <h3>{account.config.name}</h3>
+                    <p>{account.config.address}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Manage ${account.config.name}`}
+                    title="Manage account"
+                    onClick={() => setManaged(account)}
+                  >
+                    <Icon name="settings" size={16} />
+                  </button>
+                </div>
+                <div className="account-card-counts">
+                  <span>
+                    <strong>{unread.toLocaleString()}</strong> unread
+                  </span>
+                  <span>
+                    <strong>{cached.toLocaleString()}</strong> cached
+                  </span>
+                  <span className="connection-badge">
+                    <Icon name="lock" size={11} />
+                    {account.config.security === "tls" ? "TLS" : "STARTTLS"}
+                  </span>
+                </div>
+                <div
+                  className={`account-sync-status${account.error ? " sync-status-error" : ""}`}
+                >
+                  <Icon
+                    name={
+                      syncing
+                        ? "refresh"
+                        : account.error
+                          ? "alert"
+                          : "checkCircle"
+                    }
+                    size={14}
+                    className={syncing ? "spinning" : undefined}
+                  />
+                  <span>
+                    {syncing
+                      ? account.status === "syncing" && account.sync_folder
+                        ? `${account.sync_folder}: ${account.sync_cached.toLocaleString()} of ${account.sync_total.toLocaleString()}`
+                        : "Connecting to your mail server…"
+                      : (account.error ??
+                        (account.last_synced
+                          ? `Last synced ${new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(account.last_synced * 1000)}`
+                          : "Ready for the first sync"))}
+                  </span>
+                </div>
+                <div className="account-card-actions">
+                  <Link
+                    to="/mail"
+                    search={{ account: account.id, view: "inbox" }}
+                    className="button button-secondary"
+                    aria-label={`Open ${account.config.name} inbox`}
+                  >
+                    Open inbox
+                    <Icon name="chevron" size={14} />
+                  </Link>
+                  {syncing ? (
+                    <button
+                      type="button"
+                      className="button button-quiet"
+                      onClick={() => {
+                        void mail.cancelSync(account.id);
+                      }}
+                    >
+                      Stop sync
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button-quiet"
+                      onClick={() => {
+                        void mail.sync(account.id);
+                      }}
+                    >
+                      <Icon name="refresh" size={14} />
+                      Sync now
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+        <div className="overview-connected-footer">
+          <Icon name="lock" size={16} />
+          <p>
+            Your mail and search index are encrypted on this device. Sending and
+            mailbox changes are not available in this read-only build.
+          </p>
+        </div>
+        <ManageAccount account={managed} onDismiss={() => setManaged(null)} />
+      </section>
+    );
+  }
   return (
     <section className="page overview-page">
       <PageHeading
@@ -41,13 +219,16 @@ function Overview() {
           <button
             className="button button-primary"
             type="button"
-            onClick={openAbout}
+            onClick={mail.connect}
+            disabled={!mail.desktop || mail.loading}
           >
-            Explore this preview
+            Connect an account
             <Icon name="chevron" size={15} />
           </button>
           <span className="welcome-footnote">
-            Account connections are coming next.
+            {mail.desktop
+              ? "IMAP with TLS or STARTTLS. Stored in your keyring."
+              : "Open the desktop app to connect your accounts."}
           </span>
         </div>
         <aside className="device-panel" aria-label="Local workspace details">
@@ -74,7 +255,7 @@ function Overview() {
             </div>
             <div>
               <dt>Mail sync</dt>
-              <dd>Coming next</dd>
+              <dd>{mail.desktop ? "Ready to connect" : "Desktop app"}</dd>
             </div>
           </dl>
           <div className="privacy-note">
@@ -134,7 +315,7 @@ function Overview() {
       <div className="overview-note">
         <Icon name="info" size={14} />
         <p>
-          You’re using an early foundation build.{" "}
+          Read and search mail. Sending and organisation are coming next.{" "}
           <button type="button" onClick={openAbout}>
             What’s available?
           </button>

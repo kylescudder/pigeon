@@ -1,14 +1,16 @@
 import { defineConfig } from "@playwright/test";
 
+const artifacts = process.env.PIGEON_E2E_ARTIFACTS ?? "evidence/playwright";
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
-  outputDir: "evidence/playwright/results",
+  outputDir: `${artifacts}/results`,
   reporter: [
     ["list"],
-    ["html", { outputFolder: "evidence/playwright/report", open: "never" }],
+    ["html", { outputFolder: `${artifacts}/report`, open: "never" }],
   ],
   use: {
     baseURL: "http://127.0.0.1:1422",

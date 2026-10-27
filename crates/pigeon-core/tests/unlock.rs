@@ -100,3 +100,53 @@ fn mismatched_key_reports_wrong_key() {
     keyring.put(DB_KEY_NAME, "test", &[7u8; 32]).unwrap();
     assert_eq!(blocked(open_store(&keyring, &path)), StoreBlocked::WrongKey);
 }
+
+#[test]
+fn concurrent_first_opens_share_one_durable_key() {
+    use pigeon_core::secrets::{Secret, SecretError};
+    use std::sync::Arc;
+    struct SlowKeyring(MemoryStore);
+    impl SecretStore for SlowKeyring {
+        fn state(&self) -> KeyringState {
+            self.0.state()
+        }
+        fn unlock(&self) -> Result<(), SecretError> {
+            self.0.unlock()
+        }
+        fn get(&self, name: &str) -> Result<Option<Secret>, SecretError> {
+            let result = self.0.get(name)?;
+            if result.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            Ok(result)
+        }
+        fn put(&self, name: &str, label: &str, secret: &[u8]) -> Result<(), SecretError> {
+            self.0.put(name, label, secret)
+        }
+        fn delete(&self, name: &str) -> Result<(), SecretError> {
+            self.0.delete(name)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mail.db");
+    let keyring = Arc::new(SlowKeyring(MemoryStore::new(KeyringState::Unlocked)));
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                scope.spawn(|| match open_store(keyring.as_ref(), &path) {
+                    UnlockOutcome::Opened { .. } => {}
+                    UnlockOutcome::Blocked(reason) => {
+                        panic!("concurrent open lost the key: {reason:?}")
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    });
+    assert!(matches!(
+        open_store(keyring.as_ref(), &path),
+        UnlockOutcome::Opened { created: false, .. }
+    ));
+}
