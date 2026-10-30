@@ -21,6 +21,8 @@
     "allow-remove-mail-account",
     "allow-update-mail-password",
     "allow-unlock-mail",
-    "allow-open-mail-message"
+    "allow-open-mail-message",
+    "allow-backup-mail",
+    "allow-restore-mail"
   ]
 }

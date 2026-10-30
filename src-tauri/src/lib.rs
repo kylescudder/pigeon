@@ -427,6 +427,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        // Used only from Rust for backup files; the webview has no dialog access.
+        .plugin(tauri_plugin_dialog::init())
         .manage(ShellState::default())
         .register_uri_scheme_protocol(VIEWER_SCHEME, |ctx, request| {
             viewer_response(ctx.app_handle(), &request)
@@ -488,6 +490,8 @@ pub fn run() {
             mail::update_mail_password,
             mail::unlock_mail,
             mail::open_mail_message,
+            mail::backup_mail,
+            mail::restore_mail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pigeon");

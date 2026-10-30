@@ -906,6 +906,33 @@ h1 {
 .settings-note svg {
   margin-top: 3px;
 }
+.backup-facts {
+  display: grid;
+  gap: 10px;
+  max-width: 650px;
+  margin-top: 18px;
+  padding: 0;
+  list-style: none;
+}
+.backup-facts li {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.backup-facts svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--faint);
+}
+.backup-actions {
+  margin-top: 20px;
+}
+.settings-section .backup-result {
+  max-width: 650px;
+  margin-top: 14px;
+}
 .notice {
   display: flex;
   gap: 11px;

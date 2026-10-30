@@ -111,7 +111,7 @@ export function Workspace({ children }: { children: ReactNode }) {
     pathname === "/foundation"
       ? "Diagnostics"
       : pathname === "/settings"
-        ? "Appearance"
+        ? "Settings"
         : pathname === "/mail"
           ? "Mail"
           : "Overview";
@@ -193,9 +193,9 @@ export function Workspace({ children }: { children: ReactNode }) {
           <MailSidebar />
           <div className="sidebar-bottom">
             <nav aria-label="Preferences" className="secondary-navigation">
-              <Link to="/settings" className="nav-item" title="Appearance">
+              <Link to="/settings" className="nav-item" title="Settings">
                 <Icon name="settings" />
-                <span className="sidebar-label">Appearance</span>
+                <span className="sidebar-label">Settings</span>
               </Link>
               <Link to="/foundation" className="nav-item" title="Diagnostics">
                 <Icon name="shield" />
@@ -404,8 +404,8 @@ function CommandMenu({
       },
     },
     {
-      label: "Appearance",
-      detail: "Theme and density",
+      label: "Settings",
+      detail: "Theme, density, backup and restore",
       icon: "settings",
       run: () => {
         void navigate({ to: "/settings" });

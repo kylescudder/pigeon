@@ -1,16 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { BackupSettings } from "../components/backup-settings";
 import { Icon } from "../components/icon";
 import { PageHeading, useWorkspace } from "../components/workspace";
 
-export const Route = createFileRoute("/settings")({ component: Appearance });
+export const Route = createFileRoute("/settings")({ component: Settings });
 
-function Appearance() {
+function Settings() {
   const { theme, setTheme, density, setDensity } = useWorkspace();
   return (
     <section className="page settings-page">
       <PageHeading
-        title="Appearance"
-        description="A workspace that feels like yours."
+        title="Settings"
+        description="A workspace that feels like yours, and a way back if this device fails."
       />
       <section className="settings-section">
         <h2>Colour theme</h2>
@@ -75,6 +76,7 @@ function Appearance() {
           ))}
         </div>
       </section>
+      <BackupSettings />
       <div className="settings-note">
         <Icon name="monitor" size={16} />
         <p>

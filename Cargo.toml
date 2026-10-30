@@ -9,6 +9,7 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
+age = "0.12"
 ammonia = "4.2"
 hex = "0.4"
 getrandom = "0.4"

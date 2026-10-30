@@ -1,4 +1,5 @@
 //! Main-window adapters for the mail engine. No SQL or protocol logic here.
+use pigeon_core::backup::{self, BackupError, Summary};
 use pigeon_core::mail::{
     Account, AccountConfig, Folder, MailEngine, MailError, Message, SavedSearch, SearchQuery,
     SearchResults,
@@ -6,6 +7,7 @@ use pigeon_core::mail::{
 use pigeon_core::secrets::Secret;
 use pigeon_core::viewer::{self, RemoteContent};
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
@@ -33,6 +35,16 @@ impl From<MailError> for MailApiError {
             MailError::Busy => "busy",
             MailError::Cancelled => "cancelled",
             MailError::InvalidSearch(_) => "invalid_search",
+            MailError::KeyMissing => "key_missing",
+            MailError::Backup(error) => match error {
+                BackupError::WeakPassphrase => "weak_passphrase",
+                BackupError::WrongPassphrase => "wrong_passphrase",
+                BackupError::Damaged => "damaged_backup",
+                BackupError::Newer => "newer_backup",
+                BackupError::Busy => "busy",
+                BackupError::Io(_) => "backup_file",
+                BackupError::Storage(_) => "storage",
+            },
         };
         Self {
             code,
@@ -282,4 +294,76 @@ pub async fn open_mail_message(
         code: "viewer",
         message: "The message viewer was interrupted.".into(),
     })?
+}
+
+/// Asks where to save, then writes an encrypted backup. The file chooser runs
+/// natively, so the webview never names a path. `None` means cancelled.
+#[tauri::command]
+pub async fn backup_mail(
+    app: AppHandle,
+    webview: tauri::Webview,
+    passphrase: String,
+) -> Result<Option<Summary>, MailApiError> {
+    guard(&webview)?;
+    let passphrase = zeroize::Zeroizing::new(passphrase);
+    backup::check_passphrase(&passphrase).map_err(MailError::from)?;
+    let Some(path) = choose_file(&app, true).await? else {
+        return Ok(None);
+    };
+    task(app, move |engine| engine.create_backup(&path, &passphrase))
+        .await
+        .map(Some)
+}
+
+/// Asks for a backup file, then replaces local-only data with it.
+#[tauri::command]
+pub async fn restore_mail(
+    app: AppHandle,
+    webview: tauri::Webview,
+    passphrase: String,
+) -> Result<Option<Summary>, MailApiError> {
+    guard(&webview)?;
+    let passphrase = zeroize::Zeroizing::new(passphrase);
+    let Some(path) = choose_file(&app, false).await? else {
+        return Ok(None);
+    };
+    task(app, move |engine| engine.restore_backup(&path, &passphrase))
+        .await
+        .map(Some)
+}
+
+async fn choose_file(app: &AppHandle, save: bool) -> Result<Option<PathBuf>, MailApiError> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app
+        .dialog()
+        .file()
+        .add_filter("Pigeon backup", &[backup::FILE_EXTENSION]);
+    if let Some(window) = app.get_webview_window(crate::MAIN) {
+        dialog = dialog.set_parent(&window);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        if save {
+            dialog
+                .set_title("Save Pigeon backup")
+                .set_file_name(backup::default_file_name())
+                .blocking_save_file()
+        } else {
+            dialog
+                .set_title("Restore Pigeon backup")
+                .blocking_pick_file()
+        }
+    })
+    .await
+    .map_err(|_| MailApiError {
+        code: "interrupted",
+        message: "The file chooser was interrupted. Try again.".into(),
+    })?;
+    picked
+        .map(|file| {
+            file.into_path().map_err(|_| MailApiError {
+                code: "backup_file",
+                message: "Choose a file on this computer.".into(),
+            })
+        })
+        .transpose()
 }

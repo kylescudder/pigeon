@@ -154,3 +154,16 @@ export const removeMailAccount = (id: string) =>
 export const updateMailPassword = (id: string, password: string) =>
   invoke<void>("update_mail_password", { id, password });
 export const unlockMail = () => invoke<void>("unlock_mail");
+
+// Backups choose their file through a native dialog, so no path crosses the
+// webview boundary. A null result means the dialog was cancelled.
+export type BackupSummary = {
+  accounts: number;
+  passwords: number;
+  saved_searches: number;
+  previous_store: string | null;
+};
+export const backupMail = (passphrase: string) =>
+  invoke<BackupSummary | null>("backup_mail", { passphrase });
+export const restoreMail = (passphrase: string) =>
+  invoke<BackupSummary | null>("restore_mail", { passphrase });

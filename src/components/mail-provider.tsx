@@ -159,6 +159,23 @@ export function MailGate({ children }: { children: ReactNode }) {
         </Link>
       </div>
     );
+  if (mail.error && errorCode(mail.error) === "key_missing")
+    return (
+      <div className="page mail-empty">
+        <Icon name="lock" size={32} />
+        <h1>This device’s mail key is missing</h1>
+        <p role="alert">
+          The keyring no longer has the key for Pigeon’s encrypted store, so
+          local-only data cannot be read. Restore a backup to recover it. Mail
+          on your servers is unaffected.
+        </p>
+        <div className="inline-actions">
+          <Link className="button button-primary" to="/settings" hash="backup">
+            Restore from a backup
+          </Link>
+        </div>
+      </div>
+    );
   if (mail.error)
     return (
       <div className="page mail-empty">

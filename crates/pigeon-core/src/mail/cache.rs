@@ -151,6 +151,7 @@ impl MailEngine {
         let _lease = super::SyncLease {
             active: &self.searches,
             id: request_id.to_owned(),
+            cancel: cancel.clone(),
         };
         self.with_store(|store| {
             super::check_cancel(&cancel)?;
