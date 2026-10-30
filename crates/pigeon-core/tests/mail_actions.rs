@@ -47,6 +47,8 @@ struct Server {
     fault: Option<Fault>,
     /// Every pre-write check returns an unusable response.
     malformed: bool,
+    /// UID EXPUNGE is refused with NO.
+    reject_expunge: bool,
     log: Vec<String>,
 }
 
@@ -70,6 +72,7 @@ impl Server {
             offline: false,
             fault: None,
             malformed: false,
+            reject_expunge: false,
             log: Vec::new(),
         }))
     }
@@ -276,7 +279,7 @@ impl MailSession for Session {
     }
     fn expunge_uids(&mut self, uids: &[u32]) -> Result<(), MailError> {
         let mut server = self.server.lock().unwrap();
-        if !server.caps.uidplus {
+        if !server.caps.uidplus || server.reject_expunge {
             return Err(rejected());
         }
         let selected = self.selected.clone().unwrap();
@@ -805,4 +808,122 @@ fn a_change_the_server_answers_unusably_fails_without_blocking_sync() {
     assert_eq!(f.engine.pending_actions().unwrap()[0].state, "failed");
     assert_eq!(f.subjects("INBOX"), ["Alpha", "Bravo", "Charlie", "Delta"]);
     assert!(f.server().log.is_empty());
+}
+
+#[test]
+fn retrying_after_a_refused_source_deletion_does_not_copy_again() {
+    let f = standard();
+    {
+        let mut s = f.server();
+        s.caps.moves = false;
+        s.reject_expunge = true;
+    }
+    let alpha = f.id("INBOX", "Alpha");
+    f.engine
+        .queue_actions(&[alpha], ActionKind::Archive)
+        .unwrap();
+    f.engine.apply_actions(&f.account).unwrap();
+    let pending = f.engine.pending_actions().unwrap();
+    assert_eq!(pending[0].state, "failed", "{pending:?}");
+    assert_eq!(
+        f.server().subjects("Archive"),
+        ["Alpha"],
+        "the copy was confirmed"
+    );
+    for _ in 0..2 {
+        f.engine.retry_action(pending[0].id).unwrap();
+        f.engine.apply_actions(&f.account).unwrap();
+    }
+    f.server().reject_expunge = false;
+    f.engine.retry_action(pending[0].id).unwrap();
+    f.engine.apply_actions(&f.account).unwrap();
+    assert!(f.engine.pending_actions().unwrap().is_empty());
+    assert_eq!(
+        f.server().subjects("Archive"),
+        ["Alpha"],
+        "never copied twice"
+    );
+    assert_eq!(f.server().subjects("INBOX"), ["Bravo", "Charlie"]);
+    assert_eq!(
+        f.server()
+            .log
+            .iter()
+            .filter(|c| c.starts_with("COPY"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn discarding_one_of_overlapping_read_changes_shows_the_remaining_one() {
+    let f = standard();
+    f.server().offline = true;
+    let alpha = f.id("INBOX", "Alpha");
+    let unread = |f: &Fixture| {
+        f.local("INBOX")
+            .iter()
+            .find(|m| m.subject == "Alpha")
+            .unwrap()
+            .unread
+    };
+    f.engine
+        .queue_actions(&[alpha], ActionKind::MarkRead)
+        .unwrap();
+    f.engine
+        .queue_actions(&[alpha], ActionKind::MarkUnread)
+        .unwrap();
+    assert!(unread(&f));
+    let pending = f.engine.pending_actions().unwrap();
+    // Discard the later Mark unread: Mark read is what remains.
+    f.engine.discard_action(pending[1].id).unwrap();
+    assert!(!unread(&f), "the remaining Mark read shows locally");
+    f.server().offline = false;
+    f.engine.apply_actions(&f.account).unwrap();
+    assert!(f.server().find("INBOX", "Alpha").unwrap().seen);
+    assert!(!unread(&f));
+    // The local state agrees with the server, so Mark unread is not skipped.
+    assert_eq!(
+        f.engine
+            .queue_actions(&[alpha], ActionKind::MarkUnread)
+            .unwrap(),
+        1
+    );
+    f.engine.apply_actions(&f.account).unwrap();
+    assert!(!f.server().find("INBOX", "Alpha").unwrap().seen);
+
+    // Discarding both, earliest first, restores the server's last known state.
+    let bravo = f.id("INBOX", "Bravo");
+    f.engine
+        .queue_actions(&[bravo], ActionKind::MarkRead)
+        .unwrap();
+    f.engine.apply_actions(&f.account).unwrap();
+    f.server().offline = true;
+    assert_eq!(
+        f.engine
+            .queue_actions(&[bravo], ActionKind::MarkUnread)
+            .unwrap(),
+        1
+    );
+    f.engine
+        .queue_actions(&[bravo], ActionKind::MarkRead)
+        .unwrap();
+    let pending = f.engine.pending_actions().unwrap();
+    f.engine.discard_action(pending[0].id).unwrap();
+    assert!(
+        !f.local("INBOX")
+            .iter()
+            .find(|m| m.subject == "Bravo")
+            .unwrap()
+            .unread,
+        "the remaining Mark read shows locally"
+    );
+    f.engine.discard_action(pending[1].id).unwrap();
+    assert!(
+        !f.local("INBOX")
+            .iter()
+            .find(|m| m.subject == "Bravo")
+            .unwrap()
+            .unread,
+        "Bravo was read on the server all along"
+    );
 }

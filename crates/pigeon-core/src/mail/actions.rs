@@ -223,10 +223,12 @@ impl MailEngine {
                     let action = tx.last_insert_rowid();
                     {
                         let mut insert = tx
-                            .prepare("INSERT INTO mail_action_items(action,uid,prior_unread,state) VALUES (?1,?2,?3,'pending')")
+                            // With an earlier read change still outstanding, the
+                            // local value is that change's, not the server's.
+                            .prepare(&format!("INSERT INTO mail_action_items(action,uid,prior_unread,state) VALUES (?1,?2,coalesce((SELECT i.prior_unread FROM mail_action_items i JOIN mail_actions a ON a.id=i.action WHERE a.id!=?1 AND a.account=?4 AND a.folder=?5 AND a.uid_validity=?6 AND a.kind IN {FLAG_KINDS} AND a.state IN {OUTSTANDING} AND i.state='pending' AND i.uid=?2 ORDER BY a.id LIMIT 1),?3),'pending')"))
                             .map_err(storage_error)?;
                         for (uid, unread) in chunk {
-                            insert.execute(params![action, uid, unread]).map_err(storage_error)?;
+                            insert.execute(params![action, uid, unread, account, folder, validity]).map_err(storage_error)?;
                         }
                     }
                     show_locally(&tx, action)?;
@@ -295,7 +297,8 @@ impl MailEngine {
     }
 
     /// Queues a failed or conflicting change again. This is the explicit
-    /// decision an uncertain copy needs, so the attempt history is cleared.
+    /// decision an uncertain copy needs, so unconfirmed attempt history is
+    /// cleared. A confirmed copy is kept, so a retry only removes the source.
     pub fn retry_action(&self, id: i64) -> Result<(), MailError> {
         self.with_store(|store| {
             let tx = store
@@ -304,7 +307,7 @@ impl MailEngine {
                 .map_err(storage_error)?;
             let changed = tx
                 .execute(
-                    "UPDATE mail_actions SET state='queued',attempted=0,step=NULL,error=NULL,updated=?2 WHERE id=?1 AND state IN ('failed','conflict')",
+                    "UPDATE mail_actions SET state='queued',attempted=CASE WHEN step='copied' THEN attempted ELSE 0 END,step=CASE WHEN step='copied' THEN step ELSE NULL END,error=NULL,updated=?2 WHERE id=?1 AND state IN ('failed','conflict')",
                     params![id, now()],
                 )
                 .map_err(storage_error)?;
@@ -666,8 +669,8 @@ impl MailEngine {
                         .map_err(storage_error)?;
                         if flags {
                             tx.execute(
-                                &format!("UPDATE messages SET flags_pending=0 WHERE account=(SELECT account FROM mail_actions WHERE id=?1) AND folder=?2 AND uid_validity=?3 AND uid=?4 AND {}", no_other(FLAG_KINDS)),
-                                params![action.id, action.folder, action.validity, uid],
+                                &format!("UPDATE messages SET flags_pending=0,unread=?5 WHERE account=(SELECT account FROM mail_actions WHERE id=?1) AND folder=?2 AND uid_validity=?3 AND uid=?4 AND {}", no_other(FLAG_KINDS)),
+                                params![action.id, action.folder, action.validity, uid, action.kind == "mark_unread"],
                             )
                             .map_err(storage_error)?;
                         }
@@ -763,6 +766,17 @@ fn release_locally(tx: &Transaction<'_>, action: i64) -> Result<(), MailError> {
             |row| row.get(0),
         )
         .map_err(storage_error)?;
+    if kind.starts_with("mark_") {
+        // Messages another read change still covers show the latest one.
+        tx.execute(
+            &format!(
+                "UPDATE messages SET flags_pending=1,unread=(SELECT a.kind='mark_unread' FROM mail_action_items i JOIN mail_actions a ON a.id=i.action WHERE a.id!=?1 AND a.state IN {OUTSTANDING} AND a.kind IN {FLAG_KINDS} AND i.state='pending' AND a.account=messages.account AND a.folder=messages.folder AND a.uid_validity=messages.uid_validity AND i.uid=messages.uid ORDER BY a.id DESC LIMIT 1) WHERE {TARGETED} AND NOT {}",
+                no_other(FLAG_KINDS)
+            ),
+            [action],
+        )
+        .map_err(storage_error)?;
+    }
     let sql = if kind.starts_with("mark_") {
         format!(
             "UPDATE messages SET flags_pending=0,unread=coalesce((SELECT prior_unread FROM mail_action_items WHERE action=?1 AND uid=messages.uid),unread) WHERE {TARGETED} AND {}",
