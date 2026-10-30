@@ -133,3 +133,17 @@ fn debug_output_redacts_key() {
     assert_eq!(rendered, "DbKey(<redacted>)");
     assert!(!rendered.contains(&hex::encode(key.as_bytes())));
 }
+
+/// It locks and wipes every SQLite allocation, not just keys. With a normal
+/// RLIMIT_MEMLOCK that fails on each one, logging millions of lines and
+/// slowing sync about fourfold. Keys use SQLCipher's own locked heap either way.
+#[test]
+fn memory_security_stays_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("mail.db"), &DbKey::generate().unwrap()).unwrap();
+    let state: String = store
+        .connection()
+        .query_row("PRAGMA cipher_memory_security", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(state, "0");
+}

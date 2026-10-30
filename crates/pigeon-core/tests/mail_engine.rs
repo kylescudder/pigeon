@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use pigeon_core::mail::source::{
     FolderSnapshot, MailConnector, MailSession, RemoteFlag, RemoteFolder, RemoteMessage,
@@ -6,7 +7,7 @@ use pigeon_core::mail::source::{
 use pigeon_core::mail::{
     AccountConfig, MailEngine, MailError, MessageContent, SearchQuery, TransportSecurity,
 };
-use pigeon_core::secrets::{KeyringState, MemoryStore, Secret};
+use pigeon_core::secrets::{KeyringState, MemoryStore, Secret, SecretError, SecretStore};
 use std::sync::Mutex;
 use zeroize::Zeroizing;
 
@@ -406,6 +407,106 @@ fn credential_reverification_and_local_removal_do_not_damage_cached_mail_on_fail
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn removing_a_large_account_leaves_the_store_available_and_blocks_sync() {
+    use std::sync::atomic::AtomicBool;
+    let dir = tempfile::tempdir().unwrap();
+    let state = Arc::new(Mutex::new(ServerState {
+        validity: 1,
+        count: 1_200,
+        fail_after: None,
+        deleted: vec![],
+        seen: vec![],
+    }));
+    let engine = MailEngine::with_connector(
+        dir.path().join("mail.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+        Arc::new(ChangingServer(state)),
+    );
+    let account = engine
+        .add_account(config(), Zeroizing::new(b"test-password".to_vec()))
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 1_200);
+
+    let finished = AtomicBool::new(false);
+    let mut saw_partial = false;
+    let mut sync_was_busy = false;
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            engine.remove_account(&account.id).unwrap();
+            finished.store(true, Ordering::SeqCst);
+        });
+        while !finished.load(Ordering::SeqCst) {
+            let total = engine.search(&SearchQuery::default()).unwrap().total;
+            if total > 0 && total < 1_200 && !saw_partial {
+                saw_partial = true;
+                sync_was_busy = matches!(engine.sync_account(&account.id), Err(MailError::Busy));
+            }
+        }
+    });
+    assert!(saw_partial, "the store stayed locked for the whole removal");
+    assert!(
+        sync_was_busy,
+        "sync must not refill an account being removed"
+    );
+    assert!(engine.accounts().unwrap().is_empty());
+    assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 0);
+}
+
+/// A keyring that refuses deletion must leave a retriable account, not an
+/// account row with no password or a password with no account.
+#[test]
+fn failed_credential_removal_keeps_the_account_and_can_be_retried() {
+    struct RefusingKeyring {
+        inner: MemoryStore,
+        refuse: std::sync::atomic::AtomicBool,
+    }
+    impl SecretStore for RefusingKeyring {
+        fn state(&self) -> KeyringState {
+            self.inner.state()
+        }
+        fn unlock(&self) -> Result<(), SecretError> {
+            self.inner.unlock()
+        }
+        fn get(&self, name: &str) -> Result<Option<Secret>, SecretError> {
+            self.inner.get(name)
+        }
+        fn put(&self, name: &str, label: &str, secret: &[u8]) -> Result<(), SecretError> {
+            self.inner.put(name, label, secret)
+        }
+        fn delete(&self, name: &str) -> Result<(), SecretError> {
+            if self.refuse.load(Ordering::SeqCst) {
+                return Err(SecretError::Backend("refused".into()));
+            }
+            self.inner.delete(name)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let keyring = Arc::new(RefusingKeyring {
+        inner: MemoryStore::new(KeyringState::Unlocked),
+        refuse: true.into(),
+    });
+    let engine = MailEngine::with_connector(
+        dir.path().join("mail.db"),
+        keyring.clone(),
+        Arc::new(TestServer),
+    );
+    let account = engine
+        .add_account(config(), Zeroizing::new(b"test-password".to_vec()))
+        .unwrap();
+    let password = format!("account:{}:password", account.id);
+
+    assert!(engine.remove_account(&account.id).is_err());
+    assert_eq!(engine.accounts().unwrap().len(), 1);
+    assert!(keyring.get(&password).unwrap().is_some());
+
+    keyring.refuse.store(false, Ordering::SeqCst);
+    engine.remove_account(&account.id).unwrap();
+    assert!(engine.accounts().unwrap().is_empty());
+    assert!(keyring.get(&password).unwrap().is_none());
 }
 
 #[test]

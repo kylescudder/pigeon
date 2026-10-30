@@ -23,7 +23,7 @@ The screenshot is retained unmodified with provenance under the ignored `evidenc
 
 ## Design decisions made during the spike
 
-- **Raw 256-bit SQLCipher key.** The key is random, so SQLCipher's passphrase KDF is skipped. It is held in `Zeroizing` memory and its `Debug` output is redacted. `cipher_memory_security` is on.
+- **Raw 256-bit SQLCipher key.** The key is random, so SQLCipher's passphrase KDF is skipped. It is held in `Zeroizing` memory and its `Debug` output is redacted. `cipher_memory_security` is off: SQLCipher keeps keys in its own locked heap regardless, and the option adds a failing `mlock` to every SQLite allocation under normal memory limits.
 - **The store fails closed.** If SQLCipher is not linked, FTS5 is absent, or the key is wrong, the open is refused. A missing key for an existing store is reported as `KeyMissing`. A replacement key is never generated, because that would orphan local-only data.
 - **No plaintext secret fallback.** Keyring states are `Unavailable`, `Locked`, and `Unlocked`. Unlocking is never automatic; it is a separate `unlock()` called on user action. Session-only storage (`MemoryStore`) exists for the session-credential mode.
 - **Viewer isolation uses separate webviews, not iframes.** Each message opens in its own webview labelled `viewer-*`, which no capability names. The app's commands are declared through `AppManifest`, so each one needs an explicit `allow-*` grant. Every command also checks that the caller's label is `main`, as defence in depth against the Linux limitation where frames cannot be told apart.

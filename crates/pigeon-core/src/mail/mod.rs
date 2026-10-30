@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,7 @@ mod query;
 pub mod source;
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
 const MAX_PARSE_FAILURES: usize = 20;
+const REMOVAL_BATCH: i64 = 500;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -263,23 +264,45 @@ impl MailEngine {
     }
 
     pub fn remove_account(&self, id: &str) -> Result<(), MailError> {
-        let active = self.syncing.lock().map_err(|_| MailError::Busy)?;
-        if active.contains_key(id) {
-            return Err(MailError::Busy);
+        {
+            let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
+            if active.contains_key(id) {
+                return Err(MailError::Busy);
+            }
+            active.insert(id.to_owned(), Arc::new(AtomicBool::new(false)));
         }
+        let _lease = SyncLease {
+            active: &self.syncing,
+            id: id.to_owned(),
+        };
+        // Mail goes first, in batches: each row also rewrites the search index,
+        // so one transaction would hold the store and freeze every other view.
+        // The account and password outlast it, so any failure can be retried.
+        loop {
+            let removed = self.with_store(|store| {
+                store
+                    .connection()
+                    .execute(
+                        "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE account=?1 LIMIT ?2)",
+                        rusqlite::params![id, REMOVAL_BATCH],
+                    )
+                    .map_err(storage_error)
+            })?;
+            if removed == 0 {
+                break;
+            }
+            // The store mutex is not fair; give waiting readers a turn.
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        self.secrets
+            .delete(&format!("account:{id}:password"))
+            .map_err(|_| MailError::Locked)?;
         self.with_store(|store| {
-            self.secrets
-                .delete(&format!("account:{id}:password"))
-                .map_err(|_| MailError::Locked)?;
-            let tx = store
+            store
                 .connection()
-                .unchecked_transaction()
+                .execute("DELETE FROM mail_accounts WHERE id=?1", [id])
                 .map_err(storage_error)?;
-            tx.execute("DELETE FROM messages WHERE account=?1", [id])
-                .map_err(storage_error)?;
-            tx.execute("DELETE FROM mail_accounts WHERE id=?1", [id])
-                .map_err(storage_error)?;
-            tx.commit().map_err(storage_error)
+            Ok(())
         })
     }
     pub fn new(path: PathBuf, secrets: Arc<dyn SecretStore>) -> Self {

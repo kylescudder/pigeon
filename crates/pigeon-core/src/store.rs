@@ -147,9 +147,11 @@ impl Store {
         }
 
         conn.execute_batch(&format!("PRAGMA key = {};", key.pragma_value().as_str()))?;
-        // Wipe SQLCipher-managed memory on free; keep temp tables and sort
-        // spills in memory so plaintext never lands in temp files.
-        conn.execute_batch("PRAGMA cipher_memory_security = ON; PRAGMA temp_store = MEMORY;")?;
+        // Keep temp tables and sort spills in memory so plaintext never lands in
+        // temp files. Leave cipher_memory_security off: keys already use
+        // SQLCipher's locked private heap, and it adds an mlock to every SQLite
+        // allocation, which floods stderr once RLIMIT_MEMLOCK is exhausted.
+        conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
 
         // The first read is where a wrong key surfaces.
         match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
