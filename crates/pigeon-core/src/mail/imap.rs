@@ -100,7 +100,7 @@ fn imap_error(operation: &'static str, error: ::imap::Error) -> MailError {
             | std::io::ErrorKind::BrokenPipe => "the server closed the connection",
             _ => "a network read or write failed",
         },
-        Error::Parse(_) => "the server response could not be parsed by this IMAP client",
+        Error::Parse(_) => return MailError::ResponseParse { operation },
         Error::Validate(_) => "this IMAP client could not encode the command arguments",
         Error::Tls(_) | Error::TlsHandshake(_) => "the encrypted connection failed",
         _ => "the IMAP operation failed",
@@ -176,6 +176,17 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
             uid_validity,
             messages,
         })
+    }
+
+    fn reselect(&mut self, folder: &str, expected_validity: u32) -> Result<(), MailError> {
+        let mailbox = self
+            .session
+            .examine(folder)
+            .map_err(|error| imap_error("reopening a folder read-only", error))?;
+        if mailbox.uid_validity != Some(expected_validity) {
+            return Err(MailError::Protocol);
+        }
+        Ok(())
     }
 
     fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError> {
@@ -493,5 +504,130 @@ mod tests {
             );
             assert!(!error.contains("PRIVATE_RESPONSE_CANARY"));
         }
+    }
+
+    #[test]
+    fn parser_failure_in_real_fetch_response_is_isolated_from_readable_messages() {
+        use crate::mail::{MailEngine, SearchQuery};
+        use crate::secrets::{KeyringState, MemoryStore};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        struct Connector(std::net::SocketAddr);
+        impl MailConnector for Connector {
+            fn connect(
+                &self,
+                _: &AccountConfig,
+                _: &Secret,
+            ) -> Result<Box<dyn MailSession>, MailError> {
+                let stream = TcpStream::connect(self.0).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut client = Client::new(stream);
+                client.read_greeting().unwrap();
+                let session = client
+                    .login("synthetic", "synthetic")
+                    .map_err(|(e, _)| imap_error("test login", e))?;
+                Ok(Box::new(ImapSession { session }))
+            }
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let server = std::thread::spawn(move || {
+            let mut workers = Vec::new();
+            while !stopped.load(Ordering::SeqCst) {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(value) => value,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("{error}"),
+                };
+                workers.push(std::thread::spawn(move || {
+                    stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                    stream.write_all(b"* OK Synthetic IMAP\r\n").unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 { break; }
+                        let fields: Vec<_> = line.split_whitespace().collect();
+                        let tag = fields[0];
+                        match fields[1] {
+                            "LOGIN" => {},
+                            "LIST" => stream.write_all(b"* LIST () \"/\" \"INBOX\"\r\n").unwrap(),
+                            "EXAMINE" => stream.write_all(b"* 3 EXISTS\r\n* OK [UIDVALIDITY 1] epoch\r\n").unwrap(),
+                            "UID" if line.contains("FLAGS") => {
+                                for uid in 1..=3 { write!(stream, "* {uid} FETCH (UID {uid} FLAGS ())\r\n").unwrap(); }
+                            }
+                            "UID" => {
+                                let uids: Vec<u32> = fields[3].split(',').map(|uid| uid.parse().unwrap()).collect();
+                                if line.contains("BODYSTRUCTURE") && uids.contains(&2) {
+                                    // RFC BODYSTRUCTURE permits multiple extension values;
+                                    // the current parser only accepts one. No private mail.
+                                    stream.write_all(b"* 2 FETCH (UID 2 BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL NIL NIL \"7BIT\" 6 1 NIL NIL NIL NIL \"ext1\" \"ext2\"))\r\n").unwrap();
+                                    write!(stream, "{tag} OK fetched\r\n").unwrap();
+                                    break;
+                                }
+                                for uid in uids {
+                                    if line.contains("BODYSTRUCTURE") {
+                                        let header = format!("From: synthetic@example.test\r\nSubject: Message {uid}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n");
+                                        write!(stream, "* {uid} FETCH (UID {uid} BODY[HEADER] {{{}}}\r\n{header} BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL NIL NIL \"7BIT\" 6 1))\r\n", header.len()).unwrap();
+                                    } else {
+                                        write!(stream, "* {uid} FETCH (UID {uid} BODY[TEXT] {{6}}\r\nhello\n)\r\n").unwrap();
+                                    }
+                                }
+                            }
+                            _ => panic!("unexpected synthetic command"),
+                        }
+                        if write!(stream, "{tag} OK complete\r\n").is_err() { break; }
+                    }
+                }));
+            }
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let engine = MailEngine::with_connector(
+            dir.path().join("mail.db"),
+            Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+            Arc::new(Connector(address)),
+        );
+        let account = engine
+            .add_account(
+                AccountConfig {
+                    name: "Synthetic".into(),
+                    address: "synthetic@example.test".into(),
+                    host: "localhost".into(),
+                    port: address.port(),
+                    username: "synthetic".into(),
+                    security: TransportSecurity::Tls,
+                    ca_certificate: None,
+                },
+                Secret::new(b"synthetic".to_vec()),
+            )
+            .unwrap();
+        let result = engine.sync_account(&account.id);
+        let messages = engine.search(&SearchQuery::default()).unwrap();
+        drop(engine);
+        stop.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+        assert!(
+            matches!(result, Err(MailError::IncompleteSync(1))),
+            "{result:?}"
+        );
+        assert_eq!(messages.total, 2);
+        assert!(
+            messages
+                .messages
+                .iter()
+                .any(|message| message.subject == "Message 3")
+        );
     }
 }

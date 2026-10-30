@@ -147,6 +147,14 @@ pub enum MailError {
     Connection,
     #[error("the mail server returned an incomplete or unsupported response")]
     Protocol,
+    #[error("could not parse {0} message(s); readable mail was downloaded, but sync is incomplete")]
+    IncompleteSync(usize),
+    #[error(
+        "the server repeatedly returned unparseable message responses; sync paused to limit retries"
+    )]
+    ParseRetryLimit,
+    #[error("while {operation}: the server response could not be parsed by this IMAP client")]
+    ResponseParse { operation: &'static str },
     #[error("while {operation}: {reason}")]
     Imap {
         operation: &'static str,
@@ -164,6 +172,15 @@ pub enum MailError {
     Cancelled,
     #[error("invalid search: {0}")]
     InvalidSearch(String),
+}
+
+struct FetchContext<'a> {
+    account: &'a Account,
+    folder: &'a str,
+    validity: u32,
+    password: &'a Secret,
+    flags: &'a HashMap<u32, bool>,
+    cancel: &'a AtomicBool,
 }
 
 pub struct MailEngine {
@@ -378,7 +395,9 @@ impl MailEngine {
             .ok_or(MailError::Authentication)?;
         let mut session = self.connector.connect(&account.config, &password)?;
         let folders = session.folders()?;
+        let mut failed_messages = 0;
         for folder in &folders {
+            let failures_before = failed_messages;
             check_cancel(cancel)?;
             let snapshot = session.snapshot(&folder.name)?;
             if snapshot.uid_validity == 0 {
@@ -404,9 +423,73 @@ impl MailEngine {
                 .iter()
                 .map(|message| (message.uid, message.unread))
                 .collect();
+            let context = FetchContext {
+                account: &account,
+                folder: &folder.name,
+                validity: snapshot.uid_validity,
+                password: &password,
+                flags: &flags,
+                cancel,
+            };
             for batch in needed.chunks(100) {
-                check_cancel(cancel)?;
-                let messages = session.fetch_messages(batch)?;
+                let mut attempts = 0;
+                self.fetch_batch(
+                    &context,
+                    &mut session,
+                    batch,
+                    &mut failed_messages,
+                    &mut attempts,
+                )?;
+            }
+            check_cancel(cancel)?;
+            // A partial folder must not prune old data or promote a partially
+            // downloaded UIDVALIDITY epoch over the previous readable cache.
+            if failed_messages == failures_before {
+                self.complete_folder(id, &folder.name, &snapshot)?;
+            }
+        }
+        if failed_messages > 0 {
+            return Err(MailError::IncompleteSync(failed_messages));
+        }
+        check_cancel(cancel)?;
+        self.remove_absent_folders(id, &folders)?;
+        Ok(())
+    }
+
+    fn fetch_batch(
+        &self,
+        context: &FetchContext<'_>,
+        session: &mut Box<dyn source::MailSession>,
+        batch: &[u32],
+        failed: &mut usize,
+        attempts: &mut usize,
+    ) -> Result<(), MailError> {
+        check_cancel(context.cancel)?;
+        // Binary splitting is exceptional recovery, never an unbounded retry
+        // loop. Typical single-message failures need ~15 requests for 100 UIDs.
+        if *attempts >= 31 {
+            return Err(MailError::ParseRetryLimit);
+        }
+        *attempts += 1;
+        match session.fetch_messages(batch) {
+            Err(MailError::ResponseParse { .. }) => {
+                check_cancel(context.cancel)?;
+                // A parser failure may leave unread bytes in the stream.
+                // Reconnect and verify the folder epoch before any further fetch.
+                *session = self
+                    .connector
+                    .connect(&context.account.config, context.password)?;
+                session.reselect(context.folder, context.validity)?;
+                if batch.len() == 1 {
+                    *failed += 1;
+                    return Ok(());
+                }
+                let middle = batch.len() / 2;
+                self.fetch_batch(context, session, &batch[..middle], failed, attempts)?;
+                self.fetch_batch(context, session, &batch[middle..], failed, attempts)
+            }
+            Err(error) => Err(error),
+            Ok(messages) => {
                 let mut received = HashSet::new();
                 if messages.len() != batch.len()
                     || messages.iter().any(|message| {
@@ -415,15 +498,16 @@ impl MailEngine {
                 {
                     return Err(MailError::Protocol);
                 }
-                check_cancel(cancel)?;
-                self.persist_batch(id, &folder.name, snapshot.uid_validity, &messages, &flags)?;
+                check_cancel(context.cancel)?;
+                self.persist_batch(
+                    &context.account.id,
+                    context.folder,
+                    context.validity,
+                    &messages,
+                    context.flags,
+                )
             }
-            check_cancel(cancel)?;
-            self.complete_folder(id, &folder.name, &snapshot)?;
         }
-        check_cancel(cancel)?;
-        self.remove_absent_folders(id, &folders)?;
-        Ok(())
     }
 
     fn with_store<T>(

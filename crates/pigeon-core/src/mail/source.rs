@@ -15,6 +15,13 @@ pub trait MailConnector: Send + Sync {
 pub trait MailSession: Send {
     fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError>;
     fn snapshot(&mut self, folder: &str) -> Result<FolderSnapshot, MailError>;
+    /// Restore selection on a new connection without trusting old sequence state.
+    fn reselect(&mut self, folder: &str, expected_validity: u32) -> Result<(), MailError> {
+        if self.snapshot(folder)?.uid_validity != expected_validity {
+            return Err(MailError::Protocol);
+        }
+        Ok(())
+    }
     fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError>;
 }
 

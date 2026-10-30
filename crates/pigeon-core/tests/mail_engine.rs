@@ -562,3 +562,185 @@ fn malformed_queries_are_actionable_and_punctuation_never_becomes_sql() {
         1
     );
 }
+
+#[test]
+fn one_unparseable_message_does_not_block_later_mail_or_other_folders() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Server(Arc<AtomicBool>);
+    struct Session {
+        bad: Arc<AtomicBool>,
+        folder: String,
+        broken: bool,
+    }
+    impl MailConnector for Server {
+        fn connect(
+            &self,
+            _: &AccountConfig,
+            _: &Secret,
+        ) -> Result<Box<dyn MailSession>, MailError> {
+            Ok(Box::new(Session {
+                bad: self.0.clone(),
+                folder: String::new(),
+                broken: false,
+            }))
+        }
+    }
+    impl MailSession for Session {
+        fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
+            Ok(vec![
+                RemoteFolder {
+                    name: "INBOX".into(),
+                    kind: "inbox".into(),
+                },
+                RemoteFolder {
+                    name: "Archive".into(),
+                    kind: "archive".into(),
+                },
+            ])
+        }
+        fn snapshot(&mut self, folder: &str) -> Result<FolderSnapshot, MailError> {
+            if self.broken {
+                return Err(MailError::Connection);
+            }
+            self.folder = folder.into();
+            Ok(FolderSnapshot {
+                uid_validity: 1,
+                messages: (1..=250)
+                    .map(|uid| RemoteFlag { uid, unread: true })
+                    .collect(),
+            })
+        }
+        fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError> {
+            if self.broken {
+                return Err(MailError::Connection);
+            }
+            if self.folder == "INBOX" && uids.contains(&101) && self.bad.load(Ordering::SeqCst) {
+                self.broken = true;
+                return Err(MailError::ResponseParse {
+                    operation: "reading message headers and MIME structure",
+                });
+            }
+            TestSession.fetch_messages(uids)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(MemoryStore::new(KeyringState::Unlocked));
+    let bad = Arc::new(AtomicBool::new(true));
+    let path = dir.path().join("mail.db");
+    let engine =
+        MailEngine::with_connector(path.clone(), secrets.clone(), Arc::new(Server(bad.clone())));
+    let account = engine
+        .add_account(config(), Secret::new(b"test-password".to_vec()))
+        .unwrap();
+    assert!(engine.sync_account(&account.id).is_err());
+    assert_eq!(
+        engine.search(&SearchQuery::default()).unwrap().total,
+        499,
+        "a single response failure must not stop the remaining account download"
+    );
+    assert_eq!(
+        engine.accounts().unwrap()[0].status,
+        "error",
+        "partial coverage must not be marked successful"
+    );
+    assert!(
+        engine.accounts().unwrap()[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("1 message")
+    );
+    drop(engine);
+    let engine = MailEngine::with_connector(path, secrets, Arc::new(Server(bad.clone())));
+    assert!(engine.sync_account(&account.id).is_err());
+    assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 499);
+    bad.store(false, Ordering::SeqCst);
+    engine.sync_account(&account.id).unwrap();
+    assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 500);
+    assert_eq!(engine.accounts().unwrap()[0].status, "idle");
+}
+
+#[test]
+fn parser_recovery_is_bounded_and_refuses_changed_folder_epochs() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Server {
+        calls: Arc<AtomicUsize>,
+        mode: usize,
+    }
+    struct Session {
+        calls: Arc<AtomicUsize>,
+        mode: usize,
+    }
+    impl MailConnector for Server {
+        fn connect(
+            &self,
+            _: &AccountConfig,
+            _: &Secret,
+        ) -> Result<Box<dyn MailSession>, MailError> {
+            Ok(Box::new(Session {
+                calls: self.calls.clone(),
+                mode: self.mode,
+            }))
+        }
+    }
+    impl MailSession for Session {
+        fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
+            TestSession.folders()
+        }
+        fn snapshot(&mut self, _: &str) -> Result<FolderSnapshot, MailError> {
+            let epoch = if self.mode == 2 && self.calls.load(Ordering::SeqCst) > 0 {
+                2
+            } else {
+                1
+            };
+            Ok(FolderSnapshot {
+                uid_validity: epoch,
+                messages: (1..=100)
+                    .map(|uid| RemoteFlag { uid, unread: true })
+                    .collect(),
+            })
+        }
+        fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.mode != 0 || uids.len() > 50 {
+                return Err(MailError::ResponseParse {
+                    operation: "reading message headers and MIME structure",
+                });
+            }
+            TestSession.fetch_messages(uids)
+        }
+    }
+    for mode in 0..=2 {
+        let dir = tempfile::tempdir().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = MailEngine::with_connector(
+            dir.path().join("mail.db"),
+            Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+            Arc::new(Server {
+                calls: calls.clone(),
+                mode,
+            }),
+        );
+        let account = engine
+            .add_account(config(), Secret::new(b"test-password".to_vec()))
+            .unwrap();
+        let result = engine.sync_account(&account.id);
+        match mode {
+            0 => {
+                result.unwrap();
+                assert_eq!(calls.load(Ordering::SeqCst), 3);
+                assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 100);
+            }
+            1 => {
+                assert!(matches!(result, Err(MailError::ParseRetryLimit)));
+                assert_eq!(calls.load(Ordering::SeqCst), 31);
+            }
+            2 => {
+                assert!(matches!(result, Err(MailError::Protocol)));
+                assert_eq!(calls.load(Ordering::SeqCst), 1);
+                assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 0);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
