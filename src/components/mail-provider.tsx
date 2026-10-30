@@ -82,7 +82,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
     try {
       await syncMailAccount(id);
     } catch (error) {
-      if (!["busy", "cancelled"].includes(errorCode(error) ?? ""))
+      if (!["busy", "cancelled", "restoring"].includes(errorCode(error) ?? ""))
         setActionError(errorMessage(error));
     } finally {
       setActive((previous) => {

@@ -178,6 +178,8 @@ pub enum MailError {
     NotFound,
     #[error("this account is already synchronising")]
     Busy,
+    #[error("a backup is being restored; try again when it finishes")]
+    Restoring,
     #[error("the operation was cancelled; cached mail is still available")]
     Cancelled,
     #[error("invalid search: {0}")]
@@ -249,6 +251,9 @@ impl MailEngine {
         if password.is_empty() {
             return Err(MailError::InvalidConfig("enter an account password".into()));
         }
+        // Excludes a restore, which would replace this account's password and
+        // settings underneath the update. Syncing the account may continue.
+        let _lease = self.lease(&format!("\0password:{id}"))?;
         let account = self
             .accounts()?
             .into_iter()
@@ -336,16 +341,20 @@ impl MailEngine {
             return Err(MailError::InvalidConfig("enter an account password".into()));
         }
         self.with_store(|_| Ok(()))?;
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes)
+            .map_err(|_| MailError::Storage("could not create account identifier".into()))?;
+        let id = hex::encode(bytes);
+        // Held until the account row is written, so a restore cannot move the
+        // store aside between saving the password and saving the account.
+        let _lease = self.lease(&format!("\0add:{id}"))?;
         // Authentication happens outside the SQLite mutex. Browsing cached mail
         // remains available while the network is slow or unavailable.
         let mut session = self.connector.connect(&config, &password)?;
         session.folders()?;
         drop(session);
-        let mut bytes = [0u8; 16];
-        getrandom::fill(&mut bytes)
-            .map_err(|_| MailError::Storage("could not create account identifier".into()))?;
         let account = Account {
-            id: hex::encode(bytes),
+            id,
             config,
             status: "idle".into(),
             error: None,
@@ -641,10 +650,10 @@ const RESTORE_LEASE: &str = "\0restore";
 impl MailEngine {
     fn lease(&self, id: &str) -> Result<SyncLease<'_>, MailError> {
         let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
-        if active.contains_key(id)
-            || active.contains_key(RESTORE_LEASE)
-            || (id == RESTORE_LEASE && !active.is_empty())
-        {
+        if active.contains_key(RESTORE_LEASE) {
+            return Err(MailError::Restoring);
+        }
+        if active.contains_key(id) || (id == RESTORE_LEASE && !active.is_empty()) {
             return Err(MailError::Busy);
         }
         let cancel = Arc::new(AtomicBool::new(false));

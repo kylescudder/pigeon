@@ -33,6 +33,7 @@ impl From<MailError> for MailApiError {
             MailError::Storage(_) => "storage",
             MailError::NotFound => "not_found",
             MailError::Busy => "busy",
+            MailError::Restoring => "restoring",
             MailError::Cancelled => "cancelled",
             MailError::InvalidSearch(_) => "invalid_search",
             MailError::KeyMissing => "key_missing",

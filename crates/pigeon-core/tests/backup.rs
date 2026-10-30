@@ -13,7 +13,7 @@ use pigeon_core::mail::source::{
 use pigeon_core::mail::{
     AccountConfig, MailEngine, MailError, MessageContent, SearchQuery, TransportSecurity,
 };
-use pigeon_core::secrets::{KeyringState, MemoryStore, Secret, SecretStore};
+use pigeon_core::secrets::{KeyringState, MemoryStore, Secret, SecretError, SecretStore};
 use pigeon_core::unlock::DB_KEY_NAME;
 use zeroize::Zeroizing;
 
@@ -22,7 +22,7 @@ const PASSWORD: &[u8] = b"canary-imap-password";
 const CANARY_SUBJECT: &str = "Canary subject 7Q2";
 
 /// A server with `count` messages in one folder. While `gate` is set every
-/// fetch waits; while `hold_last` is set only the final batch waits, so a
+/// connection and fetch waits; while `hold_last` is set only the final batch waits, so a
 /// sync stays in progress after writing most of its mail.
 #[derive(Clone)]
 struct Server {
@@ -49,6 +49,9 @@ impl MailConnector for Server {
         _: &AccountConfig,
         password: &Secret,
     ) -> Result<Box<dyn MailSession>, MailError> {
+        while self.gate.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         if password.as_slice() != PASSWORD {
             return Err(MailError::Authentication);
         }
@@ -108,16 +111,65 @@ fn config() -> AccountConfig {
     }
 }
 
+type PutHook = Box<dyn FnMut(&str) -> Result<(), SecretError> + Send>;
+
+/// The in-memory keyring, with an optional hook that runs before each write
+/// and can fail it, block it, or change the filesystem underneath a restore.
+struct Keyring {
+    inner: MemoryStore,
+    on_put: Mutex<Option<PutHook>>,
+}
+
+impl Keyring {
+    fn hook(&self, hook: impl FnMut(&str) -> Result<(), SecretError> + Send + 'static) {
+        *self.on_put.lock().unwrap() = Some(Box::new(hook));
+    }
+    fn unhook(&self) {
+        *self.on_put.lock().unwrap() = None;
+    }
+}
+
+impl std::ops::Deref for Keyring {
+    type Target = MemoryStore;
+    fn deref(&self) -> &MemoryStore {
+        &self.inner
+    }
+}
+
+impl SecretStore for Keyring {
+    fn state(&self) -> KeyringState {
+        self.inner.state()
+    }
+    fn unlock(&self) -> Result<(), SecretError> {
+        self.inner.unlock()
+    }
+    fn get(&self, name: &str) -> Result<Option<Secret>, SecretError> {
+        self.inner.get(name)
+    }
+    fn put(&self, name: &str, label: &str, secret: &[u8]) -> Result<(), SecretError> {
+        if let Some(hook) = self.on_put.lock().unwrap().as_mut() {
+            hook(name)?;
+        }
+        self.inner.put(name, label, secret)
+    }
+    fn delete(&self, name: &str) -> Result<(), SecretError> {
+        self.inner.delete(name)
+    }
+}
+
 struct Device {
     dir: tempfile::TempDir,
-    secrets: Arc<MemoryStore>,
+    secrets: Arc<Keyring>,
     engine: MailEngine,
 }
 
 impl Device {
     fn new(server: Server) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let secrets = Arc::new(MemoryStore::new(KeyringState::Unlocked));
+        let secrets = Arc::new(Keyring {
+            inner: MemoryStore::new(KeyringState::Unlocked),
+            on_put: Mutex::new(None),
+        });
         let engine = MailEngine::with_connector(
             dir.path().join("mail.db"),
             secrets.clone(),
@@ -501,4 +553,285 @@ fn drop_store(device: &Device) {
     device.secrets.set_state(KeyringState::Locked);
     let _ = device.engine.accounts();
     device.secrets.set_state(KeyringState::Unlocked);
+}
+
+const CURRENT: &[u8] = b"current-password-after-backup";
+
+/// Two accounts backed up with `PASSWORD`. Afterwards the first account's
+/// password changes to `CURRENT` and the second's leaves the keyring, so a
+/// restore would overwrite one value and create the other.
+fn two_accounts_changed_since_backup() -> (Device, PathBuf, tempfile::TempDir, [String; 2]) {
+    let device = Device::new(Server::new(1));
+    let ids = [0, 1].map(|_| {
+        device
+            .engine
+            .add_account(config(), Zeroizing::new(PASSWORD.to_vec()))
+            .unwrap()
+            .id
+    });
+    let out = tempfile::tempdir().unwrap();
+    let file = out.path().join("b.pigeon-backup");
+    device.engine.create_backup(&file, PASSPHRASE).unwrap();
+    device
+        .secrets
+        .put(&backup::password_name(&ids[0]), "test", CURRENT)
+        .unwrap();
+    device
+        .secrets
+        .delete(&backup::password_name(&ids[1]))
+        .unwrap();
+    device
+        .engine
+        .save_search("Made after the backup", &SearchQuery::default())
+        .unwrap();
+    (device, file, out, ids)
+}
+
+fn password(device: &Device, id: &str) -> Option<Vec<u8>> {
+    device
+        .secrets
+        .get(&backup::password_name(id))
+        .unwrap()
+        .map(|p| p.to_vec())
+}
+
+fn assert_nothing_changed(device: &Device, ids: &[String; 2], store_before: &[u8]) {
+    assert_eq!(password(device, &ids[0]).as_deref(), Some(CURRENT));
+    assert_eq!(password(device, &ids[1]), None);
+    assert_eq!(std::fs::read(device.db()).unwrap(), store_before);
+    let names: Vec<String> = std::fs::read_dir(device.dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains("restore"))
+        .collect();
+    assert!(names.is_empty(), "left behind: {names:?}");
+}
+
+#[test]
+fn keyring_failure_part_way_through_passwords_puts_back_earlier_ones() {
+    let (device, file, _out, ids) = two_accounts_changed_since_backup();
+    drop_store(&device);
+    let before = std::fs::read(device.db()).unwrap();
+    let mut writes = 0;
+    device.secrets.hook(move |_| {
+        writes += 1;
+        if writes == 2 {
+            return Err(SecretError::Backend("injected keyring failure".into()));
+        }
+        Ok(())
+    });
+    let error = device.engine.restore_backup(&file, PASSPHRASE).unwrap_err();
+    device.secrets.unhook();
+    assert!(matches!(error, MailError::Locked), "{error:?}");
+    assert_nothing_changed(&device, &ids, &before);
+    assert_eq!(device.engine.saved_searches().unwrap().len(), 1);
+    assert_eq!(device.engine.accounts().unwrap().len(), 2);
+}
+
+#[test]
+fn failing_to_move_the_live_store_aside_puts_back_passwords() {
+    let (device, file, _out, ids) = two_accounts_changed_since_backup();
+    drop_store(&device);
+    let before = std::fs::read(device.db()).unwrap();
+    // Occupy every name the live store could be moved to with a directory,
+    // which a file can never be renamed over.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let blockers: Vec<PathBuf> = (now - 5..now + 120)
+        .map(|t| {
+            device
+                .dir
+                .path()
+                .join(format!("mail.db.before-restore-{t}"))
+        })
+        .collect();
+    for blocker in &blockers {
+        std::fs::create_dir(blocker).unwrap();
+        std::fs::write(blocker.join("occupied"), b"x").unwrap();
+    }
+    let error = device.engine.restore_backup(&file, PASSPHRASE).unwrap_err();
+    for blocker in &blockers {
+        std::fs::remove_dir_all(blocker).unwrap();
+    }
+    assert!(
+        matches!(error, MailError::Backup(BackupError::Io(_))),
+        "{error:?}"
+    );
+    assert_nothing_changed(&device, &ids, &before);
+    assert_eq!(device.engine.saved_searches().unwrap().len(), 1);
+}
+
+/// For the lost-key cases: the store stays unreadable and keyless, exactly
+/// as before the restore, and the passwords are put back.
+fn without_store_key() -> (Device, PathBuf, tempfile::TempDir, [String; 2], Vec<u8>) {
+    let (device, file, out, ids) = two_accounts_changed_since_backup();
+    drop_store(&device);
+    device.secrets.delete(DB_KEY_NAME).unwrap();
+    let before = std::fs::read(device.db()).unwrap();
+    (device, file, out, ids, before)
+}
+
+#[test]
+fn failing_to_save_a_new_store_key_puts_back_the_store_and_passwords() {
+    let (device, file, _out, ids, before) = without_store_key();
+    device.secrets.hook(|name| {
+        if name == DB_KEY_NAME {
+            return Err(SecretError::Backend("injected keyring failure".into()));
+        }
+        Ok(())
+    });
+    let error = device.engine.restore_backup(&file, PASSPHRASE).unwrap_err();
+    device.secrets.unhook();
+    assert!(matches!(error, MailError::Storage(_)), "{error:?}");
+    assert_nothing_changed(&device, &ids, &before);
+    assert!(device.secrets.get(DB_KEY_NAME).unwrap().is_none());
+    assert!(matches!(
+        device.engine.accounts(),
+        Err(MailError::KeyMissing)
+    ));
+}
+
+#[test]
+fn failing_to_rename_the_new_store_into_place_puts_everything_back() {
+    let (device, file, _out, ids, before) = without_store_key();
+    // Saving the new key is the last step before the rename. Remove the
+    // staged store then, so the rename itself fails.
+    let dir = device.dir.path().to_owned();
+    device.secrets.hook(move |name| {
+        if name == DB_KEY_NAME {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".mail.db.restore-")
+                {
+                    std::fs::remove_file(path).unwrap();
+                }
+            }
+        }
+        Ok(())
+    });
+    let error = device.engine.restore_backup(&file, PASSPHRASE).unwrap_err();
+    device.secrets.unhook();
+    assert!(
+        matches!(error, MailError::Backup(BackupError::Io(_))),
+        "{error:?}"
+    );
+    assert_nothing_changed(&device, &ids, &before);
+    assert!(device.secrets.get(DB_KEY_NAME).unwrap().is_none());
+    assert!(matches!(
+        device.engine.accounts(),
+        Err(MailError::KeyMissing)
+    ));
+}
+
+#[test]
+fn successful_restore_writes_every_backed_up_password() {
+    let (device, file, _out, ids) = two_accounts_changed_since_backup();
+    let summary = device.engine.restore_backup(&file, PASSPHRASE).unwrap();
+    assert_eq!((summary.accounts, summary.passwords), (2, 2));
+    assert_eq!(password(&device, &ids[0]).as_deref(), Some(PASSWORD));
+    assert_eq!(password(&device, &ids[1]).as_deref(), Some(PASSWORD));
+    assert_eq!(device.engine.saved_searches().unwrap().len(), 0);
+    for id in &ids {
+        device.engine.sync_account(id).unwrap();
+    }
+}
+
+#[test]
+fn account_changes_are_refused_while_a_restore_runs() {
+    let (device, account_id) = populated();
+    let device = Arc::new(device);
+    let out = tempfile::tempdir().unwrap();
+    let file = out.path().join("b.pigeon-backup");
+    device.engine.create_backup(&file, PASSPHRASE).unwrap();
+    // Pause the restore at its first keyring write.
+    let (entered, wait_entered) = std::sync::mpsc::channel();
+    let (release, wait_release) = std::sync::mpsc::channel::<()>();
+    let mut first = true;
+    device.secrets.hook(move |_| {
+        if std::mem::take(&mut first) {
+            entered.send(()).unwrap();
+            wait_release.recv().unwrap();
+        }
+        Ok(())
+    });
+    let restoring = {
+        let (device, file) = (device.clone(), file.clone());
+        std::thread::spawn(move || device.engine.restore_backup(&file, PASSPHRASE))
+    };
+    wait_entered.recv().unwrap();
+    let added = device
+        .engine
+        .add_account(config(), Zeroizing::new(PASSWORD.to_vec()));
+    assert!(matches!(added, Err(MailError::Restoring)), "{added:?}");
+    let updated = device
+        .engine
+        .update_password(&account_id, Zeroizing::new(PASSWORD.to_vec()));
+    assert!(matches!(updated, Err(MailError::Restoring)), "{updated:?}");
+    assert!(matches!(
+        device.engine.sync_account(&account_id),
+        Err(MailError::Restoring)
+    ));
+    assert!(matches!(
+        device.engine.remove_account(&account_id),
+        Err(MailError::Restoring)
+    ));
+    release.send(()).unwrap();
+    restoring.join().unwrap().unwrap();
+    device.secrets.unhook();
+    assert_eq!(device.engine.accounts().unwrap().len(), 1);
+    device
+        .engine
+        .add_account(config(), Zeroizing::new(PASSWORD.to_vec()))
+        .unwrap();
+    assert_eq!(device.engine.accounts().unwrap().len(), 2);
+}
+
+#[test]
+fn restore_is_refused_while_an_account_is_added_or_its_password_changes() {
+    let server = Server::new(1);
+    let gate = server.gate.clone();
+    let device = Arc::new(Device::new(server));
+    let account = device
+        .engine
+        .add_account(config(), Zeroizing::new(PASSWORD.to_vec()))
+        .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let file = out.path().join("b.pigeon-backup");
+    device.engine.create_backup(&file, PASSPHRASE).unwrap();
+
+    type Change = fn(&MailEngine, &str) -> Result<(), MailError>;
+    let changes: [(&str, Change); 2] = [
+        ("add", |engine, _| {
+            engine
+                .add_account(config(), Zeroizing::new(PASSWORD.to_vec()))
+                .map(|_| ())
+        }),
+        ("password", |engine, id| {
+            engine.update_password(id, Zeroizing::new(PASSWORD.to_vec()))
+        }),
+    ];
+    for (name, change) in changes {
+        // The change waits on the server while holding its place.
+        gate.store(true, Ordering::SeqCst);
+        let running = {
+            let (device, id) = (device.clone(), account.id.clone());
+            std::thread::spawn(move || change(&device.engine, &id))
+        };
+        std::thread::sleep(Duration::from_millis(200));
+        let error = device.engine.restore_backup(&file, PASSPHRASE).unwrap_err();
+        assert!(
+            matches!(error, MailError::Backup(BackupError::Busy)),
+            "{name}: {error:?}"
+        );
+        gate.store(false, Ordering::SeqCst);
+        running.join().unwrap().unwrap();
+    }
+    // The account added meanwhile is in the live store, not set aside.
+    assert_eq!(device.engine.accounts().unwrap().len(), 2);
 }

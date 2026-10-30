@@ -80,7 +80,7 @@ pub enum BackupError {
     Damaged,
     #[error("this backup was made by a newer version of Pigeon; update Pigeon to restore it")]
     Newer,
-    #[error("finish or cancel mail syncing and account removal before restoring")]
+    #[error("finish or cancel mail syncing, account changes, and account removal before restoring")]
     Busy,
     #[error("could not access the backup file: {0}")]
     Io(String),

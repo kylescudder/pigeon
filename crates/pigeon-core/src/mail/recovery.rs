@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::{MailEngine, MailError, RESTORE_LEASE, now, storage_error};
 use crate::backup::{self, BackupError, Summary};
-use crate::secrets::KeyringState;
+use crate::secrets::{KeyringState, Secret};
 use crate::store::{DbKey, Store};
 use crate::unlock::{DB_KEY_LABEL, DB_KEY_NAME};
 
@@ -86,6 +86,35 @@ impl MailEngine {
         new_key: bool,
         passwords: &[backup::KeyringItem],
     ) -> Result<Option<String>, MailError> {
+        // Remember what the keyring held before the first write, so that a
+        // failed restore leaves the live accounts' passwords as they were.
+        let mut saved: Vec<(&str, Option<Secret>)> = Vec::with_capacity(passwords.len());
+        for (name, _) in passwords {
+            let current = self.secrets.get(name).map_err(|_| MailError::Locked)?;
+            saved.push((name, current));
+        }
+        let result = self.swap_files(staging, key, new_key, passwords);
+        if result.is_err() {
+            for (name, previous) in &saved {
+                let _ = match previous {
+                    Some(password) => {
+                        self.secrets
+                            .put(name, "Pigeon mail account password", password)
+                    }
+                    None => self.secrets.delete(name),
+                };
+            }
+        }
+        result
+    }
+
+    fn swap_files(
+        &self,
+        staging: &Path,
+        key: &DbKey,
+        new_key: bool,
+        passwords: &[backup::KeyringItem],
+    ) -> Result<Option<String>, MailError> {
         for (name, password) in passwords {
             self.secrets
                 .put(name, "Pigeon mail account password", password)
@@ -97,22 +126,25 @@ impl MailEngine {
             .map_err(|_| MailError::Storage("mail store lock unavailable".into()))?;
         // Close the live store so its WAL is checkpointed before it moves.
         *guard = None;
+        let undo = |previous: &Option<String>| {
+            if let Some(name) = previous {
+                let _ = move_store_files(&self.path.with_file_name(name), &self.path);
+            }
+        };
         let previous = if self.path.exists() {
             let name = format!(
                 "{}.before-restore-{}",
                 self.path.file_name().unwrap_or_default().to_string_lossy(),
                 now()
             );
-            move_store_files(&self.path, &self.path.with_file_name(&name))
-                .map_err(|e| BackupError::Io(e.to_string()))?;
+            if let Err(error) = move_store_files(&self.path, &self.path.with_file_name(&name)) {
+                // Some of the store's files may already have moved.
+                undo(&Some(name));
+                return Err(BackupError::Io(error.to_string()).into());
+            }
             Some(name)
         } else {
             None
-        };
-        let undo = |previous: &Option<String>| {
-            if let Some(name) = previous {
-                let _ = move_store_files(&self.path.with_file_name(name), &self.path);
-            }
         };
         if new_key && let Err(error) = self.secrets.put(DB_KEY_NAME, DB_KEY_LABEL, key.as_bytes()) {
             undo(&previous);

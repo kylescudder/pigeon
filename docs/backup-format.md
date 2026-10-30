@@ -50,11 +50,13 @@ The file is written as `.<name>.partial-<random>` beside the destination with mo
 
 ## Restore
 
-1. A restore is refused while any account is syncing or being removed. While it runs, new syncs and removals are refused too.
+1. A restore is refused while any account is syncing, being added, having its password changed, or being removed. While it runs, all of those are refused with "a backup is being restored", so no account change can land in the store that is about to be set aside.
 2. The backup is decrypted and validated in memory before anything changes.
 3. A complete new store is built as `.mail.db.restore-<random>`. It is encrypted with this device's existing key, or with a newly generated key if the keyring has lost it.
 4. Account passwords are written to the keyring.
-5. Under the store lock, the live store is closed and moved to `mail.db.before-restore-<unix time>`, never deleted. If needed, the new key is saved, and the new store is renamed into place. If any of these steps fails, they are undone.
+5. Under the store lock, the live store is closed and moved to `mail.db.before-restore-<unix time>`, never deleted. If needed, the new key is saved, and the new store is renamed into place.
+
+Before step 4 writes anything, the keyring's current value (or absence) for each password in the backup is recorded. If any later step fails (a keyring write, moving the live store aside, saving a new key, or the final rename), the store files are moved back, a newly saved key is removed, and every password is put back to its recorded value or deleted. A failed restore therefore leaves the live accounts able to sync as before.
 
 The replaced store stays encrypted under its original key. Delete it from Pigeon's data folder once the restore looks right.
 
