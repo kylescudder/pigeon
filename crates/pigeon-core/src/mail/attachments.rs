@@ -8,6 +8,7 @@ use rusqlite::{OptionalExtension, params};
 use zeroize::Zeroizing;
 
 use super::cache::VISIBLE;
+use super::source::MailSession;
 use super::{Attachment, MailEngine, MailError, now, storage_error};
 use crate::viewer::{self, InlineImage, InlineImages, RemoteContent};
 
@@ -16,6 +17,17 @@ pub const MAX_ATTACHMENT_BYTES: usize = 64 * 1024 * 1024;
 /// Upper bound for session-only payloads held in memory at once.
 const SESSION_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const KEEP_SETTING: &str = "keep_attachments";
+
+/// The largest transfer size that can decode to at most `decoded` bytes:
+/// base64 is the largest common encoding, 4 bytes per 3 plus line breaks.
+pub(super) fn encoded_limit(decoded: usize) -> usize {
+    decoded / 3 * 4 + decoded / 38 + 4096
+}
+
+/// SQL matching a message row to the server identity captured before a
+/// download. Row ids can be reused once a message is removed.
+const SAME_MESSAGE: &str =
+    "m.id=?1 AND m.account=?2 AND m.folder=?3 AND m.uid_validity=?4 AND m.uid=?5";
 
 pub struct AttachmentData {
     pub filename: String,
@@ -125,18 +137,18 @@ impl MailEngine {
             data,
             kept,
         };
-        if let Some(data) = self.kept_part(message, part)? {
+        if let Some(data) = self.kept_part(&located, part)? {
             return Ok(result(data, true));
         }
         let data = match self.session_part(&located.key(part)) {
             Some(data) => data,
-            None => self
-                .download(&located, &[attachment], MAX_ATTACHMENT_BYTES)?
-                .pop()
-                .ok_or(MailError::Protocol)??,
+            None => {
+                let mut session = self.part_session(&located)?;
+                self.fetch_part(&mut session, &located, attachment, MAX_ATTACHMENT_BYTES)?
+            }
         };
         if keep {
-            self.keep_part(message, attachment, &data)?;
+            self.keep_part(&located, attachment, &data)?;
         }
         Ok(result(data, keep))
     }
@@ -169,7 +181,13 @@ impl MailEngine {
             },
         };
         if let Some(located) = located {
-            let mut wanted = Vec::new();
+            let keep = self.keep_attachments()?;
+            // The document budget bounds what is read or downloaded, not only
+            // what is finally placed in the document.
+            let mut left = viewer::MAX_INLINE_DOCUMENT_BYTES;
+            // One connection for all of a message's images, opened on demand.
+            let mut session: Option<Box<dyn MailSession>> = None;
+            let mut unreachable = false;
             for attachment in &located.attachments {
                 let Some(cid) = attachment
                     .content_id
@@ -183,39 +201,62 @@ impl MailEngine {
                 if !attachment.content_type.starts_with("image/") {
                     continue;
                 }
-                let cached = match self.kept_part(id, &attachment.part)? {
+                let max = left.min(viewer::MAX_INLINE_IMAGE_BYTES);
+                // Too large for what is left: shown by its alt text, unfetched.
+                if max == 0 || attachment.size as usize > encoded_limit(max) {
+                    continue;
+                }
+                let cached = match self.kept_part(&located, &attachment.part)? {
                     Some(data) => Some(data),
                     None => self.session_part(&located.key(&attachment.part)),
                 };
-                match cached {
-                    Some(data) => {
-                        inline.insert(cid, inline_image(attachment, &data));
+                let data = match cached {
+                    Some(data) => data,
+                    None if unreachable => {
+                        missing += 1;
+                        continue;
                     }
-                    None => wanted.push((cid, attachment)),
-                }
-            }
-            if !wanted.is_empty() {
-                let parts: Vec<&Attachment> = wanted.iter().map(|(_, a)| *a).collect();
-                match self.download(&located, &parts, viewer::MAX_INLINE_IMAGE_BYTES) {
-                    Ok(results) => {
-                        let keep = self.keep_attachments()?;
-                        for ((cid, attachment), result) in wanted.into_iter().zip(results) {
-                            match result {
-                                Ok(data) => {
-                                    if keep {
-                                        self.keep_part(id, attachment, &data)?;
-                                    }
-                                    inline.insert(cid, inline_image(attachment, &data));
+                    None => {
+                        let fetched = match session.as_mut() {
+                            Some(session) => self.fetch_part(session, &located, attachment, max),
+                            None => self.part_session(&located).and_then(|opened| {
+                                let session = session.insert(opened);
+                                self.fetch_part(session, &located, attachment, max)
+                            }),
+                        };
+                        match fetched {
+                            Ok(data) => {
+                                if keep {
+                                    self.keep_part(&located, attachment, &data)?;
                                 }
-                                Err(MailError::Locked) => return Err(MailError::Locked),
-                                Err(_) => missing += 1,
+                                data
+                            }
+                            Err(MailError::Locked) => return Err(MailError::Locked),
+                            // Offline or refused: show the message without it.
+                            Err(error) => {
+                                // Stop trying once the connection itself is gone.
+                                unreachable |= session.is_none()
+                                    || matches!(
+                                        error,
+                                        MailError::Connection
+                                            | MailError::Tls
+                                            | MailError::Imap {
+                                                reason: "the server closed the connection"
+                                                    | "the server response timed out",
+                                                ..
+                                            }
+                                    );
+                                missing += 1;
+                                continue;
                             }
                         }
                     }
-                    Err(MailError::Locked) => return Err(MailError::Locked),
-                    // Offline or refused: show the message without its images.
-                    Err(_) => missing += wanted.len() as u32,
+                };
+                if data.len() > max {
+                    continue;
                 }
+                left -= data.len();
+                inline.insert(cid, inline_image(attachment, &data));
             }
         }
         Ok(ViewerDocument {
@@ -316,13 +357,26 @@ impl MailEngine {
         .ok_or(MailError::NotFound)
     }
 
-    fn kept_part(&self, message: i64, part: &str) -> Result<Option<Zeroizing<Vec<u8>>>, MailError> {
+    fn kept_part(
+        &self,
+        located: &Located,
+        part: &str,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, MailError> {
         self.with_store(|store| {
             store
                 .connection()
                 .query_row(
-                    "SELECT data FROM attachment_blobs WHERE message=?1 AND part=?2",
-                    params![message, part],
+                    &format!(
+                        "SELECT b.data FROM attachment_blobs b JOIN messages m ON m.id=b.message WHERE {SAME_MESSAGE} AND b.part=?6"
+                    ),
+                    params![
+                        located.message,
+                        located.account,
+                        located.folder,
+                        located.validity,
+                        located.uid,
+                        part
+                    ],
                     |row| row.get::<_, Vec<u8>>(0),
                 )
                 .optional()
@@ -338,42 +392,60 @@ impl MailEngine {
             .get(key)
     }
 
+    /// Stores a downloaded part, but only if the row still belongs to the
+    /// message it was downloaded from; checked in the same statement.
     fn keep_part(
         &self,
-        message: i64,
+        located: &Located,
         attachment: &Attachment,
         data: &[u8],
     ) -> Result<(), MailError> {
         self.with_store(|store| {
-            store
-                .connection()
+            let db = store.connection();
+            let identity = params![
+                located.message,
+                located.account,
+                located.folder,
+                located.validity,
+                located.uid
+            ];
+            let inserted = db
                 .execute(
-                    "INSERT INTO attachment_blobs(message,part,content_type,data,stored_at) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(message,part) DO NOTHING",
-                    params![message, attachment.part, attachment.content_type, data, now()],
+                    &format!(
+                        "INSERT INTO attachment_blobs(message,part,content_type,data,stored_at) SELECT m.id,?6,?7,?8,?9 FROM messages m WHERE {SAME_MESSAGE} ON CONFLICT(message,part) DO NOTHING"
+                    ),
+                    params![
+                        located.message,
+                        located.account,
+                        located.folder,
+                        located.validity,
+                        located.uid,
+                        attachment.part,
+                        attachment.content_type,
+                        data,
+                        now()
+                    ],
                 )
-                .map_err(|error| match error {
-                    // The message was removed while its attachment downloaded.
-                    rusqlite::Error::SqliteFailure(code, _)
-                        if code.code == rusqlite::ErrorCode::ConstraintViolation =>
-                    {
-                        MailError::NotFound
-                    }
-                    error => storage_error(error),
-                })?;
+                .map_err(storage_error)?;
+            // Nothing inserted: either already kept, or the message is gone.
+            if inserted == 0
+                && !db
+                    .query_row(
+                        &format!("SELECT EXISTS(SELECT 1 FROM messages m WHERE {SAME_MESSAGE})"),
+                        identity,
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(storage_error)?
+            {
+                return Err(MailError::NotFound);
+            }
             Ok(())
         })
     }
 
-    /// Fetches parts over one connection, outside the store mutex. The outer
-    /// error is the connection; each part then succeeds or fails on its own.
-    /// The folder epoch is checked first, so a reused UID is never fetched.
-    #[allow(clippy::type_complexity)]
-    fn download(
-        &self,
-        located: &Located,
-        parts: &[&Attachment],
-        max_bytes: usize,
-    ) -> Result<Vec<Result<Zeroizing<Vec<u8>>, MailError>>, MailError> {
+    /// Connects for part downloads, outside the store mutex. The folder epoch
+    /// is checked first, so a reused UID is never fetched.
+    fn part_session(&self, located: &Located) -> Result<Box<dyn MailSession>, MailError> {
         let account = self
             .accounts()?
             .into_iter()
@@ -386,20 +458,26 @@ impl MailEngine {
             .ok_or(MailError::Authentication)?;
         let mut session = self.connector.connect(&account.config, &password)?;
         session.reselect(&located.folder, located.validity)?;
-        Ok(parts
-            .iter()
-            .map(|attachment| {
-                let data = session.fetch_part(located.uid, attachment, max_bytes)?;
-                if data.len() > max_bytes {
-                    return Err(MailError::Protocol);
-                }
-                self.parts
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(located.key(&attachment.part), data.clone());
-                Ok(data)
-            })
-            .collect())
+        Ok(session)
+    }
+
+    /// Downloads one part and holds it in the session cache.
+    fn fetch_part(
+        &self,
+        session: &mut Box<dyn MailSession>,
+        located: &Located,
+        attachment: &Attachment,
+        max_bytes: usize,
+    ) -> Result<Zeroizing<Vec<u8>>, MailError> {
+        let data = session.fetch_part(located.uid, attachment, max_bytes)?;
+        if data.len() > max_bytes {
+            return Err(MailError::Protocol);
+        }
+        self.parts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(located.key(&attachment.part), data.clone());
+        Ok(data)
     }
 }
 

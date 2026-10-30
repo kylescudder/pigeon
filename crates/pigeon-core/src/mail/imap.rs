@@ -410,8 +410,7 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
         {
             return Err(MailError::Protocol);
         }
-        // Base64 is the largest common encoding: 4 bytes for every 3, plus line breaks.
-        if other.octets as usize > max_bytes / 3 * 4 + max_bytes / 38 + 4096 {
+        if other.octets as usize > super::attachments::encoded_limit(max_bytes) {
             return Err(MailError::Imap {
                 operation: OPERATION,
                 reason: "the attachment is larger than Pigeon downloads",

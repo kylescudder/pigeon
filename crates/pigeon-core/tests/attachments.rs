@@ -11,19 +11,30 @@ use pigeon_core::mail::{
     TransportSecurity,
 };
 use pigeon_core::secrets::{KeyringState, MemoryStore, Secret};
+use pigeon_core::viewer::MAX_INLINE_DOCUMENT_BYTES;
 use zeroize::Zeroizing;
 
 const CANARY: &[u8] = b"ATTACHMENT-RETENTION-CANARY-7f3a";
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\nsynthetic-image";
 
+type Hook = Box<dyn FnOnce() + Send>;
+
 #[derive(Default)]
 struct State {
     validity: u32,
+    /// The UID the server lists; changing it models delete-then-new-mail.
+    uid: u32,
     deleted: bool,
     offline: bool,
     fetches: Vec<String>,
     connects: usize,
+    /// Extra embedded images in the message, each this many bytes.
+    many_images: Option<(u32, usize)>,
+    /// Runs once during the next part download, without the server lock.
+    during_fetch: Option<Hook>,
 }
+
+const MANY_FIRST_PART: u32 = 10;
 
 #[derive(Clone)]
 struct Server(Arc<Mutex<State>>);
@@ -82,13 +93,29 @@ impl MailSession for Session {
                 vec![]
             } else {
                 vec![RemoteFlag {
-                    uid: 5,
+                    uid: state.uid,
                     unread: true,
                 }]
             },
         })
     }
     fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError> {
+        let state = self.0.lock().unwrap();
+        let mut attachments = attachments();
+        let mut extra_html = String::new();
+        if let Some((count, size)) = state.many_images {
+            for index in 0..count {
+                let part = MANY_FIRST_PART + index;
+                attachments.push(Attachment {
+                    part: part.to_string(),
+                    filename: "Unnamed attachment".into(),
+                    content_type: "image/png".into(),
+                    size: size as u32,
+                    content_id: Some(format!("many{part}@pigeon.test")),
+                });
+                extra_html.push_str(&format!("<img src=\"cid:many{part}@pigeon.test\">"));
+            }
+        }
         Ok(uids
             .iter()
             .map(|uid| RemoteMessage {
@@ -98,14 +125,13 @@ impl MailSession for Session {
                     recipients: "mail@pigeon.test".into(),
                     subject: "Newsletter".into(),
                     body_text: "Synthetic newsletter".into(),
-                    body_html: Some(
+                    body_html: Some(format!(
                         "<p>Hello</p><img src=\"cid:logo@pigeon.test\" alt=\"logo\">\
                          <img src=\"cid:broken@pigeon.test\" alt=\"broken\">\
-                         <img src=\"https://tracker.example/pixel.gif\" alt=\"remote\">"
-                            .into(),
-                    ),
+                         <img src=\"https://tracker.example/pixel.gif\" alt=\"remote\">{extra_html}"
+                    )),
                     date: 1793005200,
-                    attachments: attachments(),
+                    attachments: attachments.clone(),
                     ..Default::default()
                 },
             })
@@ -117,11 +143,20 @@ impl MailSession for Session {
         attachment: &Attachment,
         max_bytes: usize,
     ) -> Result<Zeroizing<Vec<u8>>, MailError> {
+        let hook = self.0.lock().unwrap().during_fetch.take();
+        if let Some(hook) = hook {
+            hook();
+        }
         let mut state = self.0.lock().unwrap();
         assert_eq!(uid, 5);
-        assert!(max_bytes >= CANARY.len());
         state.fetches.push(attachment.part.clone());
+        let many = attachment.part.parse::<u32>().unwrap_or(0) >= MANY_FIRST_PART;
         match attachment.part.as_str() {
+            // Honest about its size, like the real adapter's metadata check.
+            _ if many => {
+                assert!(attachment.size as usize <= max_bytes);
+                Ok(Zeroizing::new(vec![7; attachment.size as usize]))
+            }
             "2" => Ok(Zeroizing::new(PNG.to_vec())),
             "3" => Ok(Zeroizing::new(CANARY.to_vec())),
             _ => Err(MailError::Imap {
@@ -137,24 +172,29 @@ struct Fixture {
     path: std::path::PathBuf,
     secrets: Arc<MemoryStore>,
     state: Arc<Mutex<State>>,
-    engine: MailEngine,
+    engine: Arc<MailEngine>,
     account: String,
     message: i64,
 }
 
 fn fixture() -> Fixture {
+    fixture_with(State::default())
+}
+
+fn fixture_with(initial: State) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("mail.db");
     let secrets = Arc::new(MemoryStore::new(KeyringState::Unlocked));
     let state = Arc::new(Mutex::new(State {
         validity: 9,
-        ..Default::default()
+        uid: 5,
+        ..initial
     }));
-    let engine = MailEngine::with_connector(
+    let engine = Arc::new(MailEngine::with_connector(
         path.clone(),
         secrets.clone(),
         Arc::new(Server(state.clone())),
-    );
+    ));
     let account = engine
         .add_account(
             AccountConfig {
@@ -186,11 +226,11 @@ fn fixture() -> Fixture {
 
 impl Fixture {
     fn reopen(&mut self) {
-        self.engine = MailEngine::with_connector(
+        self.engine = Arc::new(MailEngine::with_connector(
             self.path.clone(),
             self.secrets.clone(),
             Arc::new(Server(self.state.clone())),
-        );
+        ));
     }
     fn files_contain(&self, needle: &[u8]) -> bool {
         let mut found = false;
@@ -242,12 +282,7 @@ fn kept_download_survives_restart_offline_and_stays_encrypted() {
     let kept = f.engine.attachment(f.message, "3", false).unwrap();
     assert_eq!(kept.data.as_slice(), CANARY);
     assert!(kept.kept);
-    drop(f.engine);
-    f.engine = MailEngine::with_connector(
-        f.path.clone(),
-        f.secrets.clone(),
-        Arc::new(Server(f.state.clone())),
-    );
+    f.reopen();
     assert!(!f.files_contain(CANARY), "plaintext payload on disk");
 }
 
@@ -360,4 +395,94 @@ fn keep_setting_applies_to_embedded_images() {
     let document = f.engine.viewer_document(f.message).unwrap();
     assert_eq!(document.missing_inline, 1);
     assert!(document.html.contains("data:image/png;base64,"));
+}
+
+#[test]
+fn embedded_images_stop_downloading_at_the_document_budget() {
+    // Twelve referenced 6 MiB images: far more than one document may hold.
+    let size = 6 * 1024 * 1024;
+    let f = fixture_with(State {
+        many_images: Some((12, size)),
+        ..Default::default()
+    });
+    let document = f.engine.viewer_document(f.message).unwrap();
+    let state = f.state.lock().unwrap();
+    let many: Vec<_> = state
+        .fetches
+        .iter()
+        .filter(|part| part.parse::<u32>().unwrap_or(0) >= MANY_FIRST_PART)
+        .collect();
+    // Each download is checked against what is left, so the total fetched
+    // never exceeds the budget, not just the total placed in the document.
+    assert!(
+        many.len() * size <= MAX_INLINE_DOCUMENT_BYTES,
+        "{} images downloaded",
+        many.len()
+    );
+    assert_eq!(many.len(), MAX_INLINE_DOCUMENT_BYTES / size);
+    assert_eq!(
+        document.html.matches("data:image/png").count(),
+        many.len() + 1,
+        "the budgeted images plus the small logo"
+    );
+    // Images left out for size were never attempted, so are not "missing".
+    assert_eq!(document.missing_inline, 1, "only the broken part");
+}
+
+#[test]
+fn kept_and_session_images_count_toward_the_document_budget() {
+    let size = 6 * 1024 * 1024;
+    let mut f = fixture_with(State {
+        many_images: Some((12, size)),
+        ..Default::default()
+    });
+    // Download all twelve individually and keep them, then reopen offline.
+    for index in 0..12 {
+        let part = (MANY_FIRST_PART + index).to_string();
+        f.engine.attachment(f.message, &part, true).unwrap();
+    }
+    f.reopen();
+    f.state.lock().unwrap().offline = true;
+    let document = f.engine.viewer_document(f.message).unwrap();
+    // The logo was never kept, so offline only the kept images can show.
+    assert_eq!(
+        document.html.matches("data:image/png").count(),
+        MAX_INLINE_DOCUMENT_BYTES / size
+    );
+    assert_eq!(document.missing_inline, 2, "the logo and broken part");
+}
+
+#[test]
+fn keeping_refuses_a_part_whose_message_row_was_reused_meanwhile() {
+    let f = fixture();
+    let engine = f.engine.clone();
+    let state = f.state.clone();
+    let account = f.account.clone();
+    // While part 3 of UID 5 downloads, the server deletes UID 5 and delivers
+    // UID 6. SQLite reuses the freed row id for the new message.
+    f.state.lock().unwrap().during_fetch = Some(Box::new(move || {
+        state.lock().unwrap().deleted = true;
+        engine.sync_account(&account).unwrap();
+        {
+            let mut state = state.lock().unwrap();
+            state.deleted = false;
+            state.uid = 6;
+        }
+        engine.sync_account(&account).unwrap();
+    }));
+    let result = f.engine.attachment(f.message, "3", true);
+    let reused = f.engine.search(&SearchQuery::default()).unwrap().messages[0].id;
+    assert_eq!(reused, f.message, "scenario needs the row id to be reused");
+    assert!(
+        matches!(result, Err(MailError::NotFound)),
+        "the old message's bytes must not be kept"
+    );
+    assert_eq!(f.engine.stored_attachment_bytes().unwrap(), 0);
+    // The new message's own part 3 is fetched from the server, not the old bytes.
+    f.state.lock().unwrap().fetches.clear();
+    f.state.lock().unwrap().offline = true;
+    assert!(matches!(
+        f.engine.attachment(reused, "3", false),
+        Err(MailError::Connection)
+    ));
 }
