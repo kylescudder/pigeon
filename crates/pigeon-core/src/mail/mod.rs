@@ -133,6 +133,7 @@ pub struct Folder {
     pub account_id: String,
     pub name: String,
     pub kind: String,
+    pub delimiter: Option<String>,
     pub total: u64,
     pub cached: u64,
     pub unread: u64,

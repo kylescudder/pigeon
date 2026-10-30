@@ -123,6 +123,8 @@ const MIGRATIONS: &[&str] = &[
     CREATE TRIGGER mail_folders_ai AFTER INSERT ON mail_folders WHEN new.id IS NULL BEGIN
         UPDATE mail_folders SET id=lower(hex(randomblob(16))) WHERE rowid=new.rowid;
     END;",
+    // Filled in by the next sync of each folder; until then folders show flat.
+    "ALTER TABLE mail_folders ADD COLUMN delimiter TEXT;",
 ];
 
 impl Store {

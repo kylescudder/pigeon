@@ -50,6 +50,7 @@ export type MailFolder = {
   account_id: string;
   name: string;
   kind: string;
+  delimiter: string | null;
   total: number;
   cached: number;
   unread: number;

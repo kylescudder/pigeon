@@ -29,6 +29,9 @@ pub trait MailSession: Send {
 pub struct RemoteFolder {
     pub name: String,
     pub kind: String,
+    /// The server's hierarchy separator, such as "/" or ".". None for a flat
+    /// mailbox or a server that does not report one.
+    pub delimiter: Option<String>,
 }
 
 #[derive(Debug, Clone)]

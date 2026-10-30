@@ -153,6 +153,7 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
                 RemoteFolder {
                     name: folder.name().to_owned(),
                     kind: kind.into(),
+                    delimiter: folder.delimiter().map(str::to_owned),
                 }
             })
             .collect())

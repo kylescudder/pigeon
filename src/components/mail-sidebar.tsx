@@ -1,4 +1,12 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useState } from "react";
+import {
+  ancestorPaths,
+  buildFolderTree,
+  subtreeUnread,
+  type FolderNode,
+} from "../lib/folder-tree";
+import type { MailFolder } from "../lib/native";
 import { Icon, type IconName } from "./icon";
 import { useMail } from "./mail-provider";
 
@@ -72,20 +80,12 @@ export function MailSidebar() {
                 ) : null}
               </Link>
               {accountId === account.id && (
-                <div className="sidebar-folders">
-                  {folders.map((folder) => (
-                    <Link
-                      to="/mail"
-                      key={folder.id}
-                      search={{ account: account.id, folder: folder.id }}
-                      className={`folder-link${folderId === folder.id ? " selected" : ""}`}
-                      title={folder.name}
-                    >
-                      <Icon name={folderIcon(folder.kind)} size={14} />
-                      <span>{folder.name}</span>
-                      {folder.unread > 0 && <small>{folder.unread}</small>}
-                    </Link>
-                  ))}
+                <div className="sidebar-folders" role="tree">
+                  <FolderTree
+                    accountId={account.id}
+                    folders={folders}
+                    selected={folderId}
+                  />
                 </div>
               )}
             </div>
@@ -127,4 +127,76 @@ export function MailSidebar() {
       )}
     </div>
   );
+}
+
+function FolderTree({
+  accountId,
+  folders,
+  selected,
+}: {
+  accountId: string;
+  folders: MailFolder[];
+  selected: string | undefined;
+}) {
+  const tree = buildFolderTree(folders);
+  // In memory only: folder names never go to persistent browser storage.
+  const [toggled, setToggled] = useState(new Map<string, boolean>());
+  const opened = new Set(ancestorPaths(tree, selected));
+  const isOpen = (path: string) => toggled.get(path) ?? opened.has(path);
+  const toggle = (path: string) =>
+    setToggled((previous) => new Map(previous).set(path, !isOpen(path)));
+  const render = (node: FolderNode, depth: number) => {
+    const open = node.children.length > 0 && isOpen(node.path);
+    const unread = open ? (node.folder?.unread ?? 0) : subtreeUnread(node);
+    const content = (
+      <>
+        <Icon name={folderIcon(node.folder?.kind ?? "other")} size={14} />
+        <span>{node.label}</span>
+        {unread > 0 && <small>{unread.toLocaleString()}</small>}
+      </>
+    );
+    return (
+      <div
+        key={node.path}
+        role="treeitem"
+        aria-expanded={node.children.length ? open : undefined}
+        aria-selected={!!node.folder && node.folder.id === selected}
+      >
+        <div className="folder-row" style={{ paddingLeft: depth * 12 }}>
+          {node.children.length ? (
+            <button
+              type="button"
+              className={`folder-toggle${open ? " open" : ""}`}
+              aria-label={`${open ? "Collapse" : "Expand"} ${node.label}`}
+              onClick={() => toggle(node.path)}
+            >
+              <Icon name="chevron" size={11} />
+            </button>
+          ) : (
+            <span className="folder-toggle" />
+          )}
+          {node.folder ? (
+            <Link
+              to="/mail"
+              search={{ account: accountId, folder: node.folder.id }}
+              className={`folder-link${node.folder.id === selected ? " selected" : ""}`}
+              title={node.folder.name}
+            >
+              {content}
+            </Link>
+          ) : (
+            <span className="folder-link folder-placeholder" title={node.path}>
+              {content}
+            </span>
+          )}
+        </div>
+        {open && (
+          <div role="group">
+            {node.children.map((child) => render(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+  return <>{tree.map((node) => render(node, 0))}</>;
 }

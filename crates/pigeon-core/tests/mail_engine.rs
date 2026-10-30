@@ -35,6 +35,7 @@ impl MailSession for ChangingSession {
         Ok(vec![RemoteFolder {
             name: "INBOX".into(),
             kind: "inbox".into(),
+            delimiter: Some("/".into()),
         }])
     }
     fn snapshot(&mut self, _: &str) -> Result<FolderSnapshot, MailError> {
@@ -239,6 +240,7 @@ impl MailSession for TestSession {
         Ok(vec![RemoteFolder {
             name: "INBOX".into(),
             kind: "inbox".into(),
+            delimiter: Some("/".into()),
         }])
     }
     fn snapshot(&mut self, _folder: &str) -> Result<FolderSnapshot, MailError> {
@@ -386,6 +388,7 @@ fn credential_reverification_and_local_removal_do_not_damage_cached_mail_on_fail
     engine.sync_account(&account.id).unwrap();
     let folder_id = engine.folders().unwrap()[0].id.clone();
     assert!(!folder_id.is_empty());
+    assert_eq!(engine.folders().unwrap()[0].delimiter.as_deref(), Some("/"));
     engine.sync_account(&account.id).unwrap();
     assert_eq!(engine.folders().unwrap()[0].id, folder_id);
     assert!(matches!(
@@ -692,10 +695,12 @@ fn one_unparseable_message_does_not_block_later_mail_or_other_folders() {
                 RemoteFolder {
                     name: "INBOX".into(),
                     kind: "inbox".into(),
+                    delimiter: Some("/".into()),
                 },
                 RemoteFolder {
                     name: "Archive".into(),
                     kind: "archive".into(),
+                    delimiter: Some("/".into()),
                 },
             ])
         }

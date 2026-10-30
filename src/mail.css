@@ -41,7 +41,12 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .account-link-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.account-unread { margin-left: auto; font-size: 10px; color: var(--muted); }
 .account-avatar { width: 28px; height: 28px; border-radius: 8px; display: inline-grid; place-items: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
 .avatar-0 { color: #c0caff; background: #465787; }.avatar-1 { color: #c1e5dc; background: #365e59; }.avatar-2 { color: #e7d0f2; background: #665178; }.avatar-3 { color: #f1dbb4; background: #716043; }
-.sidebar-folders { padding: 5px 0 7px 21px; }.folder-link { display: flex; gap: 8px; align-items: center; min-height: 29px; padding: 5px 9px; font-size: 10px; border-radius: 5px; color: var(--faint); }.folder-link > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }.folder-link > small { margin-left: auto; }.folder-link.selected { color: var(--accent); background: var(--accent-subtle); }
+.sidebar-folders { padding: 5px 0 7px 6px; }.folder-link { display: flex; gap: 8px; align-items: center; min-height: 29px; padding: 5px 9px; font-size: 10px; border-radius: 5px; color: var(--faint); }.folder-link > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }.folder-link > small { margin-left: auto; }.folder-link.selected { color: var(--accent); background: var(--accent-subtle); }
+.folder-row { display: flex; align-items: center; gap: 2px; }.folder-row > .folder-link { flex: 1; min-width: 0; }
+.folder-toggle { flex-shrink: 0; width: 16px; height: 22px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--faint); cursor: pointer; }
+span.folder-toggle { cursor: default; }button.folder-toggle:hover { background: var(--hover); color: var(--text); }
+.folder-toggle svg { transition: transform .12s ease; }.folder-toggle.open svg { transform: rotate(90deg); }
+.folder-placeholder { cursor: default; }.folder-placeholder:hover { background: none; color: var(--faint); }
 .saved-searches { margin-top: 25px; }.saved-search-link { display: flex; gap: 9px; align-items: center; color: var(--muted); padding: 8px 11px; border-radius: 6px; font-size: 11px; }.saved-search-link > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The estate overview uses real account/cache counts, never sample metrics. */

@@ -34,8 +34,8 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
 impl MailEngine {
     pub fn folders(&self) -> Result<Vec<Folder>, MailError> {
         self.with_store(|store| {
-            let mut statement = store.connection().prepare("SELECT f.account,f.name,f.kind,f.total,count(m.id),coalesce(sum(m.unread),0),f.id FROM mail_folders f LEFT JOIN messages m INDEXED BY messages_folder_counts ON m.account=f.account AND m.folder=f.name AND m.uid_validity=f.uid_validity GROUP BY f.account,f.name ORDER BY f.account,CASE WHEN f.kind='inbox' THEN 0 ELSE 1 END,f.name").map_err(storage_error)?;
-            statement.query_map([], |row| Ok(Folder { id: row.get(6)?, account_id: row.get(0)?, name: row.get(1)?, kind: row.get(2)?, total: row.get::<_,i64>(3)? as u64, cached: row.get::<_,i64>(4)? as u64, unread: row.get::<_,i64>(5)? as u64 })).map_err(storage_error)?.collect::<rusqlite::Result<_>>().map_err(storage_error)
+            let mut statement = store.connection().prepare("SELECT f.account,f.name,f.kind,f.total,count(m.id),coalesce(sum(m.unread),0),f.id,f.delimiter FROM mail_folders f LEFT JOIN messages m INDEXED BY messages_folder_counts ON m.account=f.account AND m.folder=f.name AND m.uid_validity=f.uid_validity GROUP BY f.account,f.name ORDER BY f.account,CASE WHEN f.kind='inbox' THEN 0 ELSE 1 END,f.name").map_err(storage_error)?;
+            statement.query_map([], |row| Ok(Folder { id: row.get(6)?, account_id: row.get(0)?, name: row.get(1)?, kind: row.get(2)?, delimiter: row.get(7)?, total: row.get::<_,i64>(3)? as u64, cached: row.get::<_,i64>(4)? as u64, unread: row.get::<_,i64>(5)? as u64 })).map_err(storage_error)?.collect::<rusqlite::Result<_>>().map_err(storage_error)
         })
     }
     pub(super) fn prepare_folder(
@@ -46,7 +46,7 @@ impl MailEngine {
     ) -> Result<HashSet<u32>, MailError> {
         self.with_store(|store| {
             let db = store.connection();
-            db.execute("INSERT INTO mail_folders(account,name,kind,uid_validity,total) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(account,name) DO UPDATE SET kind=excluded.kind,total=excluded.total", params![id,folder.name,folder.kind,snapshot.uid_validity,snapshot.messages.len() as i64]).map_err(storage_error)?;
+            db.execute("INSERT INTO mail_folders(account,name,kind,uid_validity,total,delimiter) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(account,name) DO UPDATE SET kind=excluded.kind,total=excluded.total,delimiter=excluded.delimiter", params![id,folder.name,folder.kind,snapshot.uid_validity,snapshot.messages.len() as i64,folder.delimiter]).map_err(storage_error)?;
             let known: HashSet<u32> = db.prepare("SELECT uid FROM messages WHERE account=?1 AND folder=?2 AND uid_validity=?3").map_err(storage_error)?.query_map(params![id,folder.name,snapshot.uid_validity], |row| row.get(0)).map_err(storage_error)?.collect::<rusqlite::Result<_>>().map_err(storage_error)?;
             let cached = snapshot.messages.iter().filter(|message| known.contains(&message.uid)).count();
             db.execute("UPDATE mail_accounts SET sync_folder=?2,sync_cached=?3,sync_total=?4 WHERE id=?1", params![id,folder.name,cached as i64,snapshot.messages.len() as i64]).map_err(storage_error)?;

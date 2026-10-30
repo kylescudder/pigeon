@@ -25,10 +25,12 @@ impl MailSession for CorpusSession {
             RemoteFolder {
                 name: "INBOX".into(),
                 kind: "inbox".into(),
+                delimiter: Some("/".into()),
             },
             RemoteFolder {
                 name: "Archive".into(),
                 kind: "archive".into(),
+                delimiter: Some("/".into()),
             },
         ])
     }

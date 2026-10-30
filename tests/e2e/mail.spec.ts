@@ -261,3 +261,45 @@ test("locked store hides decrypted mail, unlock restores it, and invalid searche
   await expect(page.getByRole("button", { name: /Invoice 4471/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Release planning/ })).toHaveCount(0);
 });
+
+test("nested folders show as a collapsible tree", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith("narrow"), "the narrow sidebar shows accounts only");
+  await page.addInitScript(() => {
+    const folder = (id: string, name: string, unread: number, delimiter: string | null = "/") => ({ id, account_id: "acc-1", name, kind: name === "INBOX" ? "inbox" : "other", delimiter, total: unread, cached: unread, unread });
+    if (!localStorage.getItem("pigeon-fixture-state")) localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{ id: "acc-1", config: { name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993, username: "mail@example.test", security: "tls" }, status: "idle", error: null, last_synced: 1793008800, sync_folder: null, sync_cached: 0, sync_total: 0 }],
+      folders: [
+        folder("f-inbox", "INBOX", 1),
+        folder("f-gigs", "INBOX/Gigs", 2),
+        folder("f-polaris", "INBOX/Gigs/Polaris", 3),
+        // The parent is unselectable on the server, so it is not listed.
+        folder("f-2024", "Projects.2024", 4, "."),
+        folder("f-flat", "Notes/Old", 0, null),
+      ],
+      saved_searches: [],
+    }));
+  });
+  await page.goto("/mail?account=acc-1&view=inbox");
+  const tree = page.getByRole("tree");
+  await expect(tree.getByRole("link", { name: /^INBOX/ })).toBeVisible();
+  await expect(tree.getByRole("link", { name: /Gigs/ })).toHaveCount(0);
+  // Collapsed parents add up their children's unread mail.
+  await expect(tree.getByRole("link", { name: "INBOX 6", exact: true })).toBeVisible();
+  await tree.getByRole("button", { name: "Expand INBOX", exact: true }).click();
+  await expect(tree.getByRole("link", { name: "INBOX 1", exact: true })).toBeVisible();
+  await expect(tree.getByRole("link", { name: "Gigs 5", exact: true })).toBeVisible();
+  await tree.getByRole("button", { name: "Expand Gigs", exact: true }).click();
+  await tree.getByRole("link", { name: "Polaris 3", exact: true }).click();
+  await expect(page).toHaveURL(/folder=f-polaris/);
+  await expect(tree.getByText("Projects", { exact: true })).toBeVisible();
+  await tree.getByRole("button", { name: "Expand Projects", exact: true }).click();
+  await expect(tree.getByRole("link", { name: "2024 4", exact: true })).toBeVisible();
+  // A folder synced before separators were stored stays flat.
+  await expect(tree.getByRole("link", { name: "Notes/Old", exact: true })).toBeVisible();
+  // Reloading a nested folder opens the path to it.
+  await page.reload();
+  await expect(page.getByRole("tree").getByRole("link", { name: "Polaris 3", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("folder-tree.png") });
+  await tree.getByRole("button", { name: "Collapse INBOX", exact: true }).click();
+  await expect(tree.getByRole("link", { name: /Polaris/ })).toHaveCount(0);
+});
