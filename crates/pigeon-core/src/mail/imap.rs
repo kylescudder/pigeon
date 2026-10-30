@@ -8,7 +8,7 @@ use ::imap::types::NameAttribute;
 use ::imap::{Client, Session};
 use imap_proto::types::{BodyStructure, MessageSection, SectionPath};
 use mailparse::MailHeaderMap;
-use native_tls::{Certificate, Protocol, TlsConnector, TlsStream};
+use native_tls::{Certificate, Protocol, TlsConnector};
 use std::collections::{BTreeMap, HashMap};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -51,12 +51,16 @@ impl MailConnector for ImapConnector {
                     .connect(&config.host, stream)
                     .map_err(|_| MailError::Tls)?;
                 let mut client = Client::new(stream);
-                client.read_greeting().map_err(|_| MailError::Connection)?;
+                client
+                    .read_greeting()
+                    .map_err(|error| imap_error("reading the server greeting", error))?;
                 client
             }
             TransportSecurity::StartTls => {
                 let mut client = Client::new(stream);
-                client.read_greeting().map_err(|_| MailError::Connection)?;
+                client
+                    .read_greeting()
+                    .map_err(|error| imap_error("reading the server greeting", error))?;
                 client
                     .secure(&config.host, &tls)
                     .map_err(|_| MailError::Tls)?
@@ -67,22 +71,52 @@ impl MailConnector for ImapConnector {
         let password = std::str::from_utf8(password).map_err(|_| {
             MailError::InvalidConfig("the account password is not valid text".into())
         })?;
-        let session = client
-            .login(&config.username, password)
-            .map_err(|_| MailError::Authentication)?;
+        let session =
+            client
+                .login(&config.username, password)
+                .map_err(|(error, _)| match error {
+                    ::imap::Error::No(_) | ::imap::Error::Bad(_) => MailError::Authentication,
+                    other => imap_error("authenticating", other),
+                })?;
         Ok(Box::new(ImapSession { session }))
     }
 }
 
-struct ImapSession {
-    session: Session<TlsStream<TcpStream>>,
+// Never display/debug-format the library error: NO/BAD and Parse variants can
+// contain arbitrary server responses, including private message content.
+fn imap_error(operation: &'static str, error: ::imap::Error) -> MailError {
+    use ::imap::Error;
+    let reason = match error {
+        Error::No(_) => "the server rejected the command (IMAP NO)",
+        Error::Bad(_) => "the server rejected the command (IMAP BAD)",
+        Error::ConnectionLost => "the server closed the connection",
+        Error::Io(error) => match error.kind() {
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
+                "the server response timed out"
+            }
+            std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::BrokenPipe => "the server closed the connection",
+            _ => "a network read or write failed",
+        },
+        Error::Parse(_) => "the server response could not be parsed by this IMAP client",
+        Error::Validate(_) => "this IMAP client could not encode the command arguments",
+        Error::Tls(_) | Error::TlsHandshake(_) => "the encrypted connection failed",
+        _ => "the IMAP operation failed",
+    };
+    MailError::Imap { operation, reason }
 }
-impl MailSession for ImapSession {
+
+struct ImapSession<T: std::io::Read + std::io::Write> {
+    session: Session<T>,
+}
+impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
     fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
         let folders = self
             .session
             .list(None, Some("*"))
-            .map_err(|_| MailError::Connection)?;
+            .map_err(|error| imap_error("listing folders", error))?;
         Ok(folders
             .iter()
             .filter(|folder| !folder.attributes().contains(&NameAttribute::NoSelect))
@@ -120,14 +154,14 @@ impl MailSession for ImapSession {
         let mailbox = self
             .session
             .examine(folder)
-            .map_err(|_| MailError::Connection)?;
+            .map_err(|error| imap_error("opening a folder read-only", error))?;
         let uid_validity = mailbox.uid_validity.ok_or(MailError::Protocol)?;
         let mut messages = Vec::new();
         if mailbox.exists > 0 {
             let flags = self
                 .session
                 .uid_fetch("1:*", "(UID FLAGS)")
-                .map_err(|_| MailError::Connection)?;
+                .map_err(|error| imap_error("reading message identifiers and flags", error))?;
             for message in flags.iter() {
                 if message.flags().contains(&Flag::Deleted) {
                     continue;
@@ -154,7 +188,7 @@ impl MailSession for ImapSession {
                 uid_set(uids),
                 "(UID BODY.PEEK[HEADER] BODYSTRUCTURE INTERNALDATE)",
             )
-            .map_err(|_| MailError::Connection)?;
+            .map_err(|error| imap_error("reading message headers and MIME structure", error))?;
         let mut drafts = HashMap::<u32, Draft>::new();
         let mut groups = BTreeMap::<Vec<u32>, Vec<u32>>::new();
         for item in fetched.iter() {
@@ -229,7 +263,7 @@ impl MailSession for ImapSession {
             let responses = self
                 .session
                 .uid_fetch(uid_set(&part_uids), &query)
-                .map_err(|_| MailError::Connection)?;
+                .map_err(|error| imap_error("downloading message text", error))?;
             let mut received = std::collections::HashSet::new();
             for response in responses.iter() {
                 let uid = response.uid.ok_or(MailError::Protocol)?;
@@ -397,4 +431,67 @@ fn collect_parts(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+
+    // Real adapter calls over a disposable server connection. This exercises
+    // response parsing and error translation, not a mock of that translation.
+    #[test]
+    fn folder_errors_distinguish_rejection_from_disconnect_without_echoing_server_data() {
+        for (reply, expected) in [
+            (Some("NO"), "rejected"),
+            (Some("BAD"), "rejected"),
+            (Some("MALFORMED"), "parsed"),
+            (Some("TIMEOUT"), "timed out"),
+            (None, "closed"),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.write_all(b"* OK Test IMAP\r\n").unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                for command in ["LOGIN", "LIST"] {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    let mut fields = line.split_whitespace();
+                    let tag = fields.next().unwrap();
+                    assert_eq!(fields.next().unwrap(), command);
+                    if command == "LOGIN" {
+                        writeln!(stream, "{tag} OK authenticated\r").unwrap();
+                    } else if reply == Some("TIMEOUT") {
+                        std::thread::sleep(Duration::from_millis(1200));
+                    } else if let Some(status) = reply {
+                        writeln!(stream, "{tag} {status} PRIVATE_RESPONSE_CANARY\r").unwrap();
+                    }
+                }
+            });
+            let stream = TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_millis(500)))
+                .unwrap();
+            let mut client = Client::new(stream);
+            client.read_greeting().unwrap();
+            let session = client
+                .login("synthetic-user", "synthetic-password")
+                .map_err(|(e, _)| e)
+                .unwrap();
+            let error = ImapSession { session }.folders().unwrap_err().to_string();
+            server.join().unwrap();
+            assert!(
+                error.contains("listing folders"),
+                "missing operation: {error}"
+            );
+            assert!(
+                error.contains(expected),
+                "missing failure category: {error}"
+            );
+            assert!(!error.contains("PRIVATE_RESPONSE_CANARY"));
+        }
+    }
 }

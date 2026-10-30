@@ -147,6 +147,11 @@ pub enum MailError {
     Connection,
     #[error("the mail server returned an incomplete or unsupported response")]
     Protocol,
+    #[error("while {operation}: {reason}")]
+    Imap {
+        operation: &'static str,
+        reason: &'static str,
+    },
     #[error("the desktop keyring is locked or unavailable; unlock it before continuing")]
     Locked,
     #[error("encrypted mail storage is unavailable: {0}")]

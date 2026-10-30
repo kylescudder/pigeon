@@ -23,6 +23,7 @@ impl From<MailError> for MailApiError {
             MailError::Tls => "tls",
             MailError::Connection => "connection",
             MailError::Protocol => "protocol",
+            MailError::Imap { .. } => "imap",
             MailError::Locked => "locked",
             MailError::Storage(_) => "storage",
             MailError::NotFound => "not_found",

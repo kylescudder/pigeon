@@ -110,3 +110,13 @@ cargo test --release --locked -p pigeon-core --test search_benchmark -- --ignore
 Run this milestone on the user's x86_64 NixOS desktop: connect the actual provider, observe initial coverage and errors, read/search after quitting and reopening offline, confirm filters/saved searches, open a real formatted message, run the expanded isolation probe, then exercise background reopen and both Wayland/X11 where available. No actual user credentials or private mail were used during development.
 
 SMTP/composing/drafts, mailbox mutations and the durable offline action queue, attachment download/export, remote/embedded-image controls, backups/recovery export, OAuth, notifications, Home Manager startup configuration, and the five-design picker remain later work in the agreed product plan. This receiving build is ready for testing, not a complete daily-client replacement.
+
+## Partial-sync diagnosis, 2026-10-30
+
+The user reported that Refresh briefly resumes work and then stops with the same generic connection error. The cause of that provider-side failure has not yet been reproduced locally. A separate, confirmed diagnostic defect hid the distinction: established-session IMAP NO/BAD replies and response parsing errors were all translated to `Connection`.
+
+The adapter now reports the operation (folder listing/open, UID/flags, headers/MIME structure, or text download) and a safe failure category: rejection, parsing, timeout, closed connection, or other transport failure. It never formats raw library errors, which can include private server responses or message content. Failed authentication remains distinct; interrupted authentication no longer falsely reports a rejected password. TLS verification, sync batching, and committed-cache recovery are unchanged.
+
+A disposable scripted server regression exercises the actual adapter's LIST response path for NO, BAD, malformed response, timeout, and disconnect. It checks both useful detail and omission of a synthetic private-response canary. This identifies diagnostic loss, not the user's underlying sync failure. The existing real Dovecot and interrupted-cache recovery tests are also rerun. Local evidence is under `evidence/sync-diagnostics/` (ignored).
+
+To collect the next signal, quit the running background instance, pull the update, launch with `nix run`, and Refresh the affected account. Share the new error text, whether its cached count advances between retries, and the provider/server name; omit credentials and message content. No extra wire logging is needed.
