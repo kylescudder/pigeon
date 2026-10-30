@@ -17,9 +17,10 @@ use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 
+mod desktop;
 mod mail;
 
-const MAIN: &str = "main";
+pub(crate) const MAIN: &str = "main";
 const DIAGNOSE_SYNC: &str = "--diagnose-sync";
 const VIEWER_SCHEME: &str = "pigeon-viewer";
 const VIEWER_PREFIX: &str = "viewer-";
@@ -53,7 +54,7 @@ struct FoundationReport {
 
 /// Defence in depth for Tauri's documented Linux limitation: capability checks
 /// cannot tell frames apart, so every command also checks the calling webview.
-fn require_main(webview: &tauri::Webview) -> Result<(), String> {
+pub(crate) fn require_main(webview: &tauri::Webview) -> Result<(), String> {
     if webview.label() == MAIN {
         Ok(())
     } else {
@@ -414,6 +415,8 @@ async function attempt(name, cmd, args) {
   await attempt("viewer_probe_reached", "viewer_probe_reached");
   await attempt("foundation_report", "foundation_report");
   await attempt("quit_app", "quit_app");
+  await attempt("desktop settings", "desktop_settings");
+  await attempt("set desktop settings", "set_desktop_settings", { settings: { closeToBackground: false } });
   await attempt("core window close", "plugin:window|close", { label: "main" });
   await attempt("mail state", "mail_state");
   await attempt("search mail", "search_mail", { query: { text: "" }, requestId: "probe" });
@@ -537,11 +540,10 @@ pub fn run() {
     }
     tauri::Builder::default()
         // Relaunching from the desktop launcher reopens the running instance.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window(MAIN) {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+        // A second `--background` start (login racing a running instance) stays hidden.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == desktop::BACKGROUND) {
+                desktop::show_main(app);
             }
         }))
         .plugin(tauri_plugin_opener::init())
@@ -557,14 +559,31 @@ pub fn run() {
                 Arc::from(secret_store()),
             ));
             app.manage(engine.clone());
+            app.manage(desktop::DesktopState::load(app.handle())?);
             if std::env::var_os("PIGEON_SELFTEST").is_some() {
                 start_selftest(app.handle().clone());
             } else if std::env::args().any(|arg| arg == DIAGNOSE_SYNC) {
                 start_sync_diagnostic(app.handle().clone(), engine);
             } else {
+                // The window starts hidden so a login start never flashes it.
+                if !std::env::args().any(|arg| arg == desktop::BACKGROUND) {
+                    desktop::show_main(app.handle());
+                }
                 // A single background coordinator keeps account refreshes from
                 // multiplying when windows or routes mount. Network work never
                 // holds the store mutex; the interface can keep reading/searching.
+                let operations = engine.clone();
+                // One worker runs queued server changes in order. It idles
+                // while the store is locked and wakes when work is queued.
+                std::thread::spawn(move || {
+                    loop {
+                        match operations.run_next_operation() {
+                            Ok(true) => {}
+                            Ok(false) => operations.wait_for_operations(Duration::from_secs(1)),
+                            Err(_) => std::thread::sleep(Duration::from_secs(2)),
+                        }
+                    }
+                });
                 std::thread::spawn(move || {
                     loop {
                         if let Ok(accounts) = engine.accounts() {
@@ -579,12 +598,18 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the main window keeps Pigeon running in the background.
+            // Closing the main window keeps Pigeon running in the background
+            // unless the user turned that off; Quit Pigeon always exits.
             if let WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == MAIN
             {
-                let _ = window.hide();
-                api.prevent_close();
+                let app = window.app_handle();
+                if app.state::<desktop::DesktopState>().close_to_background() {
+                    let _ = window.hide();
+                    api.prevent_close();
+                } else {
+                    app.exit(0);
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -593,6 +618,8 @@ pub fn run() {
             open_viewer_probe,
             viewer_probe_reached,
             quit_app,
+            desktop::desktop_settings,
+            desktop::set_desktop_settings,
             mail::mail_state,
             mail::add_mail_account,
             mail::sync_mail_account,

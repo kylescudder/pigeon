@@ -7,6 +7,7 @@ A modern, local-first IMAP/SMTP email client for NixOS. It uses an encrypted loc
 - [Product and delivery plan](docs/product-plan.md)
 - [Receiving/search implementation and verification](docs/mail-engine.md)
 - [Milestone 0 foundation spike](docs/foundation-spike.md)
+- [Desktop integration and NixOS checklist](docs/desktop.md)
 
 ## Install on NixOS
 
@@ -34,6 +35,54 @@ use SSH; Nix uses your SSH agent to fetch it.
 Rebuild, then start **Pigeon** from your launcher or run `pigeon`. Update with
 `nix flake update pigeon` and rebuild. To run it once without installing:
 `nix run git+ssh://git@github.com/kylescudder/pigeon`.
+
+### Home Manager: settings and starting at login
+
+The flake provides a Home Manager module for non-secret settings and for
+starting Pigeon in the background at login. Passwords and the database key stay
+in the desktop keyring; the module has no options for them.
+
+```nix
+{
+  inputs.pigeon = {
+    url = "git+ssh://git@github.com/kylescudder/pigeon";
+    # The flake's own home-manager input is only for its checks.
+    inputs.home-manager.follows = "home-manager";
+  };
+
+  # In the NixOS configuration, beside home-manager.users.<you>:
+  home-manager.sharedModules = [ inputs.pigeon.homeManagerModules.default ];
+
+  # In your Home Manager configuration (the package is installed for you):
+  programs.pigeon = {
+    enable = true;
+    settings = {
+      closeToBackground = true; # closing the window keeps syncing; Quit exits
+    };
+    autostart.enable = true; # systemd user service pigeon.service
+  };
+}
+```
+
+Settings written this way show as managed by Home Manager in the app. Set
+`settings = null` to change them in the app instead.
+
+The service starts with `graphical-session.target`. GNOME reaches that target.
+Hyprland started without UWSM does not, so start the service from Hyprland
+once the session environment is available to systemd:
+
+```lua
+hl.on('hyprland.start', function()
+    hl.exec_cmd('dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP && systemctl --user start pigeon.service')
+end)
+```
+
+Starting Pigeon from the launcher while it runs in the background opens the
+existing window. **Quit Pigeon** in the sidebar exits, and the service stays
+stopped until the next login.
+
+Without Home Manager, start `pigeon --background` from your compositor's
+autostart instead.
 
 ## Try it from a checkout
 
