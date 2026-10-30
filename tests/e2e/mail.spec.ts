@@ -119,6 +119,7 @@ test.beforeEach(async ({ page }) => {
               write(state);
               return;
             case "remove_mail_account":
+              await new Promise((done) => setTimeout(done, 1500));
               state.accounts = [];
               state.folders = [];
               write(state);
@@ -223,6 +224,8 @@ test("connect an account, recover from sign-in failure, read and search cached m
   await expect(page.getByRole("dialog", { name: "Manage account", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Remove from this device", exact: true }).click();
   await page.getByRole("button", { name: "Remove account", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "2 cached messages left to remove." })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your inbox starts here.", exact: true })).toBeVisible();
 });

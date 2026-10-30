@@ -40,6 +40,11 @@ export function ManageAccount({
     remove.reset();
   }, [account?.id]);
   const pending = update.isPending || remove.isPending;
+  // The mail state is recounted every few seconds, so this falls as removal
+  // works through the account's batches.
+  const remaining = (mail.state?.folders ?? [])
+    .filter((folder) => folder.account_id === account?.id)
+    .reduce((sum, folder) => sum + folder.cached, 0);
   return (
     <Modal
       open={!!account}
@@ -60,6 +65,13 @@ export function ManageAccount({
                 This removes the account’s cached mail and saved credentials
                 from this device. Mail on your server stays untouched.
               </p>
+              {remove.isPending && (
+                <p role="status" className="removal-note">
+                  {remaining > 0
+                    ? `${remaining.toLocaleString()} cached messages left to remove.`
+                    : "Removing saved credentials…"}
+                </p>
+              )}
               {remove.isError && (
                 <p role="alert" className="mail-inline-error">
                   {errorMessage(remove.error)}
