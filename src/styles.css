@@ -297,6 +297,7 @@ kbd {
 .icon-button {
   width: 28px;
   height: 28px;
+  padding: 0;
   display: grid;
   place-items: center;
   border-radius: 6px;
@@ -312,6 +313,7 @@ kbd {
   place-items: center;
   width: 27px;
   height: 27px;
+  padding: 0;
   background: var(--control);
   border: 1px solid var(--line-strong);
   border-radius: 8px;

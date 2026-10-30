@@ -249,3 +249,32 @@ test("native results, retry, and viewer failures remain visible and actionable",
     "Quit blocked in frontend test",
   );
 });
+
+test("icon-only buttons centre their icons", async ({ page }) => {
+  await page.goto("/");
+  const buttons = page.locator("button:has(> svg:only-child)");
+  await expect(page.locator(".workspace-avatar")).toBeVisible();
+  const offsets = await buttons.evaluateAll((elements) =>
+    elements
+      .filter((element) => {
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && box.width <= 48 && !element.textContent?.trim();
+      })
+      .map((element) => {
+        const box = element.getBoundingClientRect();
+        const icon = element.querySelector("svg")!.getBoundingClientRect();
+        return {
+          label: element.getAttribute("aria-label"),
+          x: icon.left + icon.width / 2 - (box.left + box.width / 2),
+          y: icon.top + icon.height / 2 - (box.top + box.height / 2),
+        };
+      }),
+  );
+  expect(offsets.map((offset) => offset.label)).toContain(
+    "About this local workspace",
+  );
+  for (const offset of offsets) {
+    expect(Math.abs(offset.x), `${offset.label} x`).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(offset.y), `${offset.label} y`).toBeLessThanOrEqual(0.5);
+  }
+});
