@@ -319,6 +319,7 @@ fn config() -> AccountConfig {
         username: "mail@pigeon.test".into(),
         security: TransportSecurity::Tls,
         ca_certificate: None,
+        sending: Default::default(),
     }
 }
 

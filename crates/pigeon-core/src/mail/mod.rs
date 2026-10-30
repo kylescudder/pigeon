@@ -16,9 +16,17 @@ use crate::unlock::{UnlockOutcome, open_store};
 mod cache;
 mod diagnostics;
 mod imap;
+mod net;
 pub mod operations;
 mod query;
+mod sending;
+pub mod smtp;
 pub mod source;
+pub use sending::{
+    Draft, DraftInput, OutboxItem, SendDecision, SendState, SendStatus, SendingSettings,
+    SentCopyStatus,
+};
+
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
 const MAX_PARSE_FAILURES: usize = 20;
 const REMOVAL_BATCH: i64 = 500;
@@ -40,6 +48,9 @@ pub struct AccountConfig {
     pub security: TransportSecurity,
     /// Optional additional trust root. Certificate validation remains enabled.
     pub ca_certificate: Option<String>,
+    /// Outgoing server and identity. Absent in accounts added before sending.
+    #[serde(default)]
+    pub sending: SendingSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,6 +194,14 @@ pub enum MailError {
     InvalidSearch(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("while {operation}: {reason}")]
+    Smtp {
+        operation: &'static str,
+        /// A 4xx reply: the same request may succeed later.
+        temporary: bool,
+        /// Our description and the reply code; never the server's text.
+        reason: String,
+    },
 }
 
 struct FetchContext<'a> {
@@ -199,6 +218,7 @@ pub struct MailEngine {
     path: PathBuf,
     secrets: Arc<dyn SecretStore>,
     connector: Arc<dyn source::MailConnector>,
+    smtp: Arc<dyn smtp::SmtpTransport>,
     store: Mutex<Option<Store>>,
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -270,6 +290,7 @@ impl MailEngine {
     }
 
     pub fn remove_account(&self, id: &str) -> Result<(), MailError> {
+        self.check_no_unsent(id)?;
         {
             let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
             if active.contains_key(id) {
@@ -308,6 +329,11 @@ impl MailEngine {
                 .connection()
                 .execute("DELETE FROM mail_accounts WHERE id=?1", [id])
                 .map_err(storage_error)?;
+            // Only settled messages remain; unsent ones blocked removal above.
+            store
+                .connection()
+                .execute("DELETE FROM outbox WHERE account=?1", [id])
+                .map_err(storage_error)?;
             Ok(())
         })
     }
@@ -319,15 +345,44 @@ impl MailEngine {
         secrets: Arc<dyn SecretStore>,
         connector: Arc<dyn source::MailConnector>,
     ) -> Self {
+        Self::with_transports(
+            path,
+            secrets,
+            connector,
+            Arc::new(smtp::SmtpClient::default()),
+        )
+    }
+    /// The real IMAP connector with a chosen SMTP transport.
+    pub fn with_smtp(
+        path: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+        smtp: Arc<dyn smtp::SmtpTransport>,
+    ) -> Self {
+        Self::with_transports(path, secrets, Arc::new(imap::ImapConnector), smtp)
+    }
+    pub fn with_transports(
+        path: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+        connector: Arc<dyn source::MailConnector>,
+        smtp: Arc<dyn smtp::SmtpTransport>,
+    ) -> Self {
+        let mut runtime = operations::Runtime::default();
+        for handler in [
+            Arc::new(sending::SubmitHandler) as Arc<dyn operations::OperationHandler>,
+            Arc::new(sending::SentCopyHandler),
+        ] {
+            runtime.handlers.insert(handler.kind(), handler);
+        }
         Self {
             path,
             secrets,
             connector,
+            smtp,
             store: Mutex::new(None),
             syncing: Mutex::new(HashMap::new()),
             searches: Mutex::new(HashMap::new()),
             parse_failures: Mutex::new(Vec::new()),
-            operations: Mutex::new(operations::Runtime::default()),
+            operations: Mutex::new(runtime),
             operations_signal: (Mutex::new(false), Condvar::new()),
         }
     }
@@ -338,6 +393,7 @@ impl MailEngine {
         password: Secret,
     ) -> Result<Account, MailError> {
         validate_config(&config)?;
+        sending::validate_sending(&config.sending)?;
         if password.is_empty() {
             return Err(MailError::InvalidConfig("enter an account password".into()));
         }
@@ -347,6 +403,15 @@ impl MailEngine {
         let mut session = self.connector.connect(&config, &password)?;
         session.folders()?;
         drop(session);
+        if let Some(outgoing) = &config.sending.smtp {
+            self.smtp.verify(
+                &smtp::SmtpServer {
+                    config: outgoing,
+                    ca_certificate: config.ca_certificate.as_deref(),
+                },
+                &password,
+            )?;
+        }
         let mut bytes = [0u8; 16];
         getrandom::fill(&mut bytes)
             .map_err(|_| MailError::Storage("could not create account identifier".into()))?;

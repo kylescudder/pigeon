@@ -2335,6 +2335,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "mail-builder"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "900998f307338c4013a28ab14d760b784067324b164448c6d98a89e44810473b"
+
+[[package]]
 name = "mailparse"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3069,12 +3075,14 @@ name = "pigeon-core"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "base64 0.22.1",
  "chrono",
  "getrandom 0.4.3",
  "hex",
  "html2text",
  "imap",
  "imap-proto",
+ "mail-builder",
  "mailparse",
  "native-tls",
  "rusqlite",

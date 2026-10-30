@@ -1,7 +1,7 @@
 //! Main-window adapters for the mail engine. No SQL or protocol logic here.
 use pigeon_core::mail::{
-    Account, AccountConfig, Folder, MailEngine, MailError, Message, SavedSearch, SearchQuery,
-    SearchResults,
+    Account, AccountConfig, Draft, DraftInput, Folder, MailEngine, MailError, Message, OutboxItem,
+    SavedSearch, SearchQuery, SearchResults, SendDecision, SendState, SendingSettings,
 };
 use pigeon_core::secrets::Secret;
 use pigeon_core::viewer::{self, RemoteContent};
@@ -34,6 +34,7 @@ impl From<MailError> for MailApiError {
             MailError::Cancelled => "cancelled",
             MailError::InvalidSearch(_) => "invalid_search",
             MailError::Conflict(_) => "conflict",
+            MailError::Smtp { .. } => "smtp",
         };
         Self {
             code,
@@ -283,4 +284,118 @@ pub async fn open_mail_message(
         code: "viewer",
         message: "The message viewer was interrupted.".into(),
     })?
+}
+
+// Composing and sending. Message content stays in the encrypted store; the
+// outbox reports outcomes, never server reply text.
+
+#[tauri::command]
+pub async fn send_state(
+    app: AppHandle,
+    webview: tauri::Webview,
+) -> Result<SendState, MailApiError> {
+    guard(&webview)?;
+    task(app, |engine| engine.send_state()).await
+}
+
+#[tauri::command]
+pub async fn save_draft(
+    app: AppHandle,
+    webview: tauri::Webview,
+    draft: DraftInput,
+) -> Result<Draft, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.save_draft(draft)).await
+}
+
+#[tauri::command]
+pub async fn delete_draft(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.delete_draft(&id)).await
+}
+
+#[tauri::command]
+pub async fn send_draft(
+    app: AppHandle,
+    webview: tauri::Webview,
+    draft: DraftInput,
+) -> Result<OutboxItem, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.send_draft(draft)).await
+}
+
+#[tauri::command]
+pub async fn return_to_drafts(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<Draft, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.return_to_drafts(&id)).await
+}
+
+#[tauri::command]
+pub async fn retry_send(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.retry_send(&id)).await
+}
+
+#[tauri::command]
+pub async fn retry_sent_copy(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.retry_sent_copy(&id)).await
+}
+
+#[tauri::command]
+pub async fn resolve_send(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+    decision: SendDecision,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.resolve_send(&id, decision)).await
+}
+
+#[tauri::command]
+pub async fn dismiss_outbox(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.dismiss_outbox(&id)).await
+}
+
+#[tauri::command]
+pub async fn update_mail_sending(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+    settings: SendingSettings,
+) -> Result<Account, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.update_sending(&id, settings)).await
+}
+
+#[tauri::command]
+pub async fn set_undo_send_seconds(
+    app: AppHandle,
+    webview: tauri::Webview,
+    seconds: u32,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.set_undo_send_seconds(seconds)).await
 }

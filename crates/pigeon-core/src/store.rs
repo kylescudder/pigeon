@@ -136,6 +136,21 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX operations_due ON operations(state, not_before);
     CREATE INDEX operations_account ON operations(account);",
+    // Local drafts and the outbox (mail/sending.rs). Queued messages keep
+    // their built bytes so what is sent is exactly what was queued.
+    "CREATE TABLE drafts (
+        id TEXT PRIMARY KEY, account TEXT, payload TEXT NOT NULL,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+    );
+    CREATE TABLE outbox (
+        id TEXT PRIMARY KEY, account TEXT NOT NULL, draft TEXT NOT NULL,
+        envelope TEXT NOT NULL, message BLOB NOT NULL, sent_copy BLOB NOT NULL,
+        message_id TEXT NOT NULL, subject TEXT NOT NULL, recipients TEXT NOT NULL,
+        submit_op TEXT NOT NULL, sent_copy_op TEXT, accepted INTEGER,
+        dismissed INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL
+    );
+    CREATE INDEX outbox_account ON outbox(account);
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
 ];
 
 impl Store {
