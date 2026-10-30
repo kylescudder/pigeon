@@ -51,9 +51,13 @@ queries. Choose **Connect an account** and use the provider’s IMAP settings an
 password/app password. The desktop Secret Service must be unlocked. TLS and
 STARTTLS validate certificates; OAuth-only providers are not supported yet.
 
-The receiving preview is read-only: opening mail does not mark it read on the
-server. Sending, mailbox changes, and attachment downloads come in later
-milestones. See the [receiving guide and test results](docs/mail-engine.md) for
+Opening mail does not mark it read on the server. Plain-text messages can be
+written and sent over SMTP: add the outgoing server when connecting an account,
+or later under the account's **Sending** settings. Drafts save as you type.
+Sent mail waits in the Outbox for the undo delay (10 seconds by default, under
+Settings). If Pigeon cannot tell whether the server accepted a message, it says
+so and does not send it again unless you choose to. Mailbox changes,
+attachments, replies and rich text come in later milestones. See the [receiving guide and test results](docs/mail-engine.md) for
 progress/recovery behaviour, limits, and the NixOS verification checklist.
 
 ## Interface
@@ -80,8 +84,9 @@ CI runs it on Ubuntu in dark, light, and narrow layouts. Native-command test
 fixtures exercise frontend feedback; real keyring and viewer-isolation checks
 remain part of the native self-test.
 
-Run `tools/mail-test/run.sh` with Docker for six isolated Dovecot/TLS integration
-tests. The explicit 100k-message search gate is:
+Run `tools/mail-test/run.sh` with Docker for the isolated Dovecot IMAP and
+SMTP integration tests. The SMTP service fails on purpose around message
+acceptance for chosen recipients (see `tools/mail-test/smtp.py`). The explicit 100k-message search gate is:
 
 ```sh
 cargo test --release --locked -p pigeon-core --test search_benchmark -- --ignored --nocapture

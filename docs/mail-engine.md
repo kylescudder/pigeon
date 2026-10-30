@@ -164,3 +164,41 @@ A new kind needs a handler with a stable `kind()` name and a JSON payload. Queue
 - recovery after a crash on either side of the irreversible point, and panics;
 - locked-store pausing, and outcomes recorded after unlock.
 
+## Plain-text sending, drafts and the outbox, 2026-10-30
+
+This is the first Milestone 3 slice. Replies and forwarding, rich text, attachments, address autocomplete and multiple identities per account come later. Encrypted backup and restore is separate work.
+
+- **Accounts.** An account gains a `sending` section: the SMTP server (TLS or STARTTLS, both always verified), a display name, a plain-text signature, and whether to save a Sent copy. It is stored with the account settings, so accounts added earlier simply have no SMTP server until it is added. Pigeon signs in to SMTP with the account's saved password. Saving new SMTP settings checks the sign-in first.
+- **Drafts.** Drafts are stored in the encrypted store (`drafts` table, migration 7). The composer saves 0.8 s after typing stops, and again when it is left. Saves are made one at a time.
+- **Sending.** Send moves the draft into the `outbox` table in the same transaction that queues an `smtp_submit` operation, delayed by the undo time (default 10 s, 0–60). The message bytes are built once, at that point. Undo, or Edit after a failure, cancels the operation and restores the draft in one transaction. Once sending has started, undo is refused.
+- **SMTP outcomes** come from a small client (`mail/smtp.rs`):
+  - Failures before the end-of-data marker are either retried with backoff (offline, or a 4xx reply) or failed (5xx, refused recipient, sign-in or TLS failure).
+  - The operation records its point of no return just before the marker is written.
+  - A lost connection or missing reply after the marker is **unknown**. Unknown is never retried automatically, including after a restart. The Outbox explains it and offers "It was sent", "Send again…" (with a confirmation) and "Discard".
+  - Server reply text is never shown; only reply codes are.
+- **Sent copy.** Once a message is accepted, a separate `sent_copy` operation appends it, marked as read and including Bcc, to the folder IMAP reports as `\Sent`. It retries with backoff and checks the Message-ID first, so a lost reply does not leave two copies. Its failure is shown and can be retried on its own; it never submits the message again.
+- **Account removal** is refused while the account has messages in the outbox that are not settled.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `cargo test --release -p pigeon-core` | Passes, including 7 SMTP unit tests on scripted servers, 13 sending-engine tests and 13 operations-queue tests |
+| `tools/mail-test/run.sh` | 6 IMAP and 6 SMTP tests pass against Dovecot plus an aiosmtpd submission server on 465 (TLS) and 587 (STARTTLS) |
+| `bun run typecheck`, Playwright | 38 browser tests pass in dark, light and narrow layouts, 12 of them for compose, outbox and settings |
+| `nix flake check -L` | aarch64-linux only (x86_64 cannot be checked from the macOS dev machine); results in the PR |
+
+The SMTP unit tests cover dot-stuffing and CRLF normalisation, recipient refusal without echoing server text, 4xx and 5xx after data, a dropped or stalled final reply, a failed commit hook sending no marker, rejected credentials, and STARTTLS being required with pre-encryption data refused.
+
+The real-server tests cover:
+- a STARTTLS send delivered exactly once, with the Sent copy read back by sync;
+- every fault mode mapped to the right outcome with no duplicate delivery;
+- an unknown outcome surviving a restart without being resent;
+- a Sent copy failing while the Sent folder is missing, then saved on retry without resubmitting;
+- an offline send waiting, then delivering after reconnecting;
+- undo delivering nothing.
+
+Evidence is in `evidence/composer-sending/` (ignored). It used synthetic mail and credentials only, and no real mail was sent.
+
+Still to check on the user's NixOS desktop: send through the real provider, check that the Sent copy appears in webmail, and decide whether that provider files sent mail itself (if so, turn off "Save a copy").
+

@@ -93,3 +93,54 @@ span.folder-toggle { cursor: default; }button.folder-toggle:hover { background: 
 @media (max-width: 720px) {
   .mail-sidebar { margin-top: 17px; }.sidebar-section-heading { justify-content: center; }.sidebar-section-heading .icon-button { margin: 0; }.sidebar-folders { display: none; }.account-link { justify-content: center; padding: 7px; }.saved-search-link { justify-content: center; padding: 8px; }.account-unread { display: none; }.account-avatar { width: 25px; height: 25px; font-size: 10px; }.estate-summary { gap: 22px; }.estate-summary > .button { margin-left: 0; }.estate-summary > div { gap: 7px; }.estate-summary > div > span { font-size: 9px; }.estate-summary strong { font-size: 22px; }.account-card { padding: 18px; }.account-card-actions .button { font-size: 10px; }.account-dialog .modal-content, .form-dialog .modal-content { padding: 23px; }.form-grid { grid-template-columns: 1fr; gap: 0; }.mail-heading { padding-top: 19px; padding-bottom: 17px; }.mail-heading > .inline-actions .button { font-size: 0; min-width: 30px; gap: 0; }.mail-heading > .inline-actions .button svg { width: 16px; height: 16px; }.mail-search { gap: 6px; }.mail-search > svg { width: 16px; }.mail-search .button { font-size: 10px; padding-left: 7px; padding-right: 7px; }.mail-filters label { font-size: 9px; }.mail-search input { font-size: 12px; }.mail-pagination { font-size: 10px; }.reader-content { padding-left: 20px; padding-right: 20px; }.reader-content h2 { font-size: 20px; }
 }
+
+/* Composer, drafts and outbox. */
+.nav-count { margin-left: auto; min-width: 18px; padding: 1px 6px; border-radius: 9px; background: var(--hover); color: var(--muted); font-size: 10px; text-align: center; }
+.nav-count-alert { background: var(--danger-subtle); color: var(--danger); }
+.compose-page { max-width: 860px; }
+.composer { display: flex; flex-direction: column; gap: 14px; }
+.composer-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.composer-header h1 { font-size: 22px; letter-spacing: -.5px; font-weight: 600; overflow-wrap: anywhere; }
+.composer-save-state { font-size: 11px; color: var(--faint); white-space: nowrap; }
+.composer-fields { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.composer-row { display: flex; align-items: center; gap: 12px; padding: 0 14px; min-height: 42px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.composer-row > label { width: 56px; color: var(--faint); font-size: 11px; flex: none; }
+.composer-row input, .composer-row select { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: 12px; padding: 10px 0; outline: none; }
+.composer-row:focus-within { background: var(--hover); }
+.composer-copies-toggle { background: none; color: var(--muted); font-size: 11px; padding: 4px 6px; border-radius: 5px; }
+.composer-copies-toggle:hover { background: var(--hover); color: var(--text); }
+.composer-body { width: 100%; min-height: 320px; resize: vertical; border: 0; padding: 16px 14px; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.7; outline: none; }
+.composer-signature { margin: 0; padding: 0 14px 16px; color: var(--muted); font: inherit; font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.composer-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.composer-actions .button-primary { min-width: 96px; }
+.compose-page .notice { align-items: center; }
+.compose-page .notice p { flex: 1; margin: 0; }
+.outgoing-list { list-style: none; margin: 18px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.outgoing-item { display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; }
+.outgoing-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+.outgoing-item-main strong { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.outgoing-item-main > span { overflow-wrap: anywhere; }
+.outgoing-item-main time { color: var(--faint); font-size: 10px; }
+a.outgoing-item-main:hover strong { text-decoration: underline; }
+.outgoing-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.outgoing-status { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; line-height: 1.6; }
+.outgoing-status.status-unknown { flex-direction: column; align-items: flex-start; gap: 4px; }
+.outgoing-status.status-unknown p { margin: 0; }
+.status-waiting { color: var(--muted); }
+.status-sent { color: var(--success); }
+.status-failed, .status-unknown { color: var(--danger); }
+.outbox-unknown, .outbox-failed { border-color: var(--danger-line); background: var(--danger-subtle); }
+.outgoing-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 60px; color: var(--faint); font-size: 12px; }
+.undo-send-stack { position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 20; width: min(520px, calc(100vw - 32px)); }
+.undo-send-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font-size: 12px; box-shadow: 0 10px 30px rgb(0 0 0 / .25); }
+.undo-send-bar > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.undo-send-error { color: var(--danger); }
+.sending-settings form { margin-top: 6px; }
+.form-dialog textarea, .form-dialog select { width: 100%; min-width: 0; min-height: 37px; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line-strong); color: var(--text); background: var(--control); font-size: 12px; font-family: inherit; }
+.form-dialog textarea { resize: vertical; line-height: 1.6; }
+.form-dialog label.checkbox-row { flex-direction: row; align-items: center; gap: 8px; }
+.form-dialog label.checkbox-row input { width: auto; min-height: 0; }
+@media (max-width: 640px) {
+  .outgoing-item { flex-direction: column; }
+  .outgoing-actions { justify-content: flex-start; }
+}

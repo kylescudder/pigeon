@@ -69,12 +69,14 @@ export function MailProvider({ children }: { children: ReactNode }) {
       // store becomes unavailable. Never keep showing a previous success.
       client.removeQueries({ queryKey: ["mail", "search"] });
       client.removeQueries({ queryKey: ["mail", "message"] });
+      client.removeQueries({ queryKey: ["send"] });
     }
   }, [stateQuery.isError, client]);
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: MAIL_STATE_KEY });
     await client.invalidateQueries({ queryKey: ["mail", "search"] });
     await client.invalidateQueries({ queryKey: ["mail", "message"] });
+    await client.invalidateQueries({ queryKey: ["send"] });
   };
   const sync = async (id: string) => {
     setActionError(null);

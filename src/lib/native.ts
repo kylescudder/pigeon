@@ -26,14 +26,28 @@ export function quitApp(): Promise<void> {
   return invoke<void>("quit_app");
 }
 
+export type TransportSecurity = "tls" | "start_tls";
+export type SmtpConfig = {
+  host: string;
+  port: number;
+  security: TransportSecurity;
+  username: string;
+};
+export type SendingSettings = {
+  smtp: SmtpConfig | null;
+  display_name: string;
+  signature: string;
+  save_sent_copy: boolean;
+};
 export type AccountConfig = {
   name: string;
   address: string;
   host: string;
   port: number;
   username: string;
-  security: "tls" | "start_tls";
+  security: TransportSecurity;
   ca_certificate: string | null;
+  sending?: SendingSettings;
 };
 export type MailAccount = {
   id: string;
@@ -154,3 +168,64 @@ export const removeMailAccount = (id: string) =>
 export const updateMailPassword = (id: string, password: string) =>
   invoke<void>("update_mail_password", { id, password });
 export const unlockMail = () => invoke<void>("unlock_mail");
+
+// Composing and sending. Drafts and queued messages stay in the encrypted
+// store; outcomes are reported without server reply text.
+export type DraftInput = {
+  id: string | null;
+  account_id: string | null;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+};
+export type Draft = DraftInput & { id: string; updated: number };
+export type SendStatus =
+  | { state: "queued"; send_at: number; error: string | null }
+  | { state: "sending" }
+  | { state: "accepted"; at: number }
+  | { state: "failed"; error: string }
+  | { state: "unknown"; error: string }
+  | { state: "held" };
+export type SentCopyStatus =
+  | { state: "not_requested" }
+  | { state: "waiting"; error: string | null }
+  | { state: "saving" }
+  | { state: "saved" }
+  | { state: "failed"; error: string };
+export type OutboxItem = {
+  id: string;
+  account_id: string;
+  subject: string;
+  recipients: string;
+  created: number;
+  send: SendStatus;
+  sent_copy: SentCopyStatus;
+};
+export type SendState = {
+  drafts: Draft[];
+  outbox: OutboxItem[];
+  undo_send_seconds: number;
+};
+export type SendDecision = "send_again" | "mark_sent" | "discard";
+
+export const sendState = () => invoke<SendState>("send_state");
+export const saveDraft = (draft: DraftInput) =>
+  invoke<Draft>("save_draft", { draft });
+export const deleteDraft = (id: string) => invoke<void>("delete_draft", { id });
+export const sendDraft = (draft: DraftInput) =>
+  invoke<OutboxItem>("send_draft", { draft });
+export const returnToDrafts = (id: string) =>
+  invoke<Draft>("return_to_drafts", { id });
+export const retrySend = (id: string) => invoke<void>("retry_send", { id });
+export const retrySentCopy = (id: string) =>
+  invoke<void>("retry_sent_copy", { id });
+export const resolveSend = (id: string, decision: SendDecision) =>
+  invoke<void>("resolve_send", { id, decision });
+export const dismissOutbox = (id: string) =>
+  invoke<void>("dismiss_outbox", { id });
+export const updateMailSending = (id: string, settings: SendingSettings) =>
+  invoke<MailAccount>("update_mail_sending", { id, settings });
+export const setUndoSendSeconds = (seconds: number) =>
+  invoke<void>("set_undo_send_seconds", { seconds });

@@ -1,10 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   errorMessage,
   removeMailAccount,
   updateMailPassword,
+  updateMailSending,
   type MailAccount,
+  type TransportSecurity,
 } from "../lib/native";
 import { useMail } from "./mail-provider";
 import { Modal } from "./modal";
@@ -12,9 +14,12 @@ import { Modal } from "./modal";
 export function ManageAccount({
   account,
   onDismiss,
+  focusSending = false,
 }: {
   account: MailAccount | null;
   onDismiss: () => void;
+  /** Open with the outgoing mail settings expanded. */
+  focusSending?: boolean;
 }) {
   const mail = useMail();
   const [password, setPassword] = useState("");
@@ -154,6 +159,12 @@ export function ManageAccount({
                   </button>
                 </div>
               </form>
+              <SendingForm
+                key={account.id}
+                account={account}
+                open={focusSending || !account.config.sending?.smtp}
+                disabled={pending}
+              />
               <div className="account-danger-zone">
                 <p>Remove this account’s data from this device.</p>
                 <button
@@ -184,5 +195,168 @@ export function ManageAccount({
         </>
       )}
     </Modal>
+  );
+}
+
+/** Outgoing server, display name, signature and Sent-copy preference. */
+function SendingForm({
+  account,
+  open,
+  disabled,
+}: {
+  account: MailAccount;
+  open: boolean;
+  disabled: boolean;
+}) {
+  const id = useId();
+  const mail = useMail();
+  const current = account.config.sending;
+  const [host, setHost] = useState(
+    current?.smtp?.host ?? account.config.host.replace(/^imap\./i, "smtp."),
+  );
+  const [security, setSecurity] = useState<TransportSecurity>(
+    current?.smtp?.security ?? "tls",
+  );
+  const [port, setPort] = useState(String(current?.smtp?.port ?? 465));
+  const [username, setUsername] = useState(
+    current?.smtp?.username ?? account.config.username,
+  );
+  const [displayName, setDisplayName] = useState(current?.display_name ?? "");
+  const [signature, setSignature] = useState(current?.signature ?? "");
+  const [saveSentCopy, setSaveSentCopy] = useState(
+    current?.save_sent_copy ?? true,
+  );
+  const save = useMutation({
+    mutationFn: () =>
+      updateMailSending(account.id, {
+        smtp: host.trim()
+          ? {
+              host: host.trim(),
+              port: Number(port),
+              security,
+              username: username.trim() || account.config.username,
+            }
+          : null,
+        display_name: displayName.trim(),
+        signature,
+        save_sent_copy: saveSentCopy,
+      }),
+    onSuccess: mail.refresh,
+  });
+  return (
+    <details className="advanced-settings sending-settings" open={open}>
+      <summary>Sending</summary>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          save.mutate();
+        }}
+      >
+        <fieldset disabled={disabled || save.isPending}>
+          <label htmlFor={`${id}-name`}>
+            Name shown to recipients
+            <input
+              id={`${id}-name`}
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder={account.config.address}
+              maxLength={200}
+            />
+          </label>
+          <label htmlFor={`${id}-signature`}>
+            Signature
+            <textarea
+              id={`${id}-signature`}
+              value={signature}
+              onChange={(event) => setSignature(event.target.value)}
+              rows={3}
+              maxLength={10000}
+            />
+          </label>
+          <label htmlFor={`${id}-host`}>
+            Outgoing (SMTP) server
+            <input
+              id={`${id}-host`}
+              value={host}
+              onChange={(event) => setHost(event.target.value)}
+              placeholder="smtp.example.com"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={253}
+            />
+          </label>
+          <div className="form-grid">
+            <label htmlFor={`${id}-security`}>
+              Encryption
+              <select
+                id={`${id}-security`}
+                value={security}
+                onChange={(event) => {
+                  const value = event.target.value as TransportSecurity;
+                  setSecurity(value);
+                  setPort(value === "tls" ? "465" : "587");
+                }}
+              >
+                <option value="tls">TLS</option>
+                <option value="start_tls">STARTTLS</option>
+              </select>
+            </label>
+            <label htmlFor={`${id}-port`}>
+              Port
+              <input
+                id={`${id}-port`}
+                type="number"
+                value={port}
+                onChange={(event) => setPort(event.target.value)}
+                min={1}
+                max={65535}
+              />
+            </label>
+          </div>
+          <label htmlFor={`${id}-username`}>
+            Outgoing username
+            <input
+              id={`${id}-username`}
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoCapitalize="none"
+              spellCheck={false}
+            />
+          </label>
+          <label className="checkbox-row" htmlFor={`${id}-copy`}>
+            <input
+              id={`${id}-copy`}
+              type="checkbox"
+              checked={saveSentCopy}
+              onChange={(event) => setSaveSentCopy(event.target.checked)}
+            />
+            Save a copy of sent mail to the Sent folder
+          </label>
+          <p className="field-help">
+            Pigeon signs in with this account’s saved password. Turn off the
+            Sent copy if your provider files sent mail itself.
+          </p>
+        </fieldset>
+        {save.isError && (
+          <p role="alert" className="mail-inline-error">
+            {errorMessage(save.error)}
+          </p>
+        )}
+        {save.isSuccess && (
+          <p role="status" className="inline-success">
+            Sending settings saved.
+          </p>
+        )}
+        <div className="modal-actions">
+          <button
+            type="submit"
+            className="button button-secondary"
+            disabled={disabled || save.isPending}
+          >
+            {save.isPending ? "Checking the server…" : "Save sending settings"}
+          </button>
+        </div>
+      </form>
+    </details>
   );
 }
