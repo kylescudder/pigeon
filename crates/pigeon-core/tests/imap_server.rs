@@ -334,3 +334,88 @@ fn dropped_wire_connection_preserves_offline_mail_and_recovers() {
     assert_eq!(engine.accounts().unwrap()[0].status, "idle");
     relay.join().unwrap();
 }
+
+fn relay_bytes() -> u64 {
+    std::fs::read_to_string("/pki/server-to-client-bytes")
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+#[test]
+#[ignore = "requires the disposable Dovecot TLS server and counting relay"]
+fn parts_download_on_request_byte_exact_without_marking_mail_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = MailEngine::new(
+        dir.path().join("mail.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+    );
+    let mut through_relay = config();
+    through_relay.port = 1993;
+    let account = engine
+        .add_account(through_relay, Zeroizing::new(b"pigeon-test-only".to_vec()))
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    let find = |text: &str| {
+        engine
+            .search(&SearchQuery {
+                text: text.into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .messages[0]
+            .id
+    };
+
+    // The embedded logo is fetched and inlined; the 2 MB manual beside it is not.
+    let newsletter = find("pelican");
+    let message = engine.message(newsletter).unwrap();
+    let logo = message
+        .attachments
+        .iter()
+        .find(|a| a.content_id.as_deref() == Some("logo@pigeon.test"))
+        .unwrap();
+    assert_eq!(logo.content_type, "image/png");
+    assert_eq!(logo.part, "1.2.2");
+    let before = relay_bytes();
+    let document = engine.viewer_document(newsletter).unwrap();
+    let used = relay_bytes() - before;
+    eprintln!("Encrypted IMAP bytes for the embedded logo: {used}");
+    assert!(used < 65_536, "embedded image fetch pulled {used} bytes");
+    assert_eq!(document.missing_inline, 0);
+    assert!(
+        document
+            .html
+            .contains("src=\"data:image/png;base64,iVBORw0KGgo"),
+        "{}",
+        document.html
+    );
+    assert!(!document.html.contains("cid:"));
+    assert!(!document.html.contains("tracker.example"));
+
+    // A base64 attachment decodes to exactly the original bytes.
+    let manual = message
+        .attachments
+        .iter()
+        .find(|a| a.filename == "manual.pdf")
+        .unwrap();
+    let data = engine.attachment(newsletter, &manual.part, false).unwrap();
+    assert_eq!(
+        data.data.as_slice(),
+        b"MANUAL_PAYLOAD_CANARY-".repeat(100_000)
+    );
+    let report = find("resume");
+    let pdf = engine.attachment(report, "2", false).unwrap();
+    assert_eq!(pdf.filename, "report.pdf");
+    assert_eq!(
+        pdf.data.as_slice(),
+        b"ATTACHMENT_PAYLOAD_CANARY-".repeat(360_000)
+    );
+
+    // BODY.PEEK keeps both messages unread on the server.
+    engine.sync_account(&account.id).unwrap();
+    for id in [newsletter, report] {
+        assert!(engine.message(id).unwrap().summary.unread);
+    }
+}

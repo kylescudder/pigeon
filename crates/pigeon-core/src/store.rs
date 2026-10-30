@@ -136,6 +136,28 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX operations_due ON operations(state, not_before);
     CREATE INDEX operations_account ON operations(account);",
+    // 7: keep schema 6 unchanged; also repair early attachment builds that
+    // used version 6 before the operations queue landed. Preserve their blobs.
+    // Attachment payloads the user chose to keep. They go with their message
+    // row, so pruning, UIDVALIDITY replacement and account removal clear them.
+    "CREATE TABLE IF NOT EXISTS operations (
+        id TEXT PRIMARY KEY, account TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        state TEXT NOT NULL, not_before INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0, irreversible INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT, depends_on TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS operations_due ON operations(state, not_before);
+    CREATE INDEX IF NOT EXISTS operations_account ON operations(account);
+    CREATE TABLE IF NOT EXISTS attachment_blobs (
+        message INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        part TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        data BLOB NOT NULL,
+        stored_at INTEGER NOT NULL,
+        PRIMARY KEY (message, part)
+    );
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
 ];
 
 impl Store {

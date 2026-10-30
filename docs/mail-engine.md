@@ -30,7 +30,7 @@ folder:Archive is:unread has:attachment
 
 Dates use the device's local timezone. Structured filters combine with AND; Boolean operators apply to the full-text expression. Clickable account/folder/unread/attachment filters combine with typed terms. Junk/Trash are indexed but excluded by default unless selected or included. Results are sorted newest first, returned in pages of 50, and retain exact counts. Saved searches survive restart in the encrypted database. Explicit sync refreshes an open cached message too; background reader polling detects remote removal/replacement, and closing the reader discards its query cache. Unsaved search text stays in session memory; URLs contain opaque navigation identifiers, not mail addresses, folder names, or search terms.
 
-Plain text is rendered as text in the main window. **Open formatted view** opens sanitised HTML in a separate unprivileged webview with remote content blocked. Embedded images and attachment downloads are deferred. Attachment filenames/types are visible, but payloads remain on the server.
+Plain text is rendered as text in the main window. **Open formatted view** opens sanitised HTML in a separate unprivileged webview with remote content blocked. Embedded (`cid:`) images are downloaded on opening and shown inline; see [attachments and embedded images](#attachments-and-embedded-images-2026-10-30). Attachment filenames/types are visible; saving or opening attachments is not available yet.
 
 Use **Manage account** on its overview card to verify a replacement password or remove its local cache and keyring credential. Removal leaves server mail untouched. Password verification failure preserves the preceding working credential.
 
@@ -109,7 +109,7 @@ cargo test --release --locked -p pigeon-core --test search_benchmark -- --ignore
 
 Run this milestone on the user's x86_64 NixOS desktop: connect the actual provider, observe initial coverage and errors, read/search after quitting and reopening offline, confirm filters/saved searches, open a real formatted message, run the expanded isolation probe, then exercise background reopen and both Wayland/X11 where available. No actual user credentials or private mail were used during development.
 
-SMTP/composing/drafts, mailbox mutations and the durable offline action queue, attachment download/export, remote/embedded-image controls, backups/recovery export, OAuth, notifications, Home Manager startup configuration, and the five-design picker remain later work in the agreed product plan. This receiving build is ready for testing, not a complete daily-client replacement.
+SMTP/composing/drafts, mailbox mutations and the durable offline action queue, attachment saving/opening, remote-content controls, backups/recovery export, OAuth, notifications, Home Manager startup configuration, and the five-design picker remain later work in the agreed product plan. This receiving build is ready for testing, not a complete daily-client replacement.
 
 ## Partial-sync diagnosis, 2026-10-30
 
@@ -145,6 +145,21 @@ The actual scripted FETCH regression now requires all three messages to download
 
 Verification: 30 application core tests, 39 upstream parser tests, six real Dovecot tests and 21 production-build browser tests pass. Packaged Nix/native results and exact source revision are recorded in ignored `evidence/zoho-parser/`. This is a tested compatibility fix; the original Zoho message has not been fetched by the development environment. Retry it on the target machine after updating; no cache reset or account removal is needed.
 
+## Attachments and embedded images, 2026-10-30
+
+Sync still downloads only headers, MIME structure and text parts. Attachment payloads are fetched one part at a time, only on request:
+
+- **Session-only by default.** A downloaded part is held in memory for the session, up to 256 MiB in total (oldest evicted first), and discarded when the keyring locks or Pigeon quits. Kept parts are stored in the encrypted database (`attachment_blobs`, migration 7), never as plain files. They are removed with their message, so server deletion, UIDVALIDITY replacement and account removal clear them. A part is only stored, or read back, if the row still has the account, folder, UIDVALIDITY and UID it was downloaded for; this is checked in the same SQL statement, because SQLite can reuse a removed message's row id. A stored setting, `keep_attachments` (off by default), makes keeping automatic; its interface arrives with attachment saving.
+- **Checked against the cached message.** A part can only be requested if it is listed in that message's cached metadata. Before fetching, the folder is reopened read-only (EXAMINE) and its UIDVALIDITY must match. The part's BODYSTRUCTURE type and size must also match the cache, which provides the transfer encoding. Parts over 64 MiB decoded are refused before download. The fetch uses `BODY.PEEK[part]`, so read state is unchanged and other parts are not transferred. Part numbers are validated as dotted digits before reaching a command.
+- **Embedded images.** Opening the formatted view finds the `cid:` images that survive sanitising, then downloads the matching `image/*` parts over one mail connection. Only PNG, JPEG, GIF, WebP and BMP parts are inlined as `data:` URLs, up to 10 MiB per image and 25 MiB per message. The per-message budget is applied before each image is read from the store or downloaded, so an image that cannot fit is never fetched. Other types, SVG, oversized or unresolved images lose their source and show their alt text; no `cid:` reference reaches the viewer. The viewer CSP is unchanged (`img-src data:`), so the document itself still cannot fetch anything. If parts cannot be downloaded (for example offline), the view opens without them, and the reader says how many are missing.
+
+Verification: synthetic fixtures only.
+
+| Check | Observed result |
+| --- | --- |
+| `cargo test --release -p pigeon-core` | Viewer: inline cid mapping (percent-encoded, bracketed, upper-case `CID:`), unresolved/SVG/HTML/oversized parts dropped, shared document budget, `cid:` in links, `srcset` and `background` removed, hostile fixture still clean. Engine: session-only payload absent from `mail.db`/WAL and re-fetched after restart; kept payload served offline after restart and still absent as plaintext from the files; payload removed with its message and account; changed UIDVALIDITY refuses without fetching; unlisted part numbers rejected; keyring lock discards session payloads; one connection for a message's embedded images; offline opening; keep setting. |
+| `tools/mail-test/run.sh` | The real Dovecot adapter decodes a base64 2 MB attachment and the existing 9 MB `report.pdf` byte-exactly. Opening a newsletter inlines its real PNG logo for 3,717 encrypted bytes through the counting relay, without its 2 MB sibling attachment. Both messages remain unread on the server. |
+| Native self-test | A synthetic message built through the same sanitiser, document wrapper and CSP is opened in a real viewer webview. An injected check reports that the inline PNG rendered, the remote image and an unresolved `cid:` image have no source, no `cid:` remains, and no network resource entries exist. All existing ACL denials still pass. |
 ## Durable operations queue, 2026-10-30
 
 Outgoing mail and mailbox changes share one durable queue, `pigeon_core::mail::operations`. Rows sit in the encrypted store (`operations` table, migration 6). Each kind registers one `OperationHandler`. A single background worker in the shell claims due work and runs the handler without holding the store lock. While the keyring is locked, the worker does nothing.
@@ -163,4 +178,3 @@ A new kind needs a handler with a stable `kind()` name and a JSON payload. Queue
 - claim and undo races, backoff, held work and parent ordering;
 - recovery after a crash on either side of the irreversible point, and panics;
 - locked-store pausing, and outcomes recorded after unlock.
-

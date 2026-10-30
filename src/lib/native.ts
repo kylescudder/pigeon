@@ -161,8 +161,10 @@ export async function searchMail(
 }
 export const readMailMessage = (id: number) =>
   invoke<MailMessage>("read_mail_message", { id });
+/** Embedded images that could not be downloaded, for example while offline. */
+export type OpenedMessage = { missing_inline: number };
 export const openMailMessage = (id: number) =>
-  invoke<void>("open_mail_message", { id });
+  invoke<OpenedMessage>("open_mail_message", { id });
 export const saveMailSearch = (name: string, query: SearchQuery) =>
   invoke<SavedSearch>("save_mail_search", { name, query });
 export const deleteMailSearch = (id: string) =>

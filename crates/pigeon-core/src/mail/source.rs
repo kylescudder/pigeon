@@ -1,7 +1,9 @@
 //! External mail-server seam. Production uses verified TLS IMAP; tests can
 //! supply a deterministic server at this same boundary for fault injection.
 
-use super::{AccountConfig, MailError, MessageContent};
+use zeroize::Zeroizing;
+
+use super::{AccountConfig, Attachment, MailError, MessageContent};
 use crate::secrets::Secret;
 
 pub trait MailConnector: Send + Sync {
@@ -23,6 +25,21 @@ pub trait MailSession: Send {
         Ok(())
     }
     fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError>;
+    /// Downloads and decodes one MIME part of a message in the selected
+    /// folder, without changing its read state. `attachment` is the cached
+    /// metadata; an adapter should refuse if the server's structure no longer
+    /// matches it, or if the part is larger than `max_bytes`.
+    fn fetch_part(
+        &mut self,
+        _uid: u32,
+        _attachment: &Attachment,
+        _max_bytes: usize,
+    ) -> Result<Zeroizing<Vec<u8>>, MailError> {
+        Err(MailError::Imap {
+            operation: "downloading an attachment",
+            reason: "this connection cannot download attachments",
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
