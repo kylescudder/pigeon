@@ -59,3 +59,13 @@ tests. The explicit 100k-message search gate is:
 ```sh
 cargo test --release --locked -p pigeon-core --test search_benchmark -- --ignored --nocapture
 ```
+
+## Reporting a sync problem
+
+If Pigeon reports that it could not parse a message, quit it from its menu and run:
+
+```sh
+nix run . -- --diagnose-sync
+```
+
+This retries uncached mail and prints a report that is safe to share. It keeps the structure of the failing server response and replaces values with their length and character types. It includes no message text, addresses, folder names, or credentials.

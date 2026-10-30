@@ -14,10 +14,12 @@ use crate::store::Store;
 use crate::unlock::{UnlockOutcome, open_store};
 
 mod cache;
+mod diagnostics;
 mod imap;
 mod query;
 pub mod source;
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
+const MAX_PARSE_FAILURES: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -154,7 +156,11 @@ pub enum MailError {
     )]
     ParseRetryLimit,
     #[error("while {operation}: the server response could not be parsed by this IMAP client")]
-    ResponseParse { operation: &'static str },
+    ResponseParse {
+        operation: &'static str,
+        /// Redacted protocol shape; deliberately not part of the display text.
+        diagnostic: Option<String>,
+    },
     #[error("while {operation}: {reason}")]
     Imap {
         operation: &'static str,
@@ -177,6 +183,7 @@ pub enum MailError {
 struct FetchContext<'a> {
     account: &'a Account,
     folder: &'a str,
+    folder_kind: &'a str,
     validity: u32,
     password: &'a Secret,
     flags: &'a HashMap<u32, bool>,
@@ -190,6 +197,16 @@ pub struct MailEngine {
     store: Mutex<Option<Store>>,
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    parse_failures: Mutex<Vec<ParseFailure>>,
+}
+
+/// One message this client could not parse. Holds no folder name, UID, or
+/// server text, so the formatted report is safe for the user to share.
+#[derive(Debug, Clone)]
+pub struct ParseFailure {
+    pub folder_kind: String,
+    pub operation: &'static str,
+    pub diagnostic: Option<String>,
 }
 
 impl MailEngine {
@@ -280,6 +297,7 @@ impl MailEngine {
             store: Mutex::new(None),
             syncing: Mutex::new(HashMap::new()),
             searches: Mutex::new(HashMap::new()),
+            parse_failures: Mutex::new(Vec::new()),
         }
     }
 
@@ -382,6 +400,9 @@ impl MailEngine {
     }
 
     fn sync_inner(&self, id: &str, cancel: &AtomicBool) -> Result<(), MailError> {
+        if let Ok(mut failures) = self.parse_failures.lock() {
+            failures.clear();
+        }
         let account = self
             .accounts()?
             .into_iter()
@@ -426,6 +447,7 @@ impl MailEngine {
             let context = FetchContext {
                 account: &account,
                 folder: &folder.name,
+                folder_kind: &folder.kind,
                 validity: snapshot.uid_validity,
                 password: &password,
                 flags: &flags,
@@ -456,6 +478,46 @@ impl MailEngine {
         Ok(())
     }
 
+    fn record_parse_failure(&self, failure: ParseFailure) {
+        if let Ok(mut failures) = self.parse_failures.lock()
+            && failures.len() < MAX_PARSE_FAILURES
+        {
+            failures.push(failure);
+        }
+    }
+
+    /// Syncs every account and returns a report safe to share: failure
+    /// categories and redacted protocol shape, never mail, addresses, folder
+    /// names, or credentials. Only uncached messages are fetched.
+    pub fn diagnose_sync(&self) -> Result<String, MailError> {
+        let mut report = String::from(
+            "Pigeon sync diagnostic. Contains no message text, addresses, folder names, or credentials.\n",
+        );
+        for (index, account) in self.accounts()?.iter().enumerate() {
+            let outcome = self.sync_account(&account.id);
+            let outcome = outcome.map_or_else(|error| error.to_string(), |()| "complete".into());
+            report.push_str(&format!("\nAccount {}: {outcome}\n", index + 1));
+            let failures = self
+                .parse_failures
+                .lock()
+                .map_err(|_| MailError::Busy)?
+                .clone();
+            for (index, failure) in failures.iter().enumerate() {
+                report.push_str(&format!(
+                    "Failure {} in a folder of type {}, while {}:\n{}\n",
+                    index + 1,
+                    failure.folder_kind,
+                    failure.operation,
+                    failure
+                        .diagnostic
+                        .as_deref()
+                        .unwrap_or("no detail available"),
+                ));
+            }
+        }
+        Ok(report)
+    }
+
     fn fetch_batch(
         &self,
         context: &FetchContext<'_>,
@@ -472,7 +534,17 @@ impl MailEngine {
         }
         *attempts += 1;
         match session.fetch_messages(batch) {
-            Err(MailError::ResponseParse { .. }) => {
+            Err(MailError::ResponseParse {
+                operation,
+                diagnostic,
+            }) => {
+                if batch.len() == 1 {
+                    self.record_parse_failure(ParseFailure {
+                        folder_kind: context.folder_kind.to_owned(),
+                        operation,
+                        diagnostic,
+                    });
+                }
                 check_cancel(context.cancel)?;
                 // A parser failure may leave unread bytes in the stream.
                 // Reconnect and verify the folder epoch before any further fetch.

@@ -86,6 +86,13 @@ impl MailConnector for ImapConnector {
 // contain arbitrary server responses, including private message content.
 fn imap_error(operation: &'static str, error: ::imap::Error) -> MailError {
     use ::imap::Error;
+    if matches!(error, Error::Parse(_)) {
+        let diagnostic = super::diagnostics::report(&error);
+        return MailError::ResponseParse {
+            operation,
+            diagnostic,
+        };
+    }
     let reason = match error {
         Error::No(_) => "the server rejected the command (IMAP NO)",
         Error::Bad(_) => "the server rejected the command (IMAP BAD)",
@@ -100,7 +107,6 @@ fn imap_error(operation: &'static str, error: ::imap::Error) -> MailError {
             | std::io::ErrorKind::BrokenPipe => "the server closed the connection",
             _ => "a network read or write failed",
         },
-        Error::Parse(_) => return MailError::ResponseParse { operation },
         Error::Validate(_) => "this IMAP client could not encode the command arguments",
         Error::Tls(_) | Error::TlsHandshake(_) => "the encrypted connection failed",
         _ => "the IMAP operation failed",
@@ -506,9 +512,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn compatible_fetch_responses_download_every_message() {
-        use crate::mail::{MailEngine, SearchQuery};
+    /// Syncs three messages through a real IMAP session against a scripted
+    /// server. `metadata` writes the headers/BODYSTRUCTURE response for a UID.
+    fn sync_scripted(
+        metadata: fn(u32, &mut TcpStream),
+        check: impl FnOnce(&crate::mail::MailEngine, Result<(), MailError>),
+    ) {
+        use crate::mail::MailEngine;
         use crate::secrets::{KeyringState, MemoryStore};
         use std::sync::{
             Arc,
@@ -569,10 +579,7 @@ mod tests {
                                 let uids: Vec<u32> = fields[3].split(',').map(|uid| uid.parse().unwrap()).collect();
                                 for uid in uids {
                                     if line.contains("BODYSTRUCTURE") {
-                                        let header = format!("From: synthetic@example.test\r\nSubject: Message {uid}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n");
-                                        let cid = if uid == 3 { "<synthetic@example.test>" } else { "NIL" };
-                                        let extension = if uid == 2 { r#" NIL NIL NIL NIL "ext1" "ext2""# } else { "" };
-                                        write!(stream, "* {uid} FETCH (UID {uid} BODY[HEADER] {{{}}}\r\n{header} BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL {cid} NIL \"7BIT\" 6 1{extension}))\r\n", header.len()).unwrap();
+                                        metadata(uid, &mut stream);
                                     } else {
                                         write!(stream, "* {uid} FETCH (UID {uid} BODY[TEXT] {{6}}\r\nhello\n)\r\n").unwrap();
                                     }
@@ -609,17 +616,92 @@ mod tests {
             )
             .unwrap();
         let result = engine.sync_account(&account.id);
-        let messages = engine.search(&SearchQuery::default()).unwrap();
+        check(&engine, result);
         drop(engine);
         stop.store(true, Ordering::SeqCst);
         server.join().unwrap();
-        assert!(result.is_ok(), "{result:?}");
-        assert_eq!(messages.total, 3);
-        assert!(
-            messages
-                .messages
-                .iter()
-                .any(|message| message.subject == "Message 3")
+    }
+
+    fn write_metadata(stream: &mut TcpStream, uid: u32, cid: &str, extension: &str) {
+        let header = format!(
+            "From: synthetic@example.test\r\nSubject: Message {uid}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+        );
+        write!(
+            stream,
+            "* {uid} FETCH (UID {uid} BODY[HEADER] {{{}}}\r\n{header} BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL {cid} NIL \"7BIT\" 6 1{extension}))\r\n",
+            header.len()
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn compatible_fetch_responses_download_every_message() {
+        use crate::mail::SearchQuery;
+        sync_scripted(
+            |uid, stream| {
+                let cid = if uid == 3 {
+                    "<synthetic@example.test>"
+                } else {
+                    "NIL"
+                };
+                let extension = if uid == 2 {
+                    r#" NIL NIL NIL NIL "ext1" "ext2""#
+                } else {
+                    ""
+                };
+                write_metadata(stream, uid, cid, extension);
+            },
+            |engine, result| {
+                let messages = engine.search(&SearchQuery::default()).unwrap();
+                assert!(result.is_ok(), "{result:?}");
+                assert_eq!(messages.total, 3);
+                assert!(
+                    messages
+                        .messages
+                        .iter()
+                        .any(|message| message.subject == "Message 3")
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data() {
+        use crate::mail::SearchQuery;
+        sync_scripted(
+            |uid, stream| match uid {
+                2 => write_metadata(stream, uid, "PRIVATE_CANARY%bad", " PRIVATE_CANARY"),
+                3 => stream
+                    .write_all(b"* NO [ALERT] PRIVATE_CANARY cannot fetch\r\n")
+                    .unwrap(),
+                _ => write_metadata(stream, uid, "NIL", ""),
+            },
+            |engine, result| {
+                let error = result.unwrap_err();
+                assert!(matches!(error, MailError::IncompleteSync(2)), "{error:?}");
+                assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 1);
+                let report = engine.diagnose_sync().unwrap();
+                assert!(report.contains("could not parse 2 message(s)"), "{report}");
+                assert!(
+                    report.contains("Failure 1 in a folder of type inbox"),
+                    "{report}"
+                );
+                assert!(report.contains("invalid response syntax"), "{report}");
+                assert!(report.contains("BODYSTRUCTURE"), "{report}");
+                assert!(report.contains("punctuation %_"), "{report}");
+                assert!(
+                    report.contains("unexpected response: Data status=No code=Alert"),
+                    "{report}"
+                );
+                for private in [
+                    "PRIVATE_CANARY",
+                    "synthetic@example.test",
+                    "Subject",
+                    "Message 2",
+                ] {
+                    assert!(!report.contains(private), "{private} leaked: {report}");
+                }
+            },
         );
     }
 }

@@ -618,6 +618,7 @@ fn one_unparseable_message_does_not_block_later_mail_or_other_folders() {
                 self.broken = true;
                 return Err(MailError::ResponseParse {
                     operation: "reading message headers and MIME structure",
+                    diagnostic: None,
                 });
             }
             TestSession.fetch_messages(uids)
@@ -705,6 +706,7 @@ fn parser_recovery_is_bounded_and_refuses_changed_folder_epochs() {
             if self.mode != 0 || uids.len() > 50 {
                 return Err(MailError::ResponseParse {
                     operation: "reading message headers and MIME structure",
+                    diagnostic: None,
                 });
             }
             TestSession.fetch_messages(uids)

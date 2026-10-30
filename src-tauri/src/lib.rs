@@ -20,6 +20,7 @@ use tauri_plugin_opener::OpenerExt;
 mod mail;
 
 const MAIN: &str = "main";
+const DIAGNOSE_SYNC: &str = "--diagnose-sync";
 const VIEWER_SCHEME: &str = "pigeon-viewer";
 const VIEWER_PREFIX: &str = "viewer-";
 const HOSTILE_FIXTURE: &str = include_str!("../../crates/pigeon-core/tests/fixtures/hostile.html");
@@ -389,8 +390,33 @@ fn start_selftest(app: AppHandle) {
     });
 }
 
+/// Prints a redacted sync report and exits. Needs no window, and shares the
+/// normal store and keyring, so it retries exactly what "Sync now" would.
+fn start_sync_diagnostic(app: AppHandle, engine: Arc<MailEngine>) {
+    if let Some(window) = app.get_webview_window(MAIN) {
+        let _ = window.hide();
+    }
+    std::thread::spawn(move || {
+        let code = match engine.diagnose_sync() {
+            Ok(report) => {
+                println!("{report}");
+                0
+            }
+            Err(error) => {
+                eprintln!("Pigeon sync diagnostic failed: {error}");
+                1
+            }
+        };
+        app.exit(code);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A running instance swallows this process via single-instance, silently.
+    if std::env::args().any(|arg| arg == DIAGNOSE_SYNC) {
+        println!("Running sync diagnostic. If no report follows, quit Pigeon and run this again.");
+    }
     tauri::Builder::default()
         // Relaunching from the desktop launcher reopens the running instance.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -415,6 +441,8 @@ pub fn run() {
             app.manage(engine.clone());
             if std::env::var_os("PIGEON_SELFTEST").is_some() {
                 start_selftest(app.handle().clone());
+            } else if std::env::args().any(|arg| arg == DIAGNOSE_SYNC) {
+                start_sync_diagnostic(app.handle().clone(), engine);
             } else {
                 // A single background coordinator keeps account refreshes from
                 // multiplying when windows or routes mount. Network work never
