@@ -1,10 +1,22 @@
 {
   description = "Pigeon: a modern, local-first email client";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Only used to evaluate the Home Manager module in `checks`. Consumers
+    # should make it follow their own: `pigeon.inputs.home-manager.follows`.
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      home-manager,
+    }:
     let
       # x86_64-linux is the supported target; aarch64-linux is built for
       # development containers only.
@@ -39,8 +51,16 @@
           # Runs the packaged binary's self-test in real WebKitGTK with a
           # throwaway keyring: SQLCipher/FTS5, keyring unlock, and viewer IPC denial.
           selftest = pkgs.callPackage ./nix/selftest.nix { inherit pigeon; };
+          home-manager = pkgs.callPackage ./nix/home-manager-check.nix {
+            inherit home-manager;
+            module = self.homeManagerModules.default;
+          };
         }
       );
+
+      # Non-secret settings and starting at login; see the README.
+      homeManagerModules.default = import ./nix/home-manager.nix { inherit self; };
+      homeModules = self.homeManagerModules;
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {

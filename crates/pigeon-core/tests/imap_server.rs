@@ -45,11 +45,13 @@ fn real_read_only_sync_downloads_text_and_indexes_it_across_folders() {
     engine.sync_account(&account.id).unwrap();
     engine.sync_account(&account.id).unwrap();
     // The real server reports its hierarchy separator, which drives nesting.
-    assert!(engine
-        .folders()
-        .unwrap()
-        .iter()
-        .all(|folder| folder.delimiter.as_deref().is_some_and(|d| d.len() == 1)));
+    assert!(
+        engine
+            .folders()
+            .unwrap()
+            .iter()
+            .all(|folder| folder.delimiter.as_deref().is_some_and(|d| d.len() == 1))
+    );
     let invoice = engine
         .search(&SearchQuery {
             text: "receipt".into(),
