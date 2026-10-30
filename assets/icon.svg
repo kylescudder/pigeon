@@ -1,4 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#7c3aed"/>
-  <text x="32" y="32" dy="0.35em" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="32" font-weight="600" fill="#ffffff">P</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a1b3ff"/>
+      <stop offset=".55" stop-color="#7188e2"/>
+      <stop offset="1" stop-color="#536ac3"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dfe5fb"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6ee7b7"/>
+      <stop offset="1" stop-color="#c084fc"/>
+    </linearGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="7"/></filter>
+    <clipPath id="bird"><path id="shape" d="M372 250C392 310 360 372 290 388C240 398 200 388 170 372L92 404L80 376L168 330C190 280 240 240 290 226C300 222 300 200 296 180C296 130 370 112 382 160C386 190 370 214 372 250Z"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g stroke="#f4a3a3" stroke-width="9" stroke-linecap="round" fill="none">
+    <path d="M268 386L262 414M248 416H276"/>
+    <path d="M304 380L304 410M290 412H318"/>
+  </g>
+  <use href="#shape" fill="url(#body)"/>
+  <g clip-path="url(#bird)">
+    <ellipse cx="334" cy="218" rx="58" ry="30" transform="rotate(28 334 218)" fill="url(#sheen)" opacity=".6" filter="url(#soft)"/>
+    <path d="M190 312C230 258 296 244 334 262C344 300 306 344 236 354L150 356Z" fill="#c4cdf3"/>
+    <path d="M50 352L132 324L144 432L60 444Z" fill="#46549a"/>
+  </g>
+  <g stroke="#46549a" stroke-width="11" stroke-linecap="round" fill="none">
+    <path d="M226 302Q262 288 296 298"/>
+    <path d="M210 326Q252 312 290 322"/>
+  </g>
+  <path d="M380 152L420 174L381 180Z" fill="#3b4580"/>
+  <ellipse cx="381" cy="157" rx="7" ry="5" fill="#ffffff"/>
+  <circle cx="350" cy="158" r="10" fill="#f59e0b"/>
+  <circle cx="350" cy="158" r="5" fill="#1e1b2e"/>
 </svg>

@@ -131,16 +131,25 @@ export function AppMark({ small = false }: { small?: boolean }) {
       className={`app-mark${small ? " app-mark-small" : ""}`}
       aria-hidden="true"
     >
-      <svg width="25" height="25" viewBox="0 0 28 28" fill="none">
+      {/* The pigeon from assets/icon.svg, simplified to stay crisp when small. */}
+      <svg width="28" height="28" viewBox="60 100 380 350" fill="none">
         <path
-          d="M6 22V7h7.4c4.4 0 6.6 2.1 6.6 5.6 0 3.6-2.5 5.8-6.8 5.8H11V22H6Z"
+          d="M372 250C392 310 360 372 290 388C240 398 204 390 182 380L98 416L74 364L168 328C190 280 240 240 290 226C300 222 300 200 296 180C296 130 370 112 382 160C386 190 370 214 372 250Z"
           fill="white"
         />
+        <path d="M132 342L144 396L98 416L74 364Z" fill="#46549a" />
         <path
-          d="M11 11v3.5h2.2c1.5 0 2.3-.6 2.3-1.8S14.7 11 13.2 11H11Z"
-          fill="#748de7"
+          d="M190 312C230 258 296 244 334 262C344 300 306 344 236 354L150 356Z"
+          fill="#c4cdf3"
         />
-        <path d="m19 5 3 3-3 3-3-3 3-3Z" fill="white" fillOpacity=".6" />
+        <path
+          d="M226 302Q262 288 296 298M210 326Q252 312 290 322"
+          stroke="#46549a"
+          strokeWidth="14"
+          strokeLinecap="round"
+        />
+        <path d="M380 152L420 174L381 180Z" fill="#3b4580" />
+        <circle cx="350" cy="158" r="12" fill="#1e1b2e" />
       </svg>
     </span>
   );
