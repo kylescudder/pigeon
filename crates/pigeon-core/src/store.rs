@@ -125,6 +125,17 @@ const MIGRATIONS: &[&str] = &[
     END;",
     // Filled in by the next sync of each folder; until then folders show flat.
     "ALTER TABLE mail_folders ADD COLUMN delimiter TEXT;",
+    // Attachment payloads the user chose to keep. They go with their message
+    // row, so pruning, UIDVALIDITY replacement and account removal clear them.
+    "CREATE TABLE attachment_blobs (
+        message INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        part TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        data BLOB NOT NULL,
+        stored_at INTEGER NOT NULL,
+        PRIMARY KEY (message, part)
+    );
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
 ];
 
 impl Store {

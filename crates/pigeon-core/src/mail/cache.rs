@@ -14,7 +14,7 @@ use super::{
 };
 
 const SUMMARY: &str = "m.id,m.account,m.folder,m.sender,m.recipients,m.subject,substr(m.body_text,1,180),m.date,m.unread,m.has_attachments";
-const VISIBLE: &str = "(f.uid_validity IS NULL OR m.uid_validity=f.uid_validity)";
+pub(super) const VISIBLE: &str = "(f.uid_validity IS NULL OR m.uid_validity=f.uid_validity)";
 
 fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
     Ok(MessageSummary {

@@ -101,8 +101,14 @@ test.beforeEach(async ({ page }) => {
                     : args.id === 1
                     ? "Please find the café receipt. <script>window.mailInjected=true</script>"
                     : "The delivery plan is ready.",
-                has_html: false,
-                attachments: [],
+                has_html: args.id === 2,
+                attachments:
+                  args.id === 2
+                    ? [
+                        { part: "1.2.2", filename: "Unnamed attachment", content_type: "image/png", size: 120, content_id: "logo@example.test" },
+                        { part: "2", filename: "plan.pdf", content_type: "application/pdf", size: 4096, content_id: null },
+                      ]
+                    : [],
               };
             case "save_mail_search": {
               const saved = {
@@ -130,6 +136,8 @@ test.beforeEach(async ({ page }) => {
               localStorage.removeItem("pigeon-test-locked");
               return;
             case "open_mail_message":
+              // Message 2 models opening while its embedded image is unreachable.
+              return { missing_inline: args.id === 2 ? 1 : 0 };
             case "update_mail_password":
               return;
             case "quit_app":
@@ -302,4 +310,28 @@ test("nested folders show as a collapsible tree", async ({ page }, testInfo) => 
   await page.screenshot({ path: testInfo.outputPath("folder-tree.png") });
   await tree.getByRole("button", { name: "Collapse INBOX", exact: true }).click();
   await expect(tree.getByRole("link", { name: /Polaris/ })).toHaveCount(0);
+});
+
+test("formatted view reports embedded images it could not download", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("pigeon-fixture-state")) localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{ id: "acc-1", config: { name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993, username: "mail@example.test", security: "tls" }, status: "idle", error: null, last_synced: 1793008800, sync_folder: null, sync_cached: 2, sync_total: 2 }],
+      folders: [{ id: "folder-1", account_id: "acc-1", name: "INBOX", kind: "inbox", delimiter: "/", total: 2, cached: 2, unread: 1 }], saved_searches: [],
+    }));
+  });
+  await page.goto("/mail");
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await expect(page.getByText("plan.pdf")).toBeVisible();
+  await expect(page.getByText(/Embedded images appear in the formatted view/)).toBeVisible();
+  await page.getByRole("button", { name: "Open formatted view", exact: true }).click();
+  await expect(page.getByText(/could not be downloaded/)).toHaveText(
+    "1 embedded image could not be downloaded, so the formatted view shows its description instead. Reconnect and open it again to try once more.",
+  );
+  await page.screenshot({ path: testInfo.outputPath("missing-embedded-image.png") });
+  // The note belongs to that opening; choosing another message clears it.
+  const back = page.getByRole("button", { name: "Messages", exact: true });
+  if (await back.isVisible()) await back.click();
+  await page.getByRole("button", { name: /Invoice 4471/ }).click();
+  await expect(page.getByRole("heading", { name: "Invoice 4471", exact: true })).toBeVisible();
+  await expect(page.getByText(/could not be downloaded/)).toHaveCount(0);
 });

@@ -4,7 +4,6 @@ use pigeon_core::mail::{
     SearchResults,
 };
 use pigeon_core::secrets::Secret;
-use pigeon_core::viewer::{self, RemoteContent};
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
@@ -222,31 +221,26 @@ pub async fn unlock_mail(app: AppHandle, webview: tauri::Webview) -> Result<(), 
     task(app, MailEngine::unlock).await
 }
 
+#[derive(Serialize)]
+pub struct OpenedMessage {
+    /// Embedded images that could not be downloaded, such as while offline.
+    missing_inline: u32,
+}
+
 #[tauri::command]
 pub async fn open_mail_message(
     app: AppHandle,
     webview: tauri::Webview,
     id: i64,
-) -> Result<(), MailApiError> {
+) -> Result<OpenedMessage, MailApiError> {
     guard(&webview)?;
-    let document = task(app.clone(), move |engine| {
-        let message = engine.message(id)?;
-        let html = message.body_html.unwrap_or_else(|| {
-            format!(
-                "<pre>{}</pre>",
-                message
-                    .body_text
-                    .replace('&', "&amp;")
-                    .replace('<', "&lt;")
-                    .replace('>', "&gt;")
-            )
-        });
-        Ok(viewer::document(
-            &viewer::sanitise(&html, RemoteContent::Blocked),
-            RemoteContent::Blocked,
-        ))
-    })
-    .await?;
+    // Embedded images are fetched over the mail connection and inlined; the
+    // viewer document itself can load nothing from the network.
+    let document = task(app.clone(), move |engine| engine.viewer_document(id)).await?;
+    let opened = OpenedMessage {
+        missing_inline: document.missing_inline,
+    };
+    let document = document.html;
     let token = app
         .state::<crate::ShellState>()
         .viewer_count
@@ -281,5 +275,6 @@ pub async fn open_mail_message(
     .map_err(|_| MailApiError {
         code: "viewer",
         message: "The message viewer was interrupted.".into(),
-    })?
+    })??;
+    Ok(opened)
 }

@@ -3070,6 +3070,7 @@ version = "0.1.0"
 dependencies = [
  "ammonia",
  "chrono",
+ "data-encoding",
  "getrandom 0.4.3",
  "hex",
  "html2text",
@@ -3077,6 +3078,7 @@ dependencies = [
  "imap-proto",
  "mailparse",
  "native-tls",
+ "percent-encoding",
  "rusqlite",
  "secret-service",
  "serde",

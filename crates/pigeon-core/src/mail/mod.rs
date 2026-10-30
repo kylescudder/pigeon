@@ -13,6 +13,9 @@ use crate::secrets::{KeyringState, Secret, SecretStore};
 use crate::store::Store;
 use crate::unlock::{UnlockOutcome, open_store};
 
+pub use attachments::{AttachmentData, MAX_ATTACHMENT_BYTES, ViewerDocument};
+
+mod attachments;
 mod cache;
 mod diagnostics;
 mod imap;
@@ -200,6 +203,9 @@ pub struct MailEngine {
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
     parse_failures: Mutex<Vec<ParseFailure>>,
+    /// Downloaded but not kept attachment payloads, in memory for this
+    /// session only. Cleared whenever the store becomes unavailable.
+    parts: Mutex<attachments::PartCache>,
 }
 
 /// One message this client could not parse. Holds no folder name, UID, or
@@ -295,6 +301,7 @@ impl MailEngine {
             // The store mutex is not fair; give waiting readers a turn.
             std::thread::sleep(Duration::from_millis(1));
         }
+        self.forget_session_parts(Some(id));
         self.secrets
             .delete(&format!("account:{id}:password"))
             .map_err(|_| MailError::Locked)?;
@@ -322,6 +329,7 @@ impl MailEngine {
             syncing: Mutex::new(HashMap::new()),
             searches: Mutex::new(HashMap::new()),
             parse_failures: Mutex::new(Vec::new()),
+            parts: Mutex::new(attachments::PartCache::default()),
         }
     }
 
@@ -616,6 +624,7 @@ impl MailEngine {
             .map_err(|_| MailError::Storage("mail store lock unavailable".into()))?;
         if self.secrets.state() != KeyringState::Unlocked {
             *guard = None;
+            self.forget_session_parts(None);
             return Err(MailError::Locked);
         }
         if guard.is_none() {
