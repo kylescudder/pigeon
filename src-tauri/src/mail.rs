@@ -33,6 +33,7 @@ impl From<MailError> for MailApiError {
             MailError::Busy => "busy",
             MailError::Cancelled => "cancelled",
             MailError::InvalidSearch(_) => "invalid_search",
+            MailError::Conflict(_) => "conflict",
         };
         Self {
             code,

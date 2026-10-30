@@ -447,6 +447,18 @@ pub fn run() {
                 // A single background coordinator keeps account refreshes from
                 // multiplying when windows or routes mount. Network work never
                 // holds the store mutex; the interface can keep reading/searching.
+                let operations = engine.clone();
+                // One worker runs queued server changes in order. It idles
+                // while the store is locked and wakes when work is queued.
+                std::thread::spawn(move || {
+                    loop {
+                        match operations.run_next_operation() {
+                            Ok(true) => {}
+                            Ok(false) => operations.wait_for_operations(Duration::from_secs(1)),
+                            Err(_) => std::thread::sleep(Duration::from_secs(2)),
+                        }
+                    }
+                });
                 std::thread::spawn(move || {
                     loop {
                         if let Ok(accounts) = engine.accounts() {

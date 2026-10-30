@@ -144,3 +144,23 @@ Pigeon now selects a narrowly patched, repository-local copy of `imap-proto` 0.1
 The actual scripted FETCH regression now requires all three messages to download successfully, including extended MIME metadata and an unquoted Content-ID. Malformed numeric/extension syntax is still rejected. Existing bounded recovery remains available for other unsupported responses. TLS, read-only EXAMINE/PEEK operations, attachment-payload selection, encryption and message-viewer permissions are unchanged. The parser dependency's existing Nom/lifetime warnings remain documented maintenance work.
 
 Verification: 30 application core tests, 39 upstream parser tests, six real Dovecot tests and 21 production-build browser tests pass. Packaged Nix/native results and exact source revision are recorded in ignored `evidence/zoho-parser/`. This is a tested compatibility fix; the original Zoho message has not been fetched by the development environment. Retry it on the target machine after updating; no cache reset or account removal is needed.
+
+## Durable operations queue, 2026-10-30
+
+Outgoing mail and mailbox changes share one durable queue, `pigeon_core::mail::operations`. Rows sit in the encrypted store (`operations` table, migration 6). Each kind registers one `OperationHandler`. A single background worker in the shell claims due work and runs the handler without holding the store lock. While the keyring is locked, the worker does nothing.
+
+States:
+- `pending` waits for its `not_before` time, which is how the undo delay works, and for any parent operation to finish.
+- `running`, `done`, `failed` (safe to retry, waits for the user) and `cancelled`.
+- `unknown` means the operation may have taken effect on the server. Only an explicit resolution moves it on: run again, mark done or discard. Neither ordinary retry nor a restart retries it.
+- `held` is never run automatically. Restored backups can use it to keep outgoing mail paused for review.
+
+A handler calls `begin_irreversible()` just before any step that cannot be safely repeated, such as sending the final end-of-message marker in SMTP. After a crash, any work left `running` is queued again if it had not reached that point, and becomes `unknown` if it had. If a handler finishes while the store is locked, its outcome is kept in memory and written when the store reopens. It is never re-run.
+
+A new kind needs a handler with a stable `kind()` name and a JSON payload. Queue work with `MailEngine::enqueue_operation`, or with `operations::insert` inside your own transaction. Operations have no foreign key to accounts, so removing an account cannot silently drop unsent work.
+
+`cargo test -p pigeon-core --test operations` covers:
+- claim and undo races, backoff, held work and parent ordering;
+- recovery after a crash on either side of the irreversible point, and panics;
+- locked-store pausing, and outcomes recorded after unlock.
+

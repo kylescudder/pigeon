@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,7 @@ use crate::unlock::{UnlockOutcome, open_store};
 mod cache;
 mod diagnostics;
 mod imap;
+pub mod operations;
 mod query;
 pub mod source;
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
@@ -180,6 +181,8 @@ pub enum MailError {
     Cancelled,
     #[error("invalid search: {0}")]
     InvalidSearch(String),
+    #[error("{0}")]
+    Conflict(String),
 }
 
 struct FetchContext<'a> {
@@ -200,6 +203,8 @@ pub struct MailEngine {
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
     parse_failures: Mutex<Vec<ParseFailure>>,
+    operations: Mutex<operations::Runtime>,
+    operations_signal: (Mutex<bool>, Condvar),
 }
 
 /// One message this client could not parse. Holds no folder name, UID, or
@@ -322,6 +327,8 @@ impl MailEngine {
             syncing: Mutex::new(HashMap::new()),
             searches: Mutex::new(HashMap::new()),
             parse_failures: Mutex::new(Vec::new()),
+            operations: Mutex::new(operations::Runtime::default()),
+            operations_signal: (Mutex::new(false), Condvar::new()),
         }
     }
 
@@ -622,6 +629,7 @@ impl MailEngine {
             match open_store(self.secrets.as_ref(), &self.path) {
                 UnlockOutcome::Opened { store, .. } => {
                     store.connection().execute("UPDATE mail_accounts SET sync_status='interrupted', last_error='Sync was interrupted; reconnect to resume' WHERE sync_status='syncing'", []).map_err(storage_error)?;
+                    self.reconcile_operations(store.connection())?;
                     *guard = Some(store);
                 }
                 UnlockOutcome::Blocked(reason) => {
