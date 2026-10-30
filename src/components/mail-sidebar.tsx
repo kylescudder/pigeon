@@ -108,6 +108,7 @@ export function MailSidebar() {
           </div>
         </div>
       )}
+      <PendingLink />
       {!!mail.state?.saved_searches.length && (
         <div className="saved-searches">
           <span className="section-label">Saved searches</span>
@@ -126,6 +127,30 @@ export function MailSidebar() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Shown while server changes are outstanding; warns when any need attention. */
+function PendingLink() {
+  const mail = useMail();
+  const counts = mail.state?.actions;
+  const total = counts ? counts.pending + counts.failed + counts.conflict : 0;
+  if (!total) return null;
+  const attention = counts!.failed + counts!.conflict;
+  return (
+    <Link
+      to="/pending"
+      className={`saved-search-link pending-link${attention ? " needs-attention" : ""}`}
+      title={
+        attention
+          ? `${attention} change${attention === 1 ? "" : "s"} need attention`
+          : "Changes waiting for the mail server"
+      }
+    >
+      <Icon name={attention ? "alert" : "refresh"} size={14} />
+      <span className="sidebar-label">Pending changes</span>
+      <span className="pending-count">{total.toLocaleString()}</span>
+    </Link>
   );
 }
 

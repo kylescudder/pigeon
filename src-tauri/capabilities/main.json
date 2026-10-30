@@ -21,6 +21,10 @@
     "allow-remove-mail-account",
     "allow-update-mail-password",
     "allow-unlock-mail",
-    "allow-open-mail-message"
+    "allow-open-mail-message",
+    "allow-queue-mail-actions",
+    "allow-mail-actions",
+    "allow-retry-mail-action",
+    "allow-discard-mail-action"
   ]
 }

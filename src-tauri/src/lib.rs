@@ -343,6 +343,10 @@ async function attempt(name, cmd, args) {
   await attempt("delete search", "delete_mail_search", { id: "probe" });
   await attempt("remove account", "remove_mail_account", { id: "probe" });
   await attempt("update password", "update_mail_password", { id: "probe", password: "synthetic-probe-value" });
+  await attempt("queue mail change", "queue_mail_actions", { ids: [1], kind: { type: "delete_permanently" } });
+  await attempt("list mail changes", "mail_actions");
+  await attempt("retry mail change", "retry_mail_action", { id: 1 });
+  await attempt("discard mail change", "discard_mail_action", { id: 1 });
   await attempt("add account", "add_mail_account", { config: { name: "Probe", address: "probe@example.test", host: "example.test", port: 993, username: "probe", security: "tls", ca_certificate: null }, password: "synthetic-probe-value" });
   try {
     await fetch("https://example.org/");
@@ -488,6 +492,10 @@ pub fn run() {
             mail::update_mail_password,
             mail::unlock_mail,
             mail::open_mail_message,
+            mail::queue_mail_actions,
+            mail::mail_actions,
+            mail::retry_mail_action,
+            mail::discard_mail_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pigeon");

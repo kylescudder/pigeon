@@ -21,6 +21,10 @@ fn main() {
             "update_mail_password",
             "unlock_mail",
             "open_mail_message",
+            "queue_mail_actions",
+            "mail_actions",
+            "retry_mail_action",
+            "discard_mail_action",
         ]),
     ))
     .expect("failed to run tauri-build");

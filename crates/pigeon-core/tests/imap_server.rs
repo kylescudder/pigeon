@@ -45,11 +45,13 @@ fn real_read_only_sync_downloads_text_and_indexes_it_across_folders() {
     engine.sync_account(&account.id).unwrap();
     engine.sync_account(&account.id).unwrap();
     // The real server reports its hierarchy separator, which drives nesting.
-    assert!(engine
-        .folders()
-        .unwrap()
-        .iter()
-        .all(|folder| folder.delimiter.as_deref().is_some_and(|d| d.len() == 1)));
+    assert!(
+        engine
+            .folders()
+            .unwrap()
+            .iter()
+            .all(|folder| folder.delimiter.as_deref().is_some_and(|d| d.len() == 1))
+    );
     let invoice = engine
         .search(&SearchQuery {
             text: "receipt".into(),
@@ -331,4 +333,231 @@ fn dropped_wire_connection_preserves_offline_mail_and_recovers() {
     assert_eq!(engine.search(&query).unwrap().total, before.total);
     assert_eq!(engine.accounts().unwrap()[0].status, "idle");
     relay.join().unwrap();
+}
+
+type Admin = imap::Session<native_tls::TlsStream<std::net::TcpStream>>;
+
+/// An independent, real IMAP client standing in for webmail or another device.
+fn second_client() -> Admin {
+    let mut builder = native_tls::TlsConnector::builder();
+    builder.add_root_certificate(
+        native_tls::Certificate::from_pem(std::fs::read("/pki/ca.pem").unwrap().as_slice())
+            .unwrap(),
+    );
+    imap::connect(("localhost", 993), "localhost", &builder.build().unwrap())
+        .unwrap()
+        .login("mail@pigeon.test", "pigeon-test-only")
+        .map_err(|(error, _)| error)
+        .unwrap()
+}
+
+fn append(admin: &mut Admin, folder: &str, subject: &str) {
+    admin
+        .append(
+            folder,
+            format!("From: queue@pigeon.test\r\nTo: mail@pigeon.test\r\nSubject: {subject}\r\n\r\nQueue fixture {subject}\r\n"),
+        )
+        .unwrap();
+}
+
+/// UIDs of messages with this subject, as the second client sees them.
+fn server_uids(admin: &mut Admin, folder: &str, subject: &str) -> Vec<u32> {
+    admin.select(folder).unwrap();
+    let mut uids: Vec<u32> = admin
+        .uid_search(format!("SUBJECT \"{subject}\""))
+        .unwrap()
+        .into_iter()
+        .collect();
+    uids.sort_unstable();
+    uids
+}
+
+fn server_seen(admin: &mut Admin, folder: &str, subject: &str) -> bool {
+    let uid = server_uids(admin, folder, subject)[0];
+    let fetched = admin.uid_fetch(uid.to_string(), "FLAGS").unwrap();
+    fetched
+        .iter()
+        .any(|message| message.flags().contains(&imap::types::Flag::Seen))
+}
+
+/// Removes this test's mail from shared folders by UID, leaving fixtures intact.
+fn remove_by_subject(admin: &mut Admin, folder: &str, subject: &str) {
+    let uids = server_uids(admin, folder, subject);
+    if !uids.is_empty() {
+        let set = uids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        admin.uid_store(&set, "+FLAGS.SILENT (\\Deleted)").unwrap();
+        admin.uid_expunge(&set).unwrap();
+    }
+}
+
+fn local_id(engine: &MailEngine, folder: &str, subject: &str) -> Option<i64> {
+    engine
+        .search(&SearchQuery {
+            folder: Some(folder.into()),
+            ..Default::default()
+        })
+        .unwrap()
+        .messages
+        .into_iter()
+        .find(|message| message.subject == subject)
+        .map(|message| message.id)
+}
+
+#[test]
+#[ignore = "requires the disposable Dovecot TLS server"]
+fn real_queued_changes_are_observed_by_a_second_client() {
+    use pigeon_core::mail::ActionKind;
+    let mut admin = second_client();
+    let capabilities = admin.capabilities().unwrap();
+    assert!(capabilities.has_str("MOVE") && capabilities.has_str("UIDPLUS"));
+    admin.create("Actions").unwrap();
+    for subject in [
+        "Queue read",
+        "Queue archive",
+        "Queue trash",
+        "Queue purge",
+        "Queue bystander",
+    ] {
+        append(&mut admin, "Actions", subject);
+    }
+    // Another client has flagged this for deletion but not expunged it.
+    let bystander = server_uids(&mut admin, "Actions", "Queue bystander")[0];
+    admin
+        .uid_store(bystander.to_string(), "+FLAGS.SILENT (\\Deleted)")
+        .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let engine = MailEngine::new(
+        dir.path().join("mail.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+    );
+    let account = engine
+        .add_account(config(), Zeroizing::new(b"pigeon-test-only".to_vec()))
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    assert!(
+        local_id(&engine, "Actions", "Queue bystander").is_none(),
+        "\\Deleted mail is not shown"
+    );
+    let id = |subject| local_id(&engine, "Actions", subject).unwrap();
+
+    engine
+        .queue_actions(&[id("Queue read")], ActionKind::MarkRead)
+        .unwrap();
+    engine.apply_actions(&account.id).unwrap();
+    assert!(server_seen(&mut admin, "Actions", "Queue read"));
+    engine
+        .queue_actions(&[id("Queue read")], ActionKind::MarkUnread)
+        .unwrap();
+    engine.apply_actions(&account.id).unwrap();
+    assert!(!server_seen(&mut admin, "Actions", "Queue read"));
+
+    let (archive, trash, purge) = (id("Queue archive"), id("Queue trash"), id("Queue purge"));
+    engine
+        .queue_actions(&[archive], ActionKind::Archive)
+        .unwrap();
+    engine.queue_actions(&[trash], ActionKind::Trash).unwrap();
+    engine
+        .queue_actions(&[purge], ActionKind::DeletePermanently)
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    assert!(engine.pending_actions().unwrap().is_empty());
+
+    assert!(server_uids(&mut admin, "Actions", "Queue archive").is_empty());
+    assert_eq!(server_uids(&mut admin, "Archive", "Queue archive").len(), 1);
+    assert_eq!(server_uids(&mut admin, "Trash", "Queue trash").len(), 1);
+    assert!(server_uids(&mut admin, "Actions", "Queue purge").is_empty());
+    for folder in ["Archive", "Trash"] {
+        assert!(server_uids(&mut admin, folder, "Queue purge").is_empty());
+    }
+    assert_eq!(
+        server_uids(&mut admin, "Actions", "Queue bystander"),
+        [bystander],
+        "UID EXPUNGE left the other client's \\Deleted message alone"
+    );
+    assert!(local_id(&engine, "Archive", "Queue archive").is_some());
+    assert!(local_id(&engine, "Trash", "Queue trash").is_some());
+    assert!(local_id(&engine, "Actions", "Queue archive").is_none());
+
+    // Permanently delete from Trash, as the interface offers there.
+    let trashed = local_id(&engine, "Trash", "Queue trash").unwrap();
+    engine
+        .queue_actions(&[trashed], ActionKind::DeletePermanently)
+        .unwrap();
+    engine.apply_actions(&account.id).unwrap();
+    assert!(server_uids(&mut admin, "Trash", "Queue trash").is_empty());
+
+    remove_by_subject(&mut admin, "Archive", "Queue archive");
+    admin.select("INBOX").unwrap();
+    admin.delete("Actions").unwrap();
+    drop(admin);
+}
+
+#[test]
+#[ignore = "requires the disposable Dovecot TLS server"]
+fn real_queue_survives_restart_and_never_resurrects_remotely_deleted_mail() {
+    use pigeon_core::mail::ActionKind;
+    struct Offline;
+    impl pigeon_core::mail::source::MailConnector for Offline {
+        fn connect(
+            &self,
+            _: &AccountConfig,
+            _: &pigeon_core::secrets::Secret,
+        ) -> Result<Box<dyn pigeon_core::mail::source::MailSession>, MailError> {
+            Err(MailError::Connection)
+        }
+    }
+    let mut admin = second_client();
+    admin.create("Offline").unwrap();
+    append(&mut admin, "Offline", "Queue offline read");
+    append(&mut admin, "Offline", "Queue vanishing");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mail.db");
+    let secrets = Arc::new(MemoryStore::new(KeyringState::Unlocked));
+    let account = {
+        let engine = MailEngine::new(path.clone(), secrets.clone());
+        let account = engine
+            .add_account(config(), Zeroizing::new(b"pigeon-test-only".to_vec()))
+            .unwrap();
+        engine.sync_account(&account.id).unwrap();
+        account
+    };
+    {
+        let offline = MailEngine::with_connector(path.clone(), secrets.clone(), Arc::new(Offline));
+        let read = local_id(&offline, "Offline", "Queue offline read").unwrap();
+        let vanishing = local_id(&offline, "Offline", "Queue vanishing").unwrap();
+        offline
+            .queue_actions(&[read], ActionKind::MarkRead)
+            .unwrap();
+        offline
+            .queue_actions(&[vanishing], ActionKind::Archive)
+            .unwrap();
+        assert!(offline.sync_account(&account.id).is_err());
+        assert_eq!(offline.pending_actions().unwrap().len(), 2);
+    }
+    // While Pigeon is offline, the second client deletes the queued message.
+    remove_by_subject(&mut admin, "Offline", "Queue vanishing");
+
+    let engine = MailEngine::new(path, secrets);
+    engine.sync_account(&account.id).unwrap();
+    assert!(server_seen(&mut admin, "Offline", "Queue offline read"));
+    let pending = engine.pending_actions().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].state, "conflict");
+    for folder in ["Offline", "Archive", "INBOX", "Trash"] {
+        assert!(
+            server_uids(&mut admin, folder, "Queue vanishing").is_empty(),
+            "resurrected in {folder}"
+        );
+    }
+    assert!(local_id(&engine, "Offline", "Queue vanishing").is_none());
+    engine.discard_action(pending[0].id).unwrap();
+
+    admin.select("INBOX").unwrap();
+    admin.delete("Offline").unwrap();
+    drop(admin);
 }

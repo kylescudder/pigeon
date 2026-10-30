@@ -13,8 +13,10 @@ import {
   errorMessage,
   isDesktop,
   mailState,
+  queueMailActions,
   syncMailAccount,
   unlockMail,
+  type MailActionKind,
   type MailState,
 } from "../lib/native";
 import { AccountDialog } from "./account-dialog";
@@ -31,6 +33,8 @@ type MailContextValue = {
   refresh: () => Promise<void>;
   sync: (id: string) => Promise<void>;
   cancelSync: (id: string) => Promise<void>;
+  /** Queues a server change. Resolves false if it could not be queued. */
+  act: (ids: number[], kind: MailActionKind) => Promise<boolean>;
   active: Set<string>;
 };
 const MailContext = createContext<MailContextValue | null>(null);
@@ -61,7 +65,9 @@ export function MailProvider({ children }: { children: ReactNode }) {
       active.size > 0 ||
       query.state.data?.accounts.some((account) => account.status === "syncing")
         ? 1000
-        : 5000,
+        : query.state.data?.actions?.pending
+          ? 2000
+          : 5000,
   });
   useEffect(() => {
     if (stateQuery.isError) {
@@ -69,12 +75,32 @@ export function MailProvider({ children }: { children: ReactNode }) {
       // store becomes unavailable. Never keep showing a previous success.
       client.removeQueries({ queryKey: ["mail", "search"] });
       client.removeQueries({ queryKey: ["mail", "message"] });
+      client.removeQueries({ queryKey: ["mail", "actions"] });
     }
   }, [stateQuery.isError, client]);
+  // Changes apply in the background; refresh views when the queue drains.
+  const pendingChanges = stateQuery.data?.actions?.pending ?? 0;
+  useEffect(() => {
+    void client.invalidateQueries({ queryKey: ["mail", "search"] });
+    void client.invalidateQueries({ queryKey: ["mail", "actions"] });
+  }, [pendingChanges, client]);
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: MAIL_STATE_KEY });
     await client.invalidateQueries({ queryKey: ["mail", "search"] });
     await client.invalidateQueries({ queryKey: ["mail", "message"] });
+    await client.invalidateQueries({ queryKey: ["mail", "actions"] });
+  };
+  const act = async (ids: number[], kind: MailActionKind) => {
+    setActionError(null);
+    try {
+      await queueMailActions(ids, kind);
+      return true;
+    } catch (error) {
+      setActionError(errorMessage(error));
+      return false;
+    } finally {
+      await refresh();
+    }
   };
   const sync = async (id: string) => {
     setActionError(null);
@@ -115,6 +141,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
         refresh,
         sync,
         cancelSync,
+        act,
         active,
       }}
     >

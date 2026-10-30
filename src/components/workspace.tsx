@@ -114,7 +114,9 @@ export function Workspace({ children }: { children: ReactNode }) {
         ? "Appearance"
         : pathname === "/mail"
           ? "Mail"
-          : "Overview";
+          : pathname === "/pending"
+            ? "Pending changes"
+            : "Overview";
 
   return (
     <WorkspaceContext.Provider
