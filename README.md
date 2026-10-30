@@ -8,7 +8,34 @@ A modern, local-first IMAP/SMTP email client for NixOS. It uses an encrypted loc
 - [Receiving/search implementation and verification](docs/mail-engine.md)
 - [Milestone 0 foundation spike](docs/foundation-spike.md)
 
-## Try it on NixOS
+## Install on NixOS
+
+Add the flake as an input to your system flake. The repository is private, so
+use SSH; Nix uses your SSH agent to fetch it.
+
+```nix
+{
+  inputs.pigeon.url = "git+ssh://git@github.com/kylescudder/pigeon";
+
+  outputs = { nixpkgs, pigeon, ... }: {
+    nixosConfigurations.<host> = nixpkgs.lib.nixosSystem {
+      modules = [
+        ({ pkgs, ... }: {
+          environment.systemPackages = [
+            pigeon.packages.${pkgs.stdenv.hostPlatform.system}.default
+          ];
+        })
+      ];
+    };
+  };
+}
+```
+
+Rebuild, then start **Pigeon** from your launcher or run `pigeon`. Update with
+`nix flake update pigeon` and rebuild. To run it once without installing:
+`nix run git+ssh://git@github.com/kylescudder/pigeon`.
+
+## Try it from a checkout
 
 Quit the previous background instance with **Quit Pigeon**, then from the checkout:
 

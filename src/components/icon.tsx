@@ -131,25 +131,15 @@ export function AppMark({ small = false }: { small?: boolean }) {
       className={`app-mark${small ? " app-mark-small" : ""}`}
       aria-hidden="true"
     >
-      {/* The pigeon from assets/icon.svg, simplified to stay crisp when small. */}
-      <svg width="28" height="28" viewBox="60 100 380 350" fill="none">
+      {/* The pigeon from assets/icon.svg, without the soft neck sheen. */}
+      <svg width="100%" height="100%" viewBox="0 0 512 512" fill="none">
         <path
-          d="M372 250C392 310 360 372 290 388C240 398 204 390 182 380L98 416L74 364L168 328C190 280 240 240 290 226C300 222 300 200 296 180C296 130 370 112 382 160C386 190 370 214 372 250Z"
+          d="M164 520C164 430 150 350 168 270C184 172 234 106 310 106C372 106 404 150 408 192C412 240 374 270 354 310C332 360 342 450 368 520Z"
           fill="white"
         />
-        <path d="M132 342L144 396L98 416L74 364Z" fill="#46549a" />
-        <path
-          d="M190 312C230 258 296 244 334 262C344 300 306 344 236 354L150 356Z"
-          fill="#c4cdf3"
-        />
-        <path
-          d="M226 302Q262 288 296 298M210 326Q252 312 290 322"
-          stroke="#46549a"
-          strokeWidth="14"
-          strokeLinecap="round"
-        />
-        <path d="M380 152L420 174L381 180Z" fill="#3b4580" />
-        <circle cx="350" cy="158" r="12" fill="#1e1b2e" />
+        <path d="M402 178Q448 192 478 224Q446 234 404 230Z" fill="#3b4580" />
+        <circle cx="322" cy="184" r="30" fill="#f59e0b" />
+        <circle cx="322" cy="184" r="16" fill="#1e1b2e" />
       </svg>
     </span>
   );
