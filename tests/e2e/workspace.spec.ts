@@ -278,3 +278,69 @@ test("icon-only buttons centre their icons", async ({ page }) => {
     expect(Math.abs(offset.y), `${offset.label} y`).toBeLessThanOrEqual(0.5);
   }
 });
+
+test("desktop close behaviour is hidden in the browser", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(
+    page.getByRole("heading", { name: "Colour theme" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "When the window closes" }),
+  ).toHaveCount(0);
+});
+
+// Frontend behaviour only: the stub stands in for the settings file.
+for (const managed of [false, true]) {
+  test(`desktop close behaviour ${managed ? "is read-only when Home Manager manages it" : "can be changed and save failures show"}`, async ({
+    page,
+  }) => {
+    await page.addInitScript((managed) => {
+      let saves = 0;
+      let settings = {
+        closeToBackground: true,
+        notifications: "senderSubject",
+        tray: false,
+      };
+      (window as any).__savedSettings = [];
+      Object.defineProperty(window, "__TAURI_INTERNALS__", {
+        value: {
+          invoke: async (command: string, args: Record<string, any> = {}) => {
+            if (command === "mail_state")
+              return { accounts: [], folders: [], saved_searches: [] };
+            if (command === "desktop_settings")
+              return { settings, managed, warning: null };
+            if (command === "set_desktop_settings") {
+              if (++saves === 1) throw "Disk full in frontend test";
+              (window as any).__savedSettings.push(args.settings);
+              settings = args.settings;
+              return { settings, managed: false, warning: null };
+            }
+            throw new Error(`Unexpected test command: ${command}`);
+          },
+        },
+      });
+    }, managed);
+    await page.goto("/settings");
+    const group = page.getByRole("group", { name: "When the window closes" });
+    const keep = group.getByRole("button", { name: "Keep running" });
+    const quit = group.getByRole("button", { name: "Quit" });
+    await expect(keep).toHaveAttribute("aria-pressed", "true");
+    if (managed) {
+      await expect(keep).toBeDisabled();
+      await expect(quit).toBeDisabled();
+      await expect(page.getByText("Managed by Home Manager.")).toBeVisible();
+      return;
+    }
+    await quit.click();
+    await expect(page.getByRole("alert")).toContainText(
+      "Disk full in frontend test",
+    );
+    await expect(keep).toHaveAttribute("aria-pressed", "true");
+    await quit.click();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(quit).toHaveAttribute("aria-pressed", "true");
+    expect(await page.evaluate(() => (window as any).__savedSettings)).toEqual([
+      { closeToBackground: false, notifications: "senderSubject", tray: false },
+    ]);
+  });
+}

@@ -8,6 +8,8 @@ fn main() {
             "open_viewer_probe",
             "viewer_probe_reached",
             "quit_app",
+            "desktop_settings",
+            "set_desktop_settings",
             "mail_state",
             "add_mail_account",
             "sync_mail_account",
