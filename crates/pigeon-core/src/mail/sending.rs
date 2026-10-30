@@ -404,19 +404,41 @@ fn undo_seconds(conn: &Connection) -> Result<u32, MailError> {
         .min(MAX_UNDO_SECONDS))
 }
 
-/// Queues the Sent copy for an accepted message, if the account wants one.
-fn queue_sent_copy(conn: &Connection, outbox: &str, account: &Account) -> Result<(), MailError> {
+/// Marks a message accepted and queues its Sent copy if the account wants
+/// one. Reads the account from `conn`, so it can run inside the transaction
+/// that records the accepted send.
+fn queue_sent_copy(conn: &Connection, outbox: &str, account: &str) -> Result<(), MailError> {
     conn.execute(
-        "UPDATE outbox SET accepted=?2 WHERE id=?1",
+        "UPDATE outbox SET accepted=coalesce(accepted,?2) WHERE id=?1",
         params![outbox, operations::now_ms()],
     )
     .map_err(storage_error)?;
-    if !account.config.sending.save_sent_copy {
+    let config: Option<String> = conn
+        .query_row(
+            "SELECT config FROM mail_accounts WHERE id=?1",
+            [account],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    let wanted = config
+        .and_then(|config| serde_json::from_str::<super::AccountConfig>(&config).ok())
+        .is_some_and(|config| config.sending.save_sent_copy);
+    let existing: Option<Option<String>> = conn
+        .query_row(
+            "SELECT sent_copy_op FROM outbox WHERE id=?1",
+            [outbox],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?;
+    // No row: dismissed or discarded. Some(Some): already queued.
+    if !wanted || !matches!(existing, Some(None)) {
         return Ok(());
     }
     let op = operations::insert(
         conn,
-        &NewOperation::new(SENT_COPY, serde_json::json!({ "outbox": outbox })).account(&account.id),
+        &NewOperation::new(SENT_COPY, serde_json::json!({ "outbox": outbox })).account(account),
     )?;
     conn.execute(
         "UPDATE outbox SET sent_copy_op=?2 WHERE id=?1",
@@ -712,7 +734,6 @@ impl MailEngine {
                 self.resolve_operation(&row.submit_op, operations::Resolution::RunAgain)
             }
             SendDecision::MarkSent => {
-                let account = self.account(&row.account).ok();
                 self.with_store(|store| {
                     let tx = store
                         .connection()
@@ -725,16 +746,7 @@ impl MailEngine {
                         OperationState::Done,
                         ",last_error=NULL",
                     )?;
-                    match &account {
-                        Some(account) => queue_sent_copy(&tx, outbox_id, account)?,
-                        None => {
-                            tx.execute(
-                                "UPDATE outbox SET accepted=?2 WHERE id=?1",
-                                params![outbox_id, operations::now_ms()],
-                            )
-                            .map_err(storage_error)?;
-                        }
-                    }
+                    queue_sent_copy(&tx, outbox_id, &row.account)?;
                     tx.commit().map_err(storage_error)
                 })?;
                 self.wake_operations();
@@ -966,20 +978,9 @@ impl operations::OperationHandler for SubmitHandler {
             .smtp
             .submit(&server, &password, &row.envelope, &row.message, &mut commit)
         {
-            Submission::Accepted => {
-                // The send is done whatever happens here; a missing Sent copy
-                // is shown separately and never causes a second submission.
-                let _ = engine.with_store(|store| {
-                    let tx = store
-                        .connection()
-                        .unchecked_transaction()
-                        .map_err(storage_error)?;
-                    queue_sent_copy(&tx, &outbox, &account)?;
-                    tx.commit().map_err(storage_error)
-                });
-                engine.wake_operations();
-                Outcome::Done
-            }
+            // The Sent copy is queued in `recorded`, together with this
+            // outcome, so a lock now cannot lose it or cause a resend.
+            Submission::Accepted => Outcome::Done,
             Submission::NotSent {
                 retry: true,
                 reason,
@@ -992,6 +993,23 @@ impl operations::OperationHandler for SubmitHandler {
                 reason,
             } => Outcome::Failed(reason),
             Submission::Unknown(reason) => Outcome::Unknown(reason),
+        }
+    }
+
+    fn recorded(
+        &self,
+        conn: &Connection,
+        op: &Operation,
+        outcome: &Outcome,
+    ) -> Result<(), MailError> {
+        let (Outcome::Done, Some(outbox), Some(account)) = (outcome, outbox_of(op), &op.account)
+        else {
+            return Ok(());
+        };
+        match queue_sent_copy(conn, &outbox, account) {
+            // Discarded meanwhile: there is nothing to save a copy of.
+            Err(MailError::NotFound) => Ok(()),
+            other => other,
         }
     }
 }

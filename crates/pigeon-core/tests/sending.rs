@@ -22,6 +22,9 @@ struct FakeSmtp {
     sent: Mutex<Vec<(Envelope, String)>>,
     /// Whether the commit hook ran before each submission's outcome.
     commits: Mutex<Vec<bool>>,
+    /// Locks this keyring after the message is sent, before the outcome is
+    /// recorded: the server accepted it while Pigeon lost its store.
+    lock_on_accept: Mutex<Option<Arc<MemoryStore>>>,
 }
 
 impl FakeSmtp {
@@ -59,6 +62,9 @@ impl SmtpTransport for FakeSmtp {
             };
         }
         self.commits.lock().unwrap().push(reached_data);
+        if let Some(secrets) = self.lock_on_accept.lock().unwrap().take() {
+            secrets.set_state(KeyringState::Locked);
+        }
         self.sent.lock().unwrap().push((
             envelope.clone(),
             String::from_utf8_lossy(message).into_owned(),
@@ -483,4 +489,32 @@ fn sent_items_can_be_dismissed_without_resending() {
     assert!(f.engine.send_state().unwrap().outbox.is_empty());
     f.drain();
     assert_eq!(f.smtp.submissions(), 1);
+}
+
+#[test]
+fn a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy() {
+    let f = fixture();
+    *f.smtp.lock_on_accept.lock().unwrap() = Some(f.secrets.clone());
+    let queued = f.engine.send_draft(f.draft()).unwrap();
+    assert!(matches!(
+        f.engine.run_next_operation(),
+        Err(MailError::Locked)
+    ));
+    assert_eq!(f.smtp.submissions(), 1);
+    assert!(f.imap.appended.lock().unwrap().is_empty());
+
+    f.engine.unlock().unwrap();
+    f.drain();
+    let item = f
+        .engine
+        .send_state()
+        .unwrap()
+        .outbox
+        .into_iter()
+        .find(|item| item.id == queued.id)
+        .unwrap();
+    assert!(matches!(item.send, SendStatus::Accepted { .. }), "{item:?}");
+    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    assert_eq!(f.smtp.submissions(), 1);
+    assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
 }

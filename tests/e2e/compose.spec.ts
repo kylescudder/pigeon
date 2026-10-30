@@ -5,7 +5,12 @@ import { expect, test, type Page } from "@playwright/test";
 // suites; this checks what the interface shows and asks for.
 async function fixture(
   page: Page,
-  options: { smtp?: boolean; undo?: number; outcome?: "accepted" | "unknown" },
+  options: {
+    smtp?: boolean;
+    undo?: number;
+    outcome?: "accepted" | "unknown" | "failed";
+    drafts?: Record<string, string>[];
+  },
 ) {
   await page.addInitScript((options) => {
     const KEY = "pigeon-compose-fixture";
@@ -44,7 +49,17 @@ async function fixture(
           ],
           folders: [],
           saved_searches: [],
-          drafts: [],
+          drafts: (options.drafts ?? []).map((draft, index) => ({
+            id: `saved-${index + 1}`,
+            account_id: "acc-1",
+            to: "",
+            cc: "",
+            bcc: "",
+            subject: "",
+            body: "",
+            updated: 1793008800000,
+            ...draft,
+          })),
           outbox: [],
           undo: options.undo ?? 10,
           next: 1,
@@ -61,7 +76,9 @@ async function fixture(
           item.send =
             options.outcome === "unknown"
               ? { state: "unknown", error: "the connection ended after the message was sent, before the server confirmed it; it may have been delivered" }
-              : { state: "accepted", at: Date.now() };
+              : options.outcome === "failed"
+                ? { state: "failed", error: "the server refused bob@example.test (550 5.1.1)" }
+                : { state: "accepted", at: Date.now() };
           item.sent_copy =
             item.send.state === "accepted" ? { state: "saved" } : { state: "not_requested" };
         }
@@ -116,7 +133,11 @@ async function fixture(
             }
             case "return_to_drafts": {
               const item = state.outbox.find((i: any) => i.id === args.id);
-              if (!item || !["queued", "failed"].includes(item.send.state))
+              if (
+                localStorage.getItem("pigeon-test-too-late") ||
+                !item ||
+                !["queued", "failed"].includes(item.send.state)
+              )
                 throw { code: "conflict", message: "sending has already started, so it can no longer be undone" };
               state.outbox = state.outbox.filter((i: any) => i.id !== args.id);
               const draft = draftOf(item.draft);
@@ -283,3 +304,92 @@ test("the undo delay is a setting", async ({ page }) => {
     page.getByRole("group", { name: "Undo send" }).getByRole("button", { name: "30s" }),
   ).toHaveAttribute("aria-pressed", "true");
 });
+
+async function writeAndSend(page: Page) {
+  await page.goto("/compose");
+  const form = page.getByRole("form", { name: "New message" });
+  await form.getByLabel("To", { exact: true }).fill("bob@example.test");
+  await form.getByLabel("Subject", { exact: true }).fill("Budget");
+  await form.getByLabel("Message", { exact: true }).fill("Numbers attached.");
+  await form.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Outbox", exact: true }),
+  ).toBeVisible();
+  return page.getByRole("listitem").filter({ hasText: "Budget" });
+}
+
+async function expectReopened(page: Page) {
+  await expect(page).toHaveURL(/compose\?draft=/);
+  const form = page.getByRole("form", { name: "New message" });
+  await expect(form.getByLabel("To", { exact: true })).toHaveValue(
+    "bob@example.test",
+  );
+  await expect(form.getByLabel("Message", { exact: true })).toHaveValue(
+    "Numbers attached.",
+  );
+}
+
+test("undo from an outbox row reopens the message with its text", async ({
+  page,
+}) => {
+  await fixture(page, { undo: 30 });
+  const item = await writeAndSend(page);
+  await item.getByRole("button", { name: "Undo", exact: true }).click();
+  await expectReopened(page);
+});
+
+test("editing a failed message reopens it with its text", async ({
+  page,
+}, testInfo) => {
+  await fixture(page, { undo: 0, outcome: "failed" });
+  const item = await writeAndSend(page);
+  await expect(item).toContainText("Not sent: the server refused");
+  await page.screenshot({ path: testInfo.outputPath("failed-send.png") });
+  await item.getByRole("button", { name: "Edit", exact: true }).click();
+  await expectReopened(page);
+});
+
+test("an undo that is too late says so and leaves the message in the outbox", async ({
+  page,
+}) => {
+  await fixture(page, { undo: 30 });
+  const item = await writeAndSend(page);
+  await page.evaluate(() => localStorage.setItem("pigeon-test-too-late", "1"));
+  await item.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("can no longer be undone");
+  await expect(page).toHaveURL(/\/outbox/);
+  await expect(item).toBeVisible();
+});
+
+test("a new message opened from a draft starts empty and leaves the draft intact", async ({
+  page,
+}) => {
+  await fixture(page, {
+    drafts: [{ to: "carol@example.test", subject: "Kept plans", body: "Original text" }],
+  });
+  await page.goto("/drafts");
+  await page.getByRole("link", { name: /Kept plans/ }).click();
+  const form = page.getByRole("form", { name: "New message" });
+  await expect(form.getByLabel("Message", { exact: true })).toHaveValue(
+    "Original text",
+  );
+
+  await page.getByRole("link", { name: "New message", exact: true }).click();
+  await expect(page).not.toHaveURL(/draft=/);
+  await expect(form.getByLabel("To", { exact: true })).toHaveValue("");
+  await expect(form.getByLabel("Subject", { exact: true })).toHaveValue("");
+  await expect(form.getByLabel("Message", { exact: true })).toHaveValue("");
+  await form.getByLabel("Subject", { exact: true }).fill("Fresh idea");
+  await expect(form.getByRole("status")).toHaveText("Draft saved on this device");
+
+  await page.goto("/drafts");
+  await expect(page.getByRole("link", { name: /Fresh idea/ })).toBeVisible();
+  await page.getByRole("link", { name: /Kept plans/ }).click();
+  await expect(form.getByLabel("Message", { exact: true })).toHaveValue(
+    "Original text",
+  );
+  await expect(form.getByLabel("To", { exact: true })).toHaveValue(
+    "carol@example.test",
+  );
+});
+

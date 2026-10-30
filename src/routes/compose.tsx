@@ -31,14 +31,14 @@ export const Route = createFileRoute("/compose")({
 function ComposeLoader() {
   const { draft: draftId } = Route.useSearch();
   const send = useSendState();
-  // The composer adds the id of a draft it creates to the URL. That must not
-  // remount it; opening any other draft, or a fresh message, must.
-  const own = useRef<string | null>(null);
-  const key = useRef("new");
-  if ((draftId ?? null) !== own.current) {
-    const next = draftId ?? `new-${Date.now()}`;
-    if (own.current !== null || next !== key.current) key.current = next;
-    own.current = null;
+  // Remount the composer whenever the URL's draft differs from the one it
+  // shows: opening another draft, or a fresh message. Adding the id of a
+  // draft it has just created to the URL must not remount it.
+  const shown = useRef<string | null>(draftId ?? null);
+  const key = useRef(draftId ?? `new-${Date.now()}`);
+  if ((draftId ?? null) !== shown.current) {
+    shown.current = draftId ?? null;
+    key.current = draftId ?? `new-${Date.now()}`;
   }
   if (!send.data)
     return (
@@ -55,7 +55,7 @@ function ComposeLoader() {
       key={key.current}
       initial={draft}
       onCreated={(id) => {
-        own.current = id;
+        shown.current = id;
       }}
     />
   );

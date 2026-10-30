@@ -56,6 +56,9 @@ function Outbox() {
       switch (kind) {
         case "edit": {
           const draft = await returnToDrafts(id);
+          // The composer reads the draft from send state when it mounts,
+          // so that state must include it first.
+          await refresh();
           await navigate({ to: "/compose", search: { draft: draft.id } });
           return;
         }
