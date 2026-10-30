@@ -114,6 +114,8 @@ fn imap_error(operation: &'static str, error: ::imap::Error) -> MailError {
     MailError::Imap { operation, reason }
 }
 
+const MAX_TEXT_BYTES: usize = 16 * 1024 * 1024;
+
 struct ImapSession<T: std::io::Read + std::io::Write> {
     session: Session<T>,
 }
@@ -208,6 +210,7 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
             .map_err(|error| imap_error("reading message headers and MIME structure", error))?;
         let mut drafts = HashMap::<u32, Draft>::new();
         let mut groups = BTreeMap::<Vec<u32>, Vec<u32>>::new();
+        let mut unstructured = Vec::new();
         for item in fetched.iter() {
             let uid = item.uid.ok_or(MailError::Protocol)?;
             let header = item.header().ok_or(MailError::Protocol)?;
@@ -247,6 +250,9 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
                 &mut content.attachments,
                 0,
             )?;
+            if parts.is_empty() && content.attachments.is_empty() {
+                unstructured.push(uid);
+            }
             for part in parts {
                 groups.entry(part).or_default().push(uid);
             }
@@ -303,7 +309,7 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
                             .ok_or(MailError::Protocol)?,
                     )
                 };
-                if body.len() > 16 * 1024 * 1024 {
+                if body.len() > MAX_TEXT_BYTES {
                     return Err(MailError::Protocol);
                 }
                 let mut raw = mime.to_vec();
@@ -331,6 +337,26 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
                 return Err(MailError::Protocol);
             }
         }
+        // A multipart listing no child parts gives no sections to request, so
+        // read the raw text. Nothing says how large or what it holds, hence
+        // the same cap as other text, applied by the server.
+        if !unstructured.is_empty() {
+            let responses = self
+                .session
+                .uid_fetch(
+                    uid_set(&unstructured),
+                    format!("(UID BODY.PEEK[TEXT]<0.{MAX_TEXT_BYTES}>)"),
+                )
+                .map_err(|error| imap_error("downloading unstructured message text", error))?;
+            for response in responses.iter() {
+                let uid = response.uid.ok_or(MailError::Protocol)?;
+                if !unstructured.contains(&uid) {
+                    return Err(MailError::Protocol);
+                }
+                let draft = drafts.get_mut(&uid).ok_or(MailError::Protocol)?;
+                recover_text(draft, response.text().unwrap_or_default());
+            }
+        }
         let mut messages = Vec::new();
         for uid in uids {
             let mut draft = drafts.remove(uid).ok_or(MailError::Protocol)?;
@@ -354,6 +380,45 @@ struct Draft {
     header: Vec<u8>,
     content: MessageContent,
 }
+/// Fills a message from its raw text when the server gave no usable structure.
+/// Never fails: one odd message must not stop the rest of the account syncing.
+fn recover_text(draft: &mut Draft, text: &[u8]) {
+    let mut raw = draft.header.clone();
+    raw.extend_from_slice(text);
+    let (mut plain, mut html) = (String::new(), String::new());
+    if let Ok(mail) = mailparse::parse_mail(&raw)
+        && !mail.subparts.is_empty()
+    {
+        collect_text(&mail, &mut plain, &mut html);
+    }
+    if plain.is_empty() && html.is_empty() {
+        plain = String::from_utf8_lossy(text).into_owned();
+    }
+    draft.content.body_text = plain;
+    draft.content.body_html = (!html.is_empty()).then_some(html);
+}
+
+fn collect_text(part: &mailparse::ParsedMail<'_>, plain: &mut String, html: &mut String) {
+    use mailparse::DispositionType;
+    if !part.subparts.is_empty() {
+        for child in &part.subparts {
+            collect_text(child, plain, html);
+        }
+        return;
+    }
+    if part.get_content_disposition().disposition == DispositionType::Attachment {
+        return;
+    }
+    let target = match part.ctype.mimetype.to_ascii_lowercase().as_str() {
+        "text/plain" => plain,
+        "text/html" => html,
+        _ => return,
+    };
+    if let Ok(body) = part.get_body() {
+        target.push_str(&body);
+    }
+}
+
 fn uid_set(uids: &[u32]) -> String {
     uids.iter()
         .map(ToString::to_string)
@@ -415,7 +480,7 @@ fn collect_parts(
                     .iter()
                     .any(|subtype| common.ty.subtype.eq_ignore_ascii_case(subtype));
             if is_body {
-                if other.octets > 16 * 1024 * 1024 {
+                if other.octets as usize > MAX_TEXT_BYTES {
                     return Err(MailError::Protocol);
                 }
                 text.push(path);
@@ -581,7 +646,15 @@ mod tests {
                                     if line.contains("BODYSTRUCTURE") {
                                         metadata(uid, &mut stream);
                                     } else {
-                                        write!(stream, "* {uid} FETCH (UID {uid} BODY[TEXT] {{6}}\r\nhello\n)\r\n").unwrap();
+                                        let text: &[u8] = match uid {
+                                            1 if line.contains("<0.") => MULTIPART_TEXT,
+                                            2 if line.contains("<0.") => b"Recovered loose text\r\n",
+                                            _ => b"hello\n",
+                                        };
+                                        let origin = if line.contains("<0.") { "<0>" } else { "" };
+                                        write!(stream, "* {uid} FETCH (UID {uid} BODY[TEXT]{origin} {{{}}}\r\n", text.len()).unwrap();
+                                        stream.write_all(text).unwrap();
+                                        stream.write_all(b")\r\n").unwrap();
                                     }
                                 }
                             }
@@ -622,6 +695,8 @@ mod tests {
         server.join().unwrap();
     }
 
+    const MULTIPART_TEXT: &[u8] = b"--synthetic\r\nContent-Type: text/plain\r\n\r\nRecovered plain text\r\n--synthetic\r\nContent-Type: text/html\r\n\r\n<p>Recovered html</p>\r\n--synthetic\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=notes.txt\r\n\r\nAttached notes stay out\r\n--synthetic--\r\n";
+
     fn write_metadata(stream: &mut TcpStream, uid: u32, cid: &str, extension: &str) {
         let header = format!(
             "From: synthetic@example.test\r\nSubject: Message {uid}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
@@ -661,6 +736,57 @@ mod tests {
                         .iter()
                         .any(|message| message.subject == "Message 3")
                 );
+            },
+        );
+    }
+
+    /// Without the fallback these messages cache cleanly with blank bodies,
+    /// which would hide mail behind a successful sync.
+    #[test]
+    fn childless_multipart_recovers_text_from_the_raw_body() {
+        use crate::mail::SearchQuery;
+        sync_scripted(
+            |uid, stream| {
+                if uid == 3 {
+                    return write_metadata(stream, uid, "NIL", "");
+                }
+                let header = format!(
+                    "From: synthetic@example.test\r\nSubject: Message {uid}\r\nContent-Type: multipart/alternative; boundary=synthetic\r\n\r\n"
+                );
+                write!(
+                    stream,
+                    "* {uid} FETCH (INTERNALDATE \"01-Jan-2026 00:00:00 +0000\" BODYSTRUCTURE (\"ALTERNATIVE\" (\"BOUNDARY\" \"synthetic\" \"CHARSET\" \"UTF-8\") NIL NIL NIL) UID {uid} BODY[HEADER] {{{}}}\r\n{header})\r\n",
+                    header.len()
+                )
+                .unwrap();
+            },
+            |engine, result| {
+                assert!(result.is_ok(), "{result:?}");
+                let found = engine.search(&SearchQuery::default()).unwrap();
+                assert_eq!(found.total, 3);
+                let body = |subject: &str| {
+                    let id = found
+                        .messages
+                        .iter()
+                        .find(|m| m.subject == subject)
+                        .unwrap()
+                        .id;
+                    engine.message(id).unwrap()
+                };
+                let parts = body("Message 1");
+                assert!(
+                    parts.body_text.contains("Recovered plain text"),
+                    "{parts:?}"
+                );
+                assert!(!parts.body_text.contains("Attached notes"), "{parts:?}");
+                assert!(!parts.body_text.contains("--synthetic"), "{parts:?}");
+                assert!(parts.body_html.unwrap().contains("Recovered html"));
+                let loose = body("Message 2");
+                assert!(
+                    loose.body_text.contains("Recovered loose text"),
+                    "{loose:?}"
+                );
+                assert_eq!(body("Message 3").body_text.trim(), "hello");
             },
         );
     }

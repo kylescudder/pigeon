@@ -254,8 +254,31 @@ named!(body_type_multipart<BodyStructure>, do_parse!(
     })
 ));
 
+// Zoho has emitted multiparts with no child parts, leaving only the subtype and
+// extension data. Requiring body-fld-param keeps a truncated single-part body
+// (whose second field is a string) from being accepted as this form.
+named!(body_type_childless_multipart<BodyStructure>, do_parse!(
+    media_subtype: string_utf8 >>
+    peek!(preceded!(tag!(" "), body_param)) >>
+    ext: body_ext_mpart >>
+    (BodyStructure::Multipart {
+        common: BodyContentCommon {
+            ty: ContentType {
+                ty: "MULTIPART",
+                subtype: media_subtype,
+                params: ext.param,
+            },
+            disposition: ext.disposition,
+            language: ext.language,
+            location: ext.location,
+        },
+        bodies: Vec::new(),
+        extension: ext.extension,
+    })
+));
+
 named!(pub(crate) body<BodyStructure>, paren_delimited!(
-    alt!(body_type_text | body_type_message | body_type_basic | body_type_multipart)
+    alt!(body_type_text | body_type_message | body_type_basic | body_type_multipart | body_type_childless_multipart)
 ));
 
 named!(pub(crate) msg_att_body_structure<AttributeValue>, do_parse!(

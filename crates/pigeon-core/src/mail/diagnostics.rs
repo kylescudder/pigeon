@@ -111,7 +111,7 @@ pub(super) fn shape(raw: &[u8]) -> String {
                     .and_then(|length| (end + 3).checked_add(length))
                     .filter(|next| *next <= raw.len())
                 else {
-                    tokens.push("truncated-literal; remainder omitted".into());
+                    tokens.push("literal not received, the parser stopped before it".into());
                     break;
                 };
                 tokens.push("{literal omitted}".into());
