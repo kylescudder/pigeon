@@ -646,6 +646,7 @@ function Mailbox({
               onFormatted={() => formatted.mutate()}
               formattedPending={formatted.isPending}
               formattedError={formatted.error}
+              missingInline={formatted.data?.missing_inline ?? 0}
             />
           ) : null}
         </article>
@@ -711,6 +712,7 @@ function MessageReader({
   onFormatted,
   formattedPending,
   formattedError,
+  missingInline,
 }: {
   message: MailMessage;
   actions: MessageActions;
@@ -718,6 +720,7 @@ function MessageReader({
   onFormatted: () => void;
   formattedPending: boolean;
   formattedError: unknown;
+  missingInline: number;
 }) {
   return (
     <>
@@ -765,6 +768,16 @@ function MessageReader({
             {errorMessage(formattedError)}
           </p>
         )}
+        {missingInline > 0 && (
+          <p role="status" className="mail-inline-note">
+            {missingInline === 1
+              ? "1 embedded image"
+              : `${missingInline} embedded images`}{" "}
+            could not be downloaded, so the formatted view shows{" "}
+            {missingInline === 1 ? "its" : "their"} description instead.
+            Reconnect and open it again to try once more.
+          </p>
+        )}
         <div className="message-text">
           {message.body_text || "This message has no text body."}
         </div>
@@ -784,8 +797,8 @@ function MessageReader({
               </div>
             ))}
             <p>
-              Attachment downloads and embedded images are coming in a later
-              build.
+              Embedded images appear in the formatted view. Saving and opening
+              attachments is coming in a later build.
             </p>
           </section>
         )}

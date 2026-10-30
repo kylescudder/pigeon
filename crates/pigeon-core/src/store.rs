@@ -125,7 +125,40 @@ const MIGRATIONS: &[&str] = &[
     END;",
     // Filled in by the next sync of each folder; until then folders show flat.
     "ALTER TABLE mail_folders ADD COLUMN delimiter TEXT;",
-    // Durable queue of changes to apply to the server. Messages carry the local
+    // Durable queue of server-changing work (mail/operations.rs). No foreign
+    // key to accounts: unsent mail must never vanish with a cascade.
+    "CREATE TABLE operations (
+        id TEXT PRIMARY KEY, account TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        state TEXT NOT NULL, not_before INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0, irreversible INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT, depends_on TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+    );
+    CREATE INDEX operations_due ON operations(state, not_before);
+    CREATE INDEX operations_account ON operations(account);",
+    // 7: keep schema 6 unchanged; also repair early attachment builds that
+    // used version 6 before the operations queue landed. Preserve their blobs.
+    // Attachment payloads the user chose to keep. They go with their message
+    // row, so pruning, UIDVALIDITY replacement and account removal clear them.
+    "CREATE TABLE IF NOT EXISTS operations (
+        id TEXT PRIMARY KEY, account TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        state TEXT NOT NULL, not_before INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0, irreversible INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT, depends_on TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS operations_due ON operations(state, not_before);
+    CREATE INDEX IF NOT EXISTS operations_account ON operations(account);
+    CREATE TABLE IF NOT EXISTS attachment_blobs (
+        message INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        part TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        data BLOB NOT NULL,
+        stored_at INTEGER NOT NULL,
+        PRIMARY KEY (message, part)
+    );
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    // 8: durable queue of mailbox changes to apply to the server (mail/actions.rs). Messages carry the local
     // effect of outstanding changes so views and sync can respect them; the
     // search and count indexes include it to stay covering.
     "CREATE TABLE mail_actions (

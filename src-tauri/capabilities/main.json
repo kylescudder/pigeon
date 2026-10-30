@@ -9,6 +9,8 @@
     "allow-open-viewer-fixture",
     "allow-open-viewer-probe",
     "allow-quit-app",
+    "allow-desktop-settings",
+    "allow-set-desktop-settings",
     "allow-mail-state",
     "allow-add-mail-account",
     "allow-sync-mail-account",

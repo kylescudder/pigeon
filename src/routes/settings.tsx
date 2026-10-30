@@ -1,6 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { Icon } from "../components/icon";
 import { PageHeading, useWorkspace } from "../components/workspace";
+import {
+  desktopSettings,
+  errorMessage,
+  isDesktop,
+  type LoadedDesktopSettings,
+  setDesktopSettings,
+} from "../lib/native";
 
 export const Route = createFileRoute("/settings")({ component: Appearance });
 
@@ -75,6 +83,7 @@ function Appearance() {
           ))}
         </div>
       </section>
+      <DesktopSection />
       <div className="settings-note">
         <Icon name="monitor" size={16} />
         <p>
@@ -82,6 +91,87 @@ function Appearance() {
           desktop’s light or dark appearance.
         </p>
       </div>
+    </section>
+  );
+}
+
+function DesktopSection() {
+  const [loaded, setLoaded] = useState<LoadedDesktopSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isDesktop()) return;
+    desktopSettings()
+      .then(setLoaded)
+      .catch((reason) => setError(errorMessage(reason)));
+  }, []);
+
+  if (!loaded && !error) return null;
+  const settings = loaded?.settings;
+  const locked = !settings || loaded?.managed || saving;
+
+  async function choose(closeToBackground: boolean) {
+    if (!settings) return;
+    setSaving(true);
+    setError(null);
+    try {
+      setLoaded(await setDesktopSettings({ ...settings, closeToBackground }));
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="settings-section" aria-labelledby="desktop-heading">
+      <div className="density-section">
+        <div>
+          <h2 id="desktop-heading">When the window closes</h2>
+          <p>
+            Keep Pigeon syncing in the background and reopen it from your
+            launcher, or quit completely. Quit Pigeon in the sidebar always
+            exits.
+          </p>
+        </div>
+        <div
+          className="segmented-control"
+          role="group"
+          aria-label="When the window closes"
+        >
+          {(
+            [
+              { value: true, label: "Keep running" },
+              { value: false, label: "Quit" },
+            ] as const
+          ).map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              aria-pressed={settings?.closeToBackground === option.value}
+              disabled={locked}
+              onClick={() => void choose(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loaded?.managed && (
+        <p>
+          Managed by Home Manager. Change <code>programs.pigeon.settings</code>{" "}
+          in your Nix configuration.
+        </p>
+      )}
+      {loaded?.warning && (
+        <p role="status">{loaded.warning}</p>
+      )}
+      {error && (
+        <div className="notice notice-error" role="alert">
+          Could not change desktop settings: {error}
+        </div>
+      )}
     </section>
   );
 }

@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -13,10 +13,14 @@ use crate::secrets::{KeyringState, Secret, SecretStore};
 use crate::store::Store;
 use crate::unlock::{UnlockOutcome, open_store};
 
+pub use attachments::{AttachmentData, MAX_ATTACHMENT_BYTES, ViewerDocument};
+
 mod actions;
+mod attachments;
 mod cache;
 mod diagnostics;
 mod imap;
+pub mod operations;
 mod query;
 pub mod source;
 pub use actions::{ActionCounts, ActionKind, PendingAction};
@@ -190,6 +194,8 @@ pub enum MailError {
     NoArchiveFolder,
     #[error("{0}")]
     InvalidAction(&'static str),
+    #[error("{0}")]
+    Conflict(String),
 }
 
 impl MailError {
@@ -219,6 +225,11 @@ pub struct MailEngine {
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
     parse_failures: Mutex<Vec<ParseFailure>>,
+    /// Downloaded but not kept attachment payloads, in memory for this
+    /// session only. Cleared whenever the store becomes unavailable.
+    parts: Mutex<attachments::PartCache>,
+    operations: Mutex<operations::Runtime>,
+    operations_signal: (Mutex<bool>, Condvar),
 }
 
 /// One message this client could not parse. Holds no folder name, UID, or
@@ -314,6 +325,7 @@ impl MailEngine {
             // The store mutex is not fair; give waiting readers a turn.
             std::thread::sleep(Duration::from_millis(1));
         }
+        self.forget_session_parts(Some(id));
         self.secrets
             .delete(&format!("account:{id}:password"))
             .map_err(|_| MailError::Locked)?;
@@ -341,6 +353,9 @@ impl MailEngine {
             syncing: Mutex::new(HashMap::new()),
             searches: Mutex::new(HashMap::new()),
             parse_failures: Mutex::new(Vec::new()),
+            parts: Mutex::new(attachments::PartCache::default()),
+            operations: Mutex::new(operations::Runtime::default()),
+            operations_signal: (Mutex::new(false), Condvar::new()),
         }
     }
 
@@ -638,6 +653,7 @@ impl MailEngine {
             .map_err(|_| MailError::Storage("mail store lock unavailable".into()))?;
         if self.secrets.state() != KeyringState::Unlocked {
             *guard = None;
+            self.forget_session_parts(None);
             return Err(MailError::Locked);
         }
         if guard.is_none() {
@@ -653,6 +669,7 @@ impl MailEngine {
                             [],
                         )
                         .map_err(storage_error)?;
+                    self.reconcile_operations(store.connection())?;
                     *guard = Some(store);
                 }
                 UnlockOutcome::Blocked(reason) => {

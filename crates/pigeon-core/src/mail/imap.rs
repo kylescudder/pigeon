@@ -7,12 +7,13 @@ use crate::secrets::Secret;
 use ::imap::types::Flag;
 use ::imap::types::NameAttribute;
 use ::imap::{Client, Session};
-use imap_proto::types::{BodyStructure, MessageSection, SectionPath};
+use imap_proto::types::{BodyStructure, ContentEncoding, MessageSection, SectionPath};
 use mailparse::MailHeaderMap;
 use native_tls::{Certificate, Protocol, TlsConnector};
 use std::collections::{BTreeMap, HashMap};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
+use zeroize::Zeroizing;
 
 pub(super) struct ImapConnector;
 impl MailConnector for ImapConnector {
@@ -455,6 +456,115 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
             .map_err(|error| imap_error("deleting messages permanently", error))?;
         Ok(())
     }
+
+    fn fetch_part(
+        &mut self,
+        uid: u32,
+        attachment: &Attachment,
+        max_bytes: usize,
+    ) -> Result<Zeroizing<Vec<u8>>, MailError> {
+        const OPERATION: &str = "downloading an attachment";
+        let path = parse_part(&attachment.part).ok_or(MailError::NotFound)?;
+        // Re-read the structure first: it gives the transfer encoding, and a
+        // part that no longer matches the cached metadata is refused.
+        let structure = self
+            .session
+            .uid_fetch(uid.to_string(), "(UID BODYSTRUCTURE)")
+            .map_err(|error| imap_error("reading an attachment's MIME structure", error))?;
+        let item = structure
+            .iter()
+            .find(|item| item.uid == Some(uid))
+            .ok_or(MailError::NotFound)?;
+        let (common, other) =
+            match find_part(item.bodystructure().ok_or(MailError::Protocol)?, &path)
+                .ok_or(MailError::Protocol)?
+            {
+                BodyStructure::Basic { common, other, .. }
+                | BodyStructure::Text { common, other, .. }
+                | BodyStructure::Message { common, other, .. } => (common, other),
+                BodyStructure::Multipart { .. } => return Err(MailError::Protocol),
+            };
+        if format!("{}/{}", common.ty.ty, common.ty.subtype).to_ascii_lowercase()
+            != attachment.content_type
+            || other.octets != attachment.size
+        {
+            return Err(MailError::Protocol);
+        }
+        if other.octets as usize > super::attachments::encoded_limit(max_bytes) {
+            return Err(MailError::Imap {
+                operation: OPERATION,
+                reason: "the attachment is larger than Pigeon downloads",
+            });
+        }
+        let encoding = match other.transfer_encoding {
+            ContentEncoding::Base64 => "base64",
+            ContentEncoding::QuotedPrintable => "quoted-printable",
+            ContentEncoding::SevenBit | ContentEncoding::EightBit | ContentEncoding::Binary => {
+                "binary"
+            }
+            ContentEncoding::Other(_) => return Err(MailError::Protocol),
+        };
+        drop(structure);
+        // PEEK keeps the message's read state; only this part is transferred.
+        let fetched = self
+            .session
+            .uid_fetch(
+                uid.to_string(),
+                format!("(UID BODY.PEEK[{}])", attachment.part),
+            )
+            .map_err(|error| imap_error(OPERATION, error))?;
+        let item = fetched
+            .iter()
+            .find(|item| item.uid == Some(uid))
+            .ok_or(MailError::NotFound)?;
+        let raw = item
+            .section(&SectionPath::Part(path, None))
+            .ok_or(MailError::Protocol)?;
+        let mut wrapped =
+            Zeroizing::new(format!("Content-Transfer-Encoding: {encoding}\r\n\r\n").into_bytes());
+        wrapped.extend_from_slice(raw);
+        drop(fetched);
+        let data = Zeroizing::new(
+            mailparse::parse_mail(&wrapped)
+                .and_then(|part| part.get_body_raw())
+                .map_err(|_| MailError::Protocol)?,
+        );
+        if data.len() > max_bytes {
+            return Err(MailError::Imap {
+                operation: OPERATION,
+                reason: "the attachment is larger than Pigeon downloads",
+            });
+        }
+        Ok(data)
+    }
+}
+
+/// A dotted IMAP part number such as "2.1". Nothing else reaches a command.
+fn parse_part(part: &str) -> Option<Vec<u32>> {
+    if part.is_empty() || part.len() > 64 {
+        return None;
+    }
+    part.split('.')
+        .map(|number| {
+            (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()))
+                .then(|| number.parse::<u32>().ok())
+                .flatten()
+                .filter(|number| *number > 0)
+        })
+        .collect()
+}
+
+/// The structure a part number refers to. Part 1 of a single-part message is
+/// its body, which is how `collect_parts` names it.
+fn find_part<'a>(body: &'a BodyStructure<'a>, path: &[u32]) -> Option<&'a BodyStructure<'a>> {
+    match (body, path) {
+        (_, []) => Some(body),
+        (BodyStructure::Multipart { bodies, .. }, [index, rest @ ..]) => {
+            find_part(bodies.get(*index as usize - 1)?, rest)
+        }
+        (_, [1]) => Some(body),
+        _ => None,
+    }
 }
 
 /// An IMAP quoted string. Line breaks and NUL cannot be quoted.
@@ -612,6 +722,28 @@ fn collect_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_dotted_part_numbers_reach_a_fetch_command() {
+        assert_eq!(parse_part("2"), Some(vec![2]));
+        assert_eq!(parse_part("2.1.3"), Some(vec![2, 1, 3]));
+        for hostile in [
+            "",
+            "0",
+            "1.",
+            ".1",
+            "1..2",
+            "2]",
+            "1 BODY[]",
+            "TEXT",
+            "1.MIME",
+            "-1",
+            "+1",
+            "99999999999",
+        ] {
+            assert_eq!(parse_part(hostile), None, "{hostile:?}");
+        }
+    }
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
 
