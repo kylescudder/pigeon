@@ -32,6 +32,7 @@ let
       ../tests/e2e
       ../src
       ../crates
+      ../vendor
       ../src-tauri/Cargo.toml
       ../src-tauri/build.rs
       ../src-tauri/tauri.conf.json

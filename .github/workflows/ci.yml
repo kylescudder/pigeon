@@ -36,3 +36,9 @@ jobs:
       - uses: actions/checkout@v5
       - name: Verified TLS, STARTTLS, MIME, read-only sync, and attachment transfer checks
         run: tools/mail-test/run.sh
+      - name: Patched parser upstream regression suite
+        run: >-
+          docker run --rm -v "$PWD":/src
+          -v pigeon-cargo:/usr/local/cargo/registry -v pigeon-target:/src/target
+          pigeon-linux-dev cargo test --release --locked
+          --manifest-path vendor/imap-proto/Cargo.toml

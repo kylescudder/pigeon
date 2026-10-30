@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn parser_failure_in_real_fetch_response_is_isolated_from_readable_messages() {
+    fn compatible_fetch_responses_download_every_message() {
         use crate::mail::{MailEngine, SearchQuery};
         use crate::secrets::{KeyringState, MemoryStore};
         use std::sync::{
@@ -567,17 +567,12 @@ mod tests {
                             }
                             "UID" => {
                                 let uids: Vec<u32> = fields[3].split(',').map(|uid| uid.parse().unwrap()).collect();
-                                if line.contains("BODYSTRUCTURE") && uids.contains(&2) {
-                                    // RFC BODYSTRUCTURE permits multiple extension values;
-                                    // the current parser only accepts one. No private mail.
-                                    stream.write_all(b"* 2 FETCH (UID 2 BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL NIL NIL \"7BIT\" 6 1 NIL NIL NIL NIL \"ext1\" \"ext2\"))\r\n").unwrap();
-                                    write!(stream, "{tag} OK fetched\r\n").unwrap();
-                                    break;
-                                }
                                 for uid in uids {
                                     if line.contains("BODYSTRUCTURE") {
                                         let header = format!("From: synthetic@example.test\r\nSubject: Message {uid}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n");
-                                        write!(stream, "* {uid} FETCH (UID {uid} BODY[HEADER] {{{}}}\r\n{header} BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL NIL NIL \"7BIT\" 6 1))\r\n", header.len()).unwrap();
+                                        let cid = if uid == 3 { "<synthetic@example.test>" } else { "NIL" };
+                                        let extension = if uid == 2 { r#" NIL NIL NIL NIL "ext1" "ext2""# } else { "" };
+                                        write!(stream, "* {uid} FETCH (UID {uid} BODY[HEADER] {{{}}}\r\n{header} BODYSTRUCTURE (\"TEXT\" \"PLAIN\" NIL {cid} NIL \"7BIT\" 6 1{extension}))\r\n", header.len()).unwrap();
                                     } else {
                                         write!(stream, "* {uid} FETCH (UID {uid} BODY[TEXT] {{6}}\r\nhello\n)\r\n").unwrap();
                                     }
@@ -618,11 +613,8 @@ mod tests {
         drop(engine);
         stop.store(true, Ordering::SeqCst);
         server.join().unwrap();
-        assert!(
-            matches!(result, Err(MailError::IncompleteSync(1))),
-            "{result:?}"
-        );
-        assert_eq!(messages.total, 2);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(messages.total, 3);
         assert!(
             messages
                 .messages
