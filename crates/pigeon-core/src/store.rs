@@ -125,6 +125,17 @@ const MIGRATIONS: &[&str] = &[
     END;",
     // Filled in by the next sync of each folder; until then folders show flat.
     "ALTER TABLE mail_folders ADD COLUMN delimiter TEXT;",
+    // Durable queue of server-changing work (mail/operations.rs). No foreign
+    // key to accounts: unsent mail must never vanish with a cascade.
+    "CREATE TABLE operations (
+        id TEXT PRIMARY KEY, account TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        state TEXT NOT NULL, not_before INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0, irreversible INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT, depends_on TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+    );
+    CREATE INDEX operations_due ON operations(state, not_before);
+    CREATE INDEX operations_account ON operations(account);",
 ];
 
 impl Store {
