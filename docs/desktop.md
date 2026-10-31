@@ -1,6 +1,6 @@
 # Desktop integration (Milestone 4)
 
-Status: background lifecycle, configurable close behaviour, `--background`, and the Home Manager module are implemented and checked in Linux containers (aarch64). Behaviour on the supported x86_64 NixOS desktop has **not been observed yet**. Notifications and the optional tray come in later slices.
+Status: background lifecycle, configurable close behaviour, `--background`, and the Home Manager module are implemented and checked in Linux containers (aarch64). Behaviour on the supported x86_64 NixOS desktop has **not been observed yet**. New-mail notifications are implemented (see below) and checked only through unit and engine tests; the popup itself has **not been seen on a real desktop**. The optional tray comes in a later slice.
 
 ## Behaviour
 
@@ -21,7 +21,7 @@ Status: background lifecycle, configurable close behaviour, `--background`, and 
 - Missing keys use the defaults above, and unknown keys are ignored.
 - An invalid file logs a warning, applies the defaults, and is never overwritten.
 - A symlink (the Home Manager case) or a read-only file is treated as managed. The Settings page shows it read-only and saving is refused.
-- `notifications` and `tray` are stored now and acted on in later slices.
+- `notifications` is acted on (see Notifications). `tray` is stored and acted on in a later slice.
 
 The two IPC commands `desktop_settings` and `set_desktop_settings` are main-window only. The viewer isolation probe also tries both and must be denied.
 
@@ -58,3 +58,15 @@ Record the revision (`git rev-parse HEAD`), the session (`echo $XDG_CURRENT_DESK
 6. Set `programs.pigeon.settings.closeToBackground = false` and rebuild. Settings → *When the window closes* shows **Quit** selected, disabled, and "Managed by Home Manager". Closing the window now exits.
 7. Set `settings = null`, rebuild, and change the option in the app. `~/.config/pigeon/settings.json` is now a normal file with the new value.
 8. Quit first, because a running instance swallows new starts. Then repeat steps 3–5 under X11 (`GDK_BACKEND=x11 pigeon`, XWayland) and in the GNOME session. In GNOME the service should start at login with no Hyprland hook.
+
+## Notifications
+
+The background refresh (every minute, with the window hidden or open) announces unread mail that newly arrived in an Inbox as one notification through the desktop's notification service (D-Bus `org.freedesktop.Notifications`).
+
+- `senderSubject` shows the sender's name and subject for one message, or a count with up to three "sender: subject" lines. `count` shows only "N new messages". `off` shows nothing. The text never includes message bodies or previews, and sender and subject are escaped and length-limited because notification servers render a small markup subset.
+- Nothing is shown while the main window is visible and focused, for an account's first sync (its backlog), for mail already read, or for mail outside the Inbox (Junk, Trash, Archive).
+- The setting is read on every refresh, so a Home Manager switch applies without a restart.
+- A missing or failing notification service is ignored.
+- Clicking a notification does not open Pigeon yet.
+
+Checked: the wording rules (`crates/pigeon-core/src/notify.rs` tests) and which messages count as new (`tests/notify.rs`). Not checked: the popup on a real desktop, and behaviour with the keyring locked.

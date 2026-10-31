@@ -34,6 +34,40 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
 }
 
 impl MailEngine {
+    /// The highest message id stored, so a later sync can tell what is new.
+    pub fn newest_message_id(&self) -> Result<i64, MailError> {
+        self.with_store(|store| {
+            store
+                .connection()
+                .query_row("SELECT coalesce(max(id),0) FROM messages", [], |row| {
+                    row.get(0)
+                })
+                .map_err(storage_error)
+        })
+    }
+
+    /// Unread Inbox mail stored after `after`, newest first, for notifications.
+    /// Mail in other folders and mail hidden by a pending move is left out.
+    pub fn new_unread_inbox(
+        &self,
+        account: &str,
+        after: i64,
+    ) -> Result<Vec<MessageSummary>, MailError> {
+        self.with_store(|store| {
+            let sql = format!(
+                "SELECT {SUMMARY} FROM messages m JOIN mail_folders f ON f.account=m.account AND f.name=m.folder WHERE m.account=?1 AND m.id>?2 AND m.unread=1 AND f.kind='inbox' AND {VISIBLE} ORDER BY m.date DESC LIMIT 200"
+            );
+            store
+                .connection()
+                .prepare(&sql)
+                .map_err(storage_error)?
+                .query_map(params![account, after], summary)
+                .map_err(storage_error)?
+                .collect::<rusqlite::Result<_>>()
+                .map_err(storage_error)
+        })
+    }
+
     pub fn folders(&self) -> Result<Vec<Folder>, MailError> {
         self.with_store(|store| {
             let mut statement = store.connection().prepare("SELECT f.account,f.name,f.kind,f.total,count(m.id),coalesce(sum(m.unread),0),f.id,f.delimiter FROM mail_folders f LEFT JOIN messages m INDEXED BY messages_folder_counts ON m.account=f.account AND m.folder=f.name AND m.uid_validity=f.uid_validity AND m.local_hidden=0 GROUP BY f.account,f.name ORDER BY f.account,CASE WHEN f.kind='inbox' THEN 0 ELSE 1 END,f.name").map_err(storage_error)?;
