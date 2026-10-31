@@ -26,6 +26,12 @@ impl DesktopState {
         })
     }
 
+    /// Whether to add a status-area icon. Read once at start: the icon is not
+    /// added or removed while Pigeon runs.
+    pub fn tray_enabled(&self) -> bool {
+        desktop::load(&self.path).settings.tray
+    }
+
     /// Read fresh each time, so a Home Manager switch applies without a restart.
     pub fn notification_policy(&self) -> NotificationPolicy {
         desktop::load(&self.path).settings.notifications
