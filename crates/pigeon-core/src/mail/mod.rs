@@ -269,6 +269,8 @@ pub struct MailEngine {
     parts: Mutex<attachments::PartCache>,
     operations: Mutex<operations::Runtime>,
     operations_signal: (Mutex<bool>, Condvar),
+    /// Unread Inbox mail stored since the last `take_arrivals`, per account.
+    arrivals: Mutex<HashMap<String, cache::Arrived>>,
 }
 
 /// One message this client could not parse. Holds no folder name, UID, or
@@ -425,6 +427,7 @@ impl MailEngine {
             parts: Mutex::new(attachments::PartCache::default()),
             operations: Mutex::new(runtime),
             operations_signal: (Mutex::new(false), Condvar::new()),
+            arrivals: Mutex::new(HashMap::new()),
         }
     }
 
@@ -716,6 +719,7 @@ impl MailEngine {
                     context.validity,
                     &messages,
                     context.flags,
+                    context.folder_kind == "inbox",
                 )
             }
         }

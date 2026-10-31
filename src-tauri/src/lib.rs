@@ -7,7 +7,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use pigeon_core::desktop::NotificationPolicy;
 use pigeon_core::diagnostics::Check;
 use pigeon_core::mail::MailEngine;
 use pigeon_core::notify;
@@ -552,30 +551,33 @@ fn start_sync_diagnostic(app: AppHandle, engine: Arc<MailEngine>) {
     });
 }
 
-/// One refresh of every account. Mail that arrives in an Inbox that had
-/// already synced once is announced as a single notification, unless the
+/// One refresh of every account. Unread mail that arrived in an Inbox that
+/// had already synced once is announced as a single notification, unless the
 /// window is open and focused (the user is looking at it) or notifications
 /// are off. An account's first sync never notifies about its backlog.
 fn sync_and_notify(app: &AppHandle, engine: &MailEngine) {
     let policy = app.state::<desktop::DesktopState>().notification_policy();
-    let mut arrived = Vec::new();
+    let mut total = 0;
+    let mut newest = Vec::new();
     if let Ok(accounts) = engine.accounts() {
         for account in accounts {
             let synced_before = account.last_synced.is_some();
-            let before = engine.newest_message_id().unwrap_or(i64::MAX);
             let _ = engine.sync_account(&account.id);
-            if synced_before
-                && policy != NotificationPolicy::Off
-                && let Ok(mut new) = engine.new_unread_inbox(&account.id, before)
+            // Always taken, so arrivals never pile up behind a first sync or
+            // while notifications are off.
+            if let Ok(mut arrived) = engine.take_arrivals(&account.id)
+                && synced_before
             {
-                arrived.append(&mut new);
+                total += arrived.total;
+                newest.append(&mut arrived.newest);
             }
         }
     }
+    newest.sort_by_key(|message| std::cmp::Reverse(message.date));
     let looking = app
         .get_webview_window(MAIN)
         .is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
-    if !looking && let Some(note) = notify::compose(policy, &arrived) {
+    if !looking && let Some(note) = notify::compose(policy, total, &newest) {
         notifier::show(&note);
     }
 }

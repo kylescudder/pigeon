@@ -92,20 +92,14 @@ fn only_new_unread_inbox_mail_is_reported() {
         Arc::new(MemoryStore::new(KeyringState::Unlocked)),
         Arc::new(Server(folders.clone())),
     );
-    assert_eq!(engine.newest_message_id().unwrap(), 0);
     let account = engine
         .add_account(config(), Zeroizing::new(b"pw".to_vec()))
         .unwrap();
     engine.sync_account(&account.id).unwrap();
-    let before = engine.newest_message_id().unwrap();
-    assert!(before > 0);
-    // Nothing was added since the snapshot.
-    assert!(
-        engine
-            .new_unread_inbox(&account.id, before)
-            .unwrap()
-            .is_empty()
-    );
+    // The first sync's unread Inbox mail counts (the shell discards it as backlog)
+    // and taking it clears it.
+    assert_eq!(engine.take_arrivals(&account.id).unwrap().total, 1);
+    assert_eq!(engine.take_arrivals(&account.id).unwrap().total, 0);
 
     {
         let mut folders = folders.lock().unwrap();
@@ -114,15 +108,43 @@ fn only_new_unread_inbox_mail_is_reported() {
         folders[2].2.push((2, true));
     }
     engine.sync_account(&account.id).unwrap();
-    let new = engine.new_unread_inbox(&account.id, before).unwrap();
-    let subjects: Vec<_> = new.iter().map(|m| m.subject.as_str()).collect();
+    let arrived = engine.take_arrivals(&account.id).unwrap();
+    let subjects: Vec<_> = arrived.newest.iter().map(|m| m.subject.as_str()).collect();
     // Newest first; the read message and the Junk and Archive arrivals are out.
     assert_eq!(subjects, ["Message 5", "Message 3"]);
-    assert!(new.iter().all(|m| m.unread && m.folder == "INBOX"));
+    assert_eq!(arrived.total, 2);
     assert!(
-        engine
-            .new_unread_inbox("someone-else", before)
-            .unwrap()
-            .is_empty()
+        arrived
+            .newest
+            .iter()
+            .all(|m| m.unread && m.folder == "INBOX")
     );
+    assert_eq!(engine.take_arrivals("someone-else").unwrap().total, 0);
+}
+
+#[test]
+fn a_reused_row_id_does_not_hide_a_new_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let folders: Arc<Mutex<Folders>> = Arc::new(Mutex::new(vec![(
+        "INBOX",
+        "inbox",
+        vec![(1, false), (2, false)],
+    )]));
+    let engine = MailEngine::with_connector(
+        dir.path().join("mail.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+        Arc::new(Server(folders.clone())),
+    );
+    let account = engine
+        .add_account(config(), Zeroizing::new(b"pw".to_vec()))
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    engine.take_arrivals(&account.id).unwrap();
+    // The newest stored message goes away and a new one arrives in the same
+    // sync: SQLite hands the new message the freed row id.
+    folders.lock().unwrap()[0].2 = vec![(1, false), (3, true)];
+    engine.sync_account(&account.id).unwrap();
+    let arrived = engine.take_arrivals(&account.id).unwrap();
+    assert_eq!(arrived.total, 1);
+    assert_eq!(arrived.newest[0].subject, "Message 3");
 }

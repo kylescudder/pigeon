@@ -18,12 +18,18 @@ pub struct Notification {
     pub body: String,
 }
 
-/// The notification for newly arrived unread mail, or none.
-pub fn compose(policy: NotificationPolicy, new: &[MessageSummary]) -> Option<Notification> {
-    if new.is_empty() || policy == NotificationPolicy::Off {
+/// The notification for `total` newly arrived unread messages, of which
+/// `newest` describes the latest few, or none. `total` can exceed what is
+/// described, so a flood is still counted truthfully.
+pub fn compose(
+    policy: NotificationPolicy,
+    total: usize,
+    newest: &[MessageSummary],
+) -> Option<Notification> {
+    if total == 0 || policy == NotificationPolicy::Off {
         return None;
     }
-    let count = new.len();
+    let count = total;
     let plural = |n: usize| {
         if n == 1 {
             "1 new message".to_owned()
@@ -37,15 +43,22 @@ pub fn compose(policy: NotificationPolicy, new: &[MessageSummary]) -> Option<Not
             body: String::new(),
         });
     }
-    if let [only] = new {
+    if let ([only], 1) = (newest, count) {
         return Some(Notification {
             summary: escape(&clip(&display_name(&only.sender), MAX_SENDER)),
             body: escape(&clip(&only.subject, MAX_SUBJECT)),
         });
     }
-    let mut lines: Vec<String> = new
+    if newest.is_empty() {
+        return Some(Notification {
+            summary: plural(count),
+            body: String::new(),
+        });
+    }
+    let shown = newest.len().min(MAX_LINES);
+    let mut lines: Vec<String> = newest
         .iter()
-        .take(MAX_LINES)
+        .take(shown)
         .map(|message| {
             format!(
                 "{}: {}",
@@ -54,8 +67,8 @@ pub fn compose(policy: NotificationPolicy, new: &[MessageSummary]) -> Option<Not
             )
         })
         .collect();
-    if count > MAX_LINES {
-        lines.push(format!("and {} more", count - MAX_LINES));
+    if count > shown {
+        lines.push(format!("and {} more", count - shown));
     }
     Some(Notification {
         summary: plural(count),
@@ -121,18 +134,18 @@ mod tests {
     #[test]
     fn nothing_when_off_or_empty() {
         let new = [message("A <a@x.test>", "Hi")];
-        assert_eq!(compose(NotificationPolicy::Off, &new), None);
-        assert_eq!(compose(NotificationPolicy::SenderSubject, &[]), None);
-        assert_eq!(compose(NotificationPolicy::Count, &[]), None);
+        assert_eq!(compose(NotificationPolicy::Off, new.len(), &new), None);
+        assert_eq!(compose(NotificationPolicy::SenderSubject, 0, &[]), None);
+        assert_eq!(compose(NotificationPolicy::Count, 0, &[]), None);
     }
 
     #[test]
     fn count_reveals_only_how_many() {
         let two = [message("A <a@x.test>", "Secret"), message("B", "Plans")];
-        let note = compose(NotificationPolicy::Count, &two).unwrap();
+        let note = compose(NotificationPolicy::Count, two.len(), &two).unwrap();
         assert_eq!(note.summary, "2 new messages");
         assert_eq!(note.body, "");
-        let one = compose(NotificationPolicy::Count, &two[..1]).unwrap();
+        let one = compose(NotificationPolicy::Count, 1, &two[..1]).unwrap();
         assert_eq!(one.summary, "1 new message");
     }
 
@@ -140,6 +153,7 @@ mod tests {
     fn one_message_shows_sender_name_and_subject_never_the_body() {
         let note = compose(
             NotificationPolicy::SenderSubject,
+            1,
             &[message("\"Alice Example\" <alice@x.test>", "Invoice 4471")],
         )
         .unwrap();
@@ -152,6 +166,7 @@ mod tests {
     fn a_bare_address_is_used_when_there_is_no_name() {
         let note = compose(
             NotificationPolicy::SenderSubject,
+            1,
             &[message("<bob@x.test>", "Hi")],
         )
         .unwrap();
@@ -163,7 +178,7 @@ mod tests {
         let new: Vec<_> = (0..5)
             .map(|n| message(&format!("S{n} <s{n}@x.test>"), &format!("Subject {n}")))
             .collect();
-        let note = compose(NotificationPolicy::SenderSubject, &new).unwrap();
+        let note = compose(NotificationPolicy::SenderSubject, new.len(), &new).unwrap();
         assert_eq!(note.summary, "5 new messages");
         assert_eq!(
             note.body,
@@ -175,6 +190,7 @@ mod tests {
     fn markup_and_control_characters_from_mail_cannot_reach_the_server() {
         let note = compose(
             NotificationPolicy::SenderSubject,
+            1,
             &[message(
                 "<b>Evil</b> <e@x.test>",
                 "<a href=\"http://x.test\">click</a> & \n\u{7}more",
@@ -187,9 +203,32 @@ mod tests {
     }
 
     #[test]
+    fn a_flood_is_counted_beyond_the_few_that_are_described() {
+        let sample: Vec<_> = (0..10)
+            .map(|n| message(&format!("S{n} <s{n}@x.test>"), &format!("Subject {n}")))
+            .collect();
+        let count = compose(NotificationPolicy::Count, 1234, &sample).unwrap();
+        assert_eq!(count.summary, "1234 new messages");
+        let note = compose(NotificationPolicy::SenderSubject, 1234, &sample).unwrap();
+        assert_eq!(note.summary, "1234 new messages");
+        assert!(note.body.ends_with("and 1231 more"), "{}", note.body);
+        // With nothing described, only the count is shown.
+        let bare = compose(NotificationPolicy::SenderSubject, 7, &[]).unwrap();
+        assert_eq!(
+            (bare.summary.as_str(), bare.body.as_str()),
+            ("7 new messages", "")
+        );
+    }
+
+    #[test]
     fn long_text_is_cut() {
         let long = "x".repeat(500);
-        let note = compose(NotificationPolicy::SenderSubject, &[message(&long, &long)]).unwrap();
+        let note = compose(
+            NotificationPolicy::SenderSubject,
+            1,
+            &[message(&long, &long)],
+        )
+        .unwrap();
         assert_eq!(note.summary.chars().count(), MAX_SENDER);
         assert_eq!(note.body.chars().count(), MAX_SUBJECT);
     }

@@ -13,6 +13,24 @@ use super::{
     SearchResults, storage_error,
 };
 
+/// Ids remembered per account between notifications, and how many of the
+/// newest messages are described. Beyond the first, arrivals are only counted.
+const ARRIVAL_IDS: usize = 500;
+const ARRIVAL_SAMPLE: usize = 10;
+
+/// Unread Inbox mail that arrived, with the newest few described.
+#[derive(Debug, Default)]
+pub struct Arrivals {
+    pub total: usize,
+    pub newest: Vec<MessageSummary>,
+}
+
+#[derive(Default)]
+pub(super) struct Arrived {
+    total: usize,
+    ids: Vec<i64>,
+}
+
 const SUMMARY: &str = "m.id,m.account,m.folder,m.sender,m.recipients,m.subject,substr(m.body_text,1,180),m.date,m.unread,m.has_attachments";
 /// Current folder epoch, and not hidden by an outstanding move or deletion.
 pub(super) const VISIBLE: &str =
@@ -34,37 +52,41 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
 }
 
 impl MailEngine {
-    /// The highest message id stored, so a later sync can tell what is new.
-    pub fn newest_message_id(&self) -> Result<i64, MailError> {
-        self.with_store(|store| {
-            store
-                .connection()
-                .query_row("SELECT coalesce(max(id),0) FROM messages", [], |row| {
-                    row.get(0)
-                })
-                .map_err(storage_error)
-        })
-    }
-
-    /// Unread Inbox mail stored after `after`, newest first, for notifications.
-    /// Mail in other folders and mail hidden by a pending move is left out.
-    pub fn new_unread_inbox(
-        &self,
-        account: &str,
-        after: i64,
-    ) -> Result<Vec<MessageSummary>, MailError> {
-        self.with_store(|store| {
+    /// Takes what newly arrived in an account's Inbox since the last call, for
+    /// notifications: unread mail that sync stored, however its row id was
+    /// chosen. Mail that has since been read, moved or deleted is left out.
+    pub fn take_arrivals(&self, account: &str) -> Result<Arrivals, MailError> {
+        let arrived = self
+            .arrivals
+            .lock()
+            .map_err(|_| MailError::Busy)?
+            .remove(account)
+            .unwrap_or_default();
+        if arrived.ids.is_empty() {
+            return Ok(Arrivals::default());
+        }
+        let (found, newest) = self.with_store(|store| {
+            let marks = vec!["?"; arrived.ids.len()].join(",");
             let sql = format!(
-                "SELECT {SUMMARY} FROM messages m JOIN mail_folders f ON f.account=m.account AND f.name=m.folder WHERE m.account=?1 AND m.id>?2 AND m.unread=1 AND f.kind='inbox' AND {VISIBLE} ORDER BY m.date DESC LIMIT 200"
+                "SELECT {SUMMARY} FROM messages m JOIN mail_folders f ON f.account=m.account AND f.name=m.folder WHERE m.account=? AND m.id IN ({marks}) AND m.unread=1 AND f.kind='inbox' AND {VISIBLE} ORDER BY m.date DESC"
             );
-            store
+            let mut values: Vec<rusqlite::types::Value> = vec![account.to_owned().into()];
+            values.extend(arrived.ids.iter().map(|id| (*id).into()));
+            let all: Vec<MessageSummary> = store
                 .connection()
                 .prepare(&sql)
                 .map_err(storage_error)?
-                .query_map(params![account, after], summary)
+                .query_map(params_from_iter(values), summary)
                 .map_err(storage_error)?
                 .collect::<rusqlite::Result<_>>()
-                .map_err(storage_error)
+                .map_err(storage_error)?;
+            Ok((all.len(), all.into_iter().take(ARRIVAL_SAMPLE).collect::<Vec<_>>()))
+        })?;
+        // Arrivals beyond the remembered ids still count toward the total.
+        let uncounted = arrived.total.saturating_sub(arrived.ids.len());
+        Ok(Arrivals {
+            total: found + uncounted,
+            newest,
         })
     }
 
@@ -97,20 +119,36 @@ impl MailEngine {
         validity: u32,
         messages: &[RemoteMessage],
         flags: &HashMap<u32, bool>,
+        inbox: bool,
     ) -> Result<(), MailError> {
+        let mut stored_unread = Vec::new();
         self.with_store(|store| {
+            stored_unread.clear();
             let tx = store.connection().unchecked_transaction().map_err(storage_error)?;
             {
                 let mut insert = tx.prepare("INSERT INTO messages(account,folder,uid_validity,uid,sender,recipients,subject,body_text,body_html,date,unread,has_attachments,message_id,attachments) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) ON CONFLICT(account,folder,uid_validity,uid) DO NOTHING").map_err(storage_error)?;
                 for message in messages {
                     let content = &message.content;
                     let attachments = serde_json::to_string(&content.attachments).map_err(|_| MailError::Protocol)?;
-                    insert.execute(params![id,folder,validity,message.uid,content.sender,content.recipients,content.subject,content.body_text,content.body_html,content.date,flags.get(&message.uid).copied().unwrap_or(true),!content.attachments.is_empty(),content.message_id,attachments]).map_err(storage_error)?;
+                    let unread = flags.get(&message.uid).copied().unwrap_or(true);
+                    let stored = insert.execute(params![id,folder,validity,message.uid,content.sender,content.recipients,content.subject,content.body_text,content.body_html,content.date,unread,!content.attachments.is_empty(),content.message_id,attachments]).map_err(storage_error)?;
+                    if stored == 1 && unread && inbox {
+                        stored_unread.push(tx.last_insert_rowid());
+                    }
                 }
             }
             tx.execute("UPDATE mail_accounts SET sync_cached=sync_cached+?2 WHERE id=?1", params![id,messages.len() as i64]).map_err(storage_error)?;
             tx.commit().map_err(storage_error)
-        })
+        })?;
+        if !stored_unread.is_empty()
+            && let Ok(mut arrivals) = self.arrivals.lock()
+        {
+            let arrived = arrivals.entry(id.to_owned()).or_default();
+            arrived.total += stored_unread.len();
+            let room = ARRIVAL_IDS.saturating_sub(arrived.ids.len());
+            arrived.ids.extend(stored_unread.into_iter().take(room));
+        }
+        Ok(())
     }
 
     pub(super) fn complete_folder(
