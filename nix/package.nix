@@ -172,6 +172,8 @@ rustPlatform.buildRustPackage (
 
     meta = {
       description = "Modern, local-first IMAP/SMTP email client";
+      homepage = "https://github.com/kylescudder/pigeon";
+      license = lib.licenses.mit;
       mainProgram = "pigeon";
       platforms = [
         "x86_64-linux"

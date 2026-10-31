@@ -5,7 +5,7 @@ exclude = ["vendor/imap-proto"]
 
 [workspace.package]
 edition = "2024"
-license = "UNLICENSED"
+license = "MIT"
 publish = false
 
 [workspace.dependencies]

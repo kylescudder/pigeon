@@ -4,19 +4,22 @@
 
 A modern, local-first IMAP/SMTP email client for NixOS. It uses an encrypted local store, fast search, and a Tauri + TanStack desktop shell.
 
+Pigeon is early software. It connects IMAP accounts, caches mail in an encrypted local database, searches across accounts, and sends plain-text mail over SMTP. It targets x86_64 NixOS (aarch64-linux builds exist for development only). It does not support OAuth-only providers yet.
+
 - [Product and delivery plan](docs/product-plan.md)
 - [Receiving/search implementation and verification](docs/mail-engine.md)
 - [Milestone 0 foundation spike](docs/foundation-spike.md)
 - [Desktop integration and NixOS checklist](docs/desktop.md)
+- [Getting Pigeon into Home Manager](docs/home-manager-upstream.md)
 
 ## Install on NixOS
 
-Add the flake as an input to your system flake. The repository is private, so
-use SSH; Nix uses your SSH agent to fetch it.
+Pigeon is distributed as a flake; it is not in nixpkgs or Home Manager's own
+module set yet, so add it as an input to your system flake:
 
 ```nix
 {
-  inputs.pigeon.url = "git+ssh://git@github.com/kylescudder/pigeon";
+  inputs.pigeon.url = "github:kylescudder/pigeon";
 
   outputs = { nixpkgs, pigeon, ... }: {
     nixosConfigurations.<host> = nixpkgs.lib.nixosSystem {
@@ -33,8 +36,12 @@ use SSH; Nix uses your SSH agent to fetch it.
 ```
 
 Rebuild, then start **Pigeon** from your launcher or run `pigeon`. Update with
-`nix flake update pigeon` and rebuild. To run it once without installing:
-`nix run git+ssh://git@github.com/kylescudder/pigeon`.
+`nix flake update pigeon` and rebuild. There is no binary cache, so the first
+build compiles from source and takes a while. To try it without installing:
+`nix run github:kylescudder/pigeon`.
+
+You need a Secret Service provider (GNOME Keyring, KWallet, KeePassXC) running
+and unlocked: Pigeon keeps account passwords and the database key there.
 
 ### Home Manager: settings and starting at login
 
@@ -45,7 +52,7 @@ in the desktop keyring; the module has no options for them.
 ```nix
 {
   inputs.pigeon = {
-    url = "git+ssh://git@github.com/kylescudder/pigeon";
+    url = "github:kylescudder/pigeon";
     # The flake's own home-manager input is only for its checks.
     inputs.home-manager.follows = "home-manager";
   };
@@ -150,3 +157,12 @@ nix run . -- --diagnose-sync
 ```
 
 This retries uncached mail and prints a report that is safe to share. It keeps the structure of the failing server response and replaces values with their length and character types. It includes no message text, addresses, folder names, or credentials.
+
+## Contributing
+
+Issues and pull requests are welcome. Run `nix flake check -L` and
+`bun run test` before sending a change.
+
+## Licence
+
+[MIT](LICENSE)

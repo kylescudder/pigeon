@@ -26,7 +26,7 @@ jobs:
         run: nix flake check -L
       - name: Formatting
         run: |
-          nix fmt -- --check flake.nix nix/*.nix
+          nix fmt -- --check flake.nix nix/*.nix nix/home-manager/*.nix nix/home-manager/tests/*.nix
           nix develop -c cargo fmt --all --check
       - name: Clippy
         run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
