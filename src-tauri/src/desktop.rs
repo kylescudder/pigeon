@@ -26,6 +26,12 @@ impl DesktopState {
         })
     }
 
+    /// Whether to add a status-area icon. Read once at start: the icon is not
+    /// added or removed while Pigeon runs.
+    pub fn tray_enabled(&self) -> bool {
+        desktop::load(&self.path).settings.tray
+    }
+
     /// Reads the file at close time, so a Home Manager switch applies at once.
     pub fn close_to_background(&self) -> bool {
         let fresh = desktop::load(&self.path);

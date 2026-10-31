@@ -19,6 +19,7 @@ use tauri_plugin_opener::OpenerExt;
 
 mod desktop;
 mod mail;
+mod tray;
 
 pub(crate) const MAIN: &str = "main";
 const DIAGNOSE_SYNC: &str = "--diagnose-sync";
@@ -579,6 +580,9 @@ pub fn run() {
             ));
             app.manage(engine.clone());
             app.manage(desktop::DesktopState::load(app.handle())?);
+                if app.state::<desktop::DesktopState>().tray_enabled() {
+                    tray::install(app.handle());
+                }
             if std::env::var_os("PIGEON_SELFTEST").is_some() {
                 start_selftest(app.handle().clone());
             } else if std::env::args().any(|arg| arg == DIAGNOSE_SYNC) {

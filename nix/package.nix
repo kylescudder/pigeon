@@ -14,6 +14,7 @@
   gtk3,
   dbus,
   gnome-keyring,
+  libayatana-appindicator,
 }:
 
 let
@@ -106,6 +107,7 @@ rustPlatform.buildRustPackage (
       libsoup_3
       gtk3
       dbus
+      libayatana-appindicator
     ];
 
     postPatch = withNodeModules;
@@ -113,8 +115,10 @@ rustPlatform.buildRustPackage (
     # Core tests run in their own check; the shell crate has none yet.
     doCheck = false;
 
+    # The tray backend loads libayatana-appindicator at run time.
     preFixup = ''
       gappsWrapperArgs+=(--set-default WEBKIT_DISABLE_DMABUF_RENDERER 1)
+      gappsWrapperArgs+=(--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libayatana-appindicator ]})
     '';
 
     passthru = {
