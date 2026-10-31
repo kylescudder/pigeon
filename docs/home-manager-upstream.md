@@ -8,7 +8,7 @@ are packaged in nixpkgs. So there are two upstream steps, in this order.
 ## State of this repository
 
 - `nix/home-manager/module.nix` is the module in Home Manager's own style:
-  `mkPackageOption pkgs "pigeon"`, a Linux platform assertion, and no flake
+  `mkPackageOption pkgs "pigeon-mail"`, a Linux platform assertion, and no flake
   references. `nix/home-manager.nix` imports it and only sets the package
   default to this flake's build.
 - `nix/home-manager/tests/` holds Home Manager `nmt` tests (default settings,
@@ -17,19 +17,22 @@ are packaged in nixpkgs. So there are two upstream steps, in this order.
 - The flake's `checks.<system>.home-manager` still evaluates the wrapper in a
   real Home Manager configuration.
 
-## 1. nixpkgs: package `pigeon`
+## 1. nixpkgs: package `pigeon-mail`
+
+nixpkgs already has an unrelated `pigeon` (a Go PEG parser generator), so
+Pigeon's attribute is `pigeon-mail`. The installed program is still `pigeon`.
 
 Needs, before the nixpkgs pull request:
 
 1. A tagged release (for example `v0.1.0`) that `fetchFromGitHub` can pin.
 2. A maintainer entry for yourself in `maintainers/maintainer-list.nix`,
    as a separate first commit.
-3. `pkgs/by-name/pi/pigeon/package.nix`, adapted from `nix/package.nix`:
+3. `pkgs/by-name/pi/pigeon-mail/package.nix`, adapted from `nix/package.nix`:
    `fetchFromGitHub` instead of the local fileset, `cargoHash` instead of
    `cargoLock`, and the Bun `node_modules` fixed-output derivation kept (hash
    from `tools/update-node-modules-hash.sh`). Drop `passthru` checks that need
    the flake, and add `meta.maintainers`.
-4. Build it on x86_64-linux with `nix-build -A pigeon` and run
+4. Build it on x86_64-linux with `nix-build -A pigeon-mail` and run
    `nixpkgs-review pr` before opening the pull request.
 
 ## 2. Home Manager: `programs.pigeon`

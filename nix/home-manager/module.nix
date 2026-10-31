@@ -80,7 +80,7 @@ in
   options.programs.pigeon = {
     enable = lib.mkEnableOption "Pigeon, a local-first email client";
 
-    package = lib.mkPackageOption pkgs "pigeon" { };
+    package = lib.mkPackageOption pkgs "pigeon-mail" { };
 
     settings = lib.mkOption {
       default = { };
