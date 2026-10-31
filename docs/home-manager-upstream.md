@@ -46,7 +46,9 @@ After the package is in nixpkgs unstable:
    ```sh
    nix-build --pure tests --option allow-import-from-derivation false \
      -A build.pigeon-default -A build.pigeon-settings \
-     -A build.pigeon-app-owned-settings -A build.pigeon-autostart
+     -A build.pigeon-app-owned-settings -A build.pigeon-autostart \
+     -A build.pigeon-accounts -A build.pigeon-accounts-none \
+     -A build.pigeon-accounts-oauth
    ```
 
 5. Commit as `pigeon: add module` (maintainer entry in its own earlier commit
