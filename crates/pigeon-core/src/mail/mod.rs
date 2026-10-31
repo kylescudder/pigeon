@@ -26,6 +26,7 @@ mod net;
 pub mod operations;
 mod query;
 mod recovery;
+pub mod reply;
 mod sending;
 pub mod smtp;
 pub mod source;
@@ -96,6 +97,13 @@ pub struct MessageContent {
     pub date: i64,
     pub message_id: String,
     pub attachments: Vec<Attachment>,
+    /// The Reply-To header, when the message has one.
+    pub reply_to: String,
+    /// The References header: Message-IDs of the conversation so far.
+    pub references: String,
+    /// The To and Cc headers alone. `recipients` also holds Bcc.
+    pub to_list: String,
+    pub cc_list: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

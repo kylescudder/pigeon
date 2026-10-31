@@ -217,7 +217,31 @@ test.beforeEach(async ({ page }) => {
             case "update_mail_password":
               return;
             case "send_state":
-              return { drafts: [], outbox: [], undo_send_seconds: 10 };
+              return { drafts: state.drafts ?? [], outbox: [], undo_send_seconds: 10 };
+            case "save_draft": {
+              const draft = { ...args.draft, id: args.draft.id ?? "draft-1", updated: Date.now() };
+              state.drafts = [draft];
+              write(state);
+              return draft;
+            }
+            case "reply_to_message": {
+              const original = messageById(args.id);
+              const draft = {
+                id: "draft-reply",
+                account_id: original.account_id,
+                to: args.kind === "forward" ? "" : original.sender,
+                cc: "",
+                bcc: "",
+                subject: `${args.kind === "forward" ? "Fwd" : "Re"}: ${original.subject}`,
+                body: `\n\nOn Tue, 27 Oct 2026, ${original.sender} wrote:\n> ${original.preview}\n`,
+                in_reply_to: "orig-2@example.test",
+                references: "orig-2@example.test",
+                updated: Date.now(),
+              };
+              state.drafts = [draft];
+              write(state);
+              return draft;
+            }
             case "quit_app":
               throw new Error("Not available in a frontend test");
             default:
@@ -533,4 +557,44 @@ test("a Home Manager account is read-only apart from its password", async ({ pag
   await expect(dialog.getByLabel("Password or app password", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Remove from this device", exact: true })).toHaveCount(0);
   await expect(dialog.getByText("Sending", { exact: true })).toHaveCount(0);
+});
+
+test("reply opens the composer with the quoted message and keeps it threaded", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (localStorage.getItem("pigeon-fixture-state")) return;
+    localStorage.setItem(
+      "pigeon-fixture-state",
+      JSON.stringify({
+        accounts: [
+          {
+            id: "acc-1",
+            config: {
+              name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993,
+              username: "mail@example.test", security: "tls", ca_certificate: null,
+              sending: { smtp: { host: "smtp.example.test", port: 465, security: "tls", username: "mail@example.test" }, display_name: "Me", signature: "", save_sent_copy: true },
+            },
+            status: "idle", error: null, last_synced: 1793008800, sync_folder: null, sync_cached: 2, sync_total: 2,
+          },
+        ],
+        folders: [{ id: "folder-1", account_id: "acc-1", name: "INBOX", kind: "inbox", total: 2, cached: 2, unread: 1 }],
+        saved_searches: [],
+      }),
+    );
+  });
+  await page.goto("/");
+  await page.getByRole("link", { name: "Open Personal inbox", exact: true }).click();
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await expect(page.getByRole("button", { name: "Forward", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reply", exact: true }).click();
+  const form = page.getByRole("form", { name: "New message" });
+  await expect(form.getByLabel("To", { exact: true })).toHaveValue("Bob <bob@example.test>");
+  await expect(form.getByLabel("Subject", { exact: true })).toHaveValue("Re: Release planning");
+  await expect(form.getByLabel("Message", { exact: true })).toHaveValue(/> The delivery plan is ready\./);
+  await expect(page).toHaveURL(/draft=draft-reply/);
+  // Editing autosaves; the threading fields must survive the save.
+  await form.getByLabel("Message", { exact: true }).fill("Sounds good.");
+  await expect(form.getByRole("status")).toHaveText("Draft saved on this device");
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).drafts[0]);
+  expect(saved.in_reply_to).toBe("orig-2@example.test");
+  expect(saved.references).toBe("orig-2@example.test");
 });

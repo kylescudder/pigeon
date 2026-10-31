@@ -240,6 +240,10 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
                     .or_else(|| item.internal_date().map(|value| value.timestamp()))
                     .unwrap_or(0),
                 message_id: headers.get_first_value("Message-ID").unwrap_or_default(),
+                reply_to: headers.get_first_value("Reply-To").unwrap_or_default(),
+                references: headers.get_first_value("References").unwrap_or_default(),
+                to_list: headers.get_first_value("To").unwrap_or_default(),
+                cc_list: headers.get_first_value("Cc").unwrap_or_default(),
                 ..Default::default()
             };
             let mut parts = Vec::new();

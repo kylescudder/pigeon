@@ -1,9 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { MailGate, useMail } from "../components/mail-provider";
 import { Modal } from "../components/modal";
 import { Icon } from "../components/icon";
+import { useRefreshSend } from "../components/send-state";
 import {
   handleActionKey,
   MessageActionButtons,
@@ -15,6 +16,8 @@ import {
   deleteMailSearch,
   errorMessage,
   openMailMessage,
+  replyToMessage,
+  type ReplyKind,
   readMailMessage,
   saveMailSearch,
   searchMail,
@@ -743,6 +746,7 @@ function MessageReader({
             {formattedPending ? "Opening…" : "Open formatted view"}
           </button>
         )}
+        <ReplyButtons messageId={message.summary.id} />
         <MessageActionButtons actions={actions} compact />
         <span>Plain text</span>
       </div>
@@ -803,6 +807,45 @@ function MessageReader({
           </section>
         )}
       </div>
+    </>
+  );
+}
+
+/** Starts a reply or forward as a draft and opens it in the composer. */
+function ReplyButtons({ messageId }: { messageId: number }) {
+  const navigate = useNavigate();
+  const refreshSend = useRefreshSend();
+  const start = useMutation({
+    mutationFn: (kind: ReplyKind) => replyToMessage(messageId, kind),
+    onSuccess: async (draft) => {
+      // The composer finds the draft in the send state, so load it first.
+      await refreshSend();
+      await navigate({ to: "/compose", search: { draft: draft.id } });
+    },
+  });
+  const choices: [ReplyKind, string][] = [
+    ["reply", "Reply"],
+    ["reply_all", "Reply all"],
+    ["forward", "Forward"],
+  ];
+  return (
+    <>
+      {choices.map(([kind, label]) => (
+        <button
+          key={kind}
+          className="button button-secondary"
+          type="button"
+          onClick={() => start.mutate(kind)}
+          disabled={start.isPending}
+        >
+          {label}
+        </button>
+      ))}
+      {start.isError && (
+        <span role="alert" className="mail-inline-error">
+          {errorMessage(start.error)}
+        </span>
+      )}
     </>
   );
 }

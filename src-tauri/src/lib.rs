@@ -659,6 +659,7 @@ pub fn run() {
             mail::retry_mail_action,
             mail::discard_mail_action,
             mail::send_state,
+            mail::reply_to_message,
             mail::save_draft,
             mail::delete_draft,
             mail::send_draft,

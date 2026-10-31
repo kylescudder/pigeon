@@ -87,6 +87,9 @@ function Composer({
     bcc: initial?.bcc ?? "",
     subject: initial?.subject ?? "",
     body: initial?.body ?? "",
+    // Kept as they are so a reply stays threaded through every autosave.
+    in_reply_to: initial?.in_reply_to ?? "",
+    references: initial?.references ?? "",
   });
   const [showCopies, setShowCopies] = useState(
     !!(initial?.cc || initial?.bcc),
