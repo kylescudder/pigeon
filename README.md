@@ -75,6 +75,32 @@ in the desktop keyring; the module has no options for them.
 Settings written this way show as managed by Home Manager in the app. Set
 `settings = null` to change them in the app instead.
 
+### Home Manager: accounts
+
+Accounts use Home Manager's shared `accounts.email.accounts` options, so an
+account you already describe for another mail program works here. Opt each one
+in with `pigeon.enable`:
+
+```nix
+accounts.email.accounts.personal = {
+  primary = true;
+  address = "me@example.com";
+  realName = "Me";
+  userName = "me@example.com";
+  flavor = "fastmail.com"; # or imap.host and smtp.host by hand
+  pigeon.enable = true;
+};
+```
+
+Pigeon reads only server settings, so the account appears in the app asking for
+its password. Enter an app password once; it goes in the desktop keyring and is
+never written to Nix. Accounts from Nix can't be removed or have their sending
+settings edited in the app. If you delete one from Nix, it stays in Pigeon as an
+ordinary account with its mail. Sign-in is by password only (no OAuth yet), so
+providers that require OAuth are not supported, and `passwordCommand` is
+ignored. See [declarative accounts](docs/declarative-accounts.md) for the file
+format and the checks the module makes.
+
 The service starts with `graphical-session.target`. GNOME reaches that target.
 Hyprland started without UWSM does not, so start the service from Hyprland
 once the session environment is available to systemd:
