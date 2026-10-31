@@ -1,6 +1,7 @@
 //! Main-window adapters for the mail engine. No SQL or protocol logic here.
 use pigeon_core::backup::{self, BackupError, Summary};
 use pigeon_core::mail::managed;
+use pigeon_core::mail::reply::ReplyKind;
 use pigeon_core::mail::{
     Account, AccountConfig, ActionCounts, ActionKind, Draft, DraftInput, Folder, MailEngine,
     MailError, Message, OutboxItem, PendingAction, SavedSearch, SearchQuery, SearchResults,
@@ -392,6 +393,18 @@ pub async fn send_state(
 ) -> Result<SendState, MailApiError> {
     guard(&webview)?;
     task(app, |engine| engine.send_state()).await
+}
+
+/// Saves a draft that replies to, or forwards, a stored message.
+#[tauri::command]
+pub async fn reply_to_message(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: i64,
+    kind: ReplyKind,
+) -> Result<Draft, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.start_reply(id, kind)).await
 }
 
 #[tauri::command]

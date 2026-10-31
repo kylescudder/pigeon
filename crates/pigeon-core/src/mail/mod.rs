@@ -26,6 +26,7 @@ mod net;
 pub mod operations;
 mod query;
 mod recovery;
+pub mod reply;
 mod sending;
 pub mod smtp;
 pub mod source;
