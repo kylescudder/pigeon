@@ -15,6 +15,64 @@
 let
   cfg = config.programs.pigeon;
   json = pkgs.formats.json { };
+
+  emailAccounts = config.accounts.email.accounts;
+  accounts = lib.filterAttrs (_: account: account.enable && account.pigeon.enable) emailAccounts;
+
+  security = tls: if tls.useStartTls then "start_tls" else "tls";
+  defaultPort =
+    tls: implicit: starttls:
+    if tls.useStartTls then starttls else implicit;
+
+  # Pigeon trusts the system roots; only a per-account override is passed on.
+  customCertificates =
+    account:
+    let
+      files = lib.filter (file: file != null && file != config.accounts.email.certificatesFile) (
+        map (server: if server == null then null else server.tls.certificatesFile) [
+          account.imap
+          account.smtp
+        ]
+      );
+    in
+    if files == [ ] then null else toString (lib.head files);
+
+  accountJson = account: {
+    inherit (account) address primary;
+    inherit (account) realName userName;
+    imap = {
+      inherit (account.imap) host;
+      port =
+        if account.imap.port != null then account.imap.port else defaultPort account.imap.tls 993 143;
+      security = security account.imap.tls;
+    };
+    smtp =
+      if account.smtp == null then
+        null
+      else
+        {
+          inherit (account.smtp) host;
+          port =
+            if account.smtp.port != null then account.smtp.port else defaultPort account.smtp.tls 465 587;
+          security = security account.smtp.tls;
+        };
+    caCertificate = customCertificates account;
+    signature = if account.signature.showSignature == "append" then account.signature.text else "";
+  };
+
+  accountsFile = {
+    version = 1;
+    accounts = lib.mapAttrs (_: accountJson) accounts;
+  };
+
+  # Authentication Pigeon can do: a plain username and password.
+  passwordAuth =
+    authentication:
+    lib.elem authentication [
+      null
+      "plain"
+      "login"
+    ];
 in
 {
   meta.maintainers = [ ];
@@ -74,15 +132,57 @@ in
     };
   };
 
+  options.accounts.email.accounts = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options.pigeon.enable = lib.mkEnableOption ''
+          Pigeon for this email account. The server settings are written to
+          {file}`$XDG_CONFIG_HOME/pigeon/accounts.json` and shown in the app as
+          managed. The password is never written: enter it once in Pigeon and
+          it stays in the desktop keyring, so `passwordCommand` is ignored
+        '';
+      }
+    );
+  };
+
   config = lib.mkIf cfg.enable {
     assertions = [
       (lib.hm.assertions.assertPlatform "programs.pigeon" pkgs lib.platforms.linux)
-    ];
+    ]
+    ++ lib.concatLists (
+      lib.mapAttrsToList (name: account: [
+        {
+          assertion = builtins.match "[A-Za-z0-9_-]{1,64}" name != null;
+          message = "Pigeon needs accounts.email.accounts.${name} to be named with up to 64 letters, digits, - or _.";
+        }
+        {
+          assertion = account.imap != null && account.imap.tls.enable;
+          message = "Pigeon needs an IMAP server with TLS or STARTTLS for accounts.email.accounts.${name}.";
+        }
+        {
+          assertion = account.smtp == null || account.smtp.tls.enable;
+          message = "Pigeon needs SMTP with TLS or STARTTLS for accounts.email.accounts.${name}.";
+        }
+        {
+          assertion =
+            account.imap == null
+            || (
+              passwordAuth account.imap.authentication
+              && (account.smtp == null || passwordAuth account.smtp.authentication)
+            );
+          message = "Pigeon supports password sign-in only (not OAuth) for accounts.email.accounts.${name}.";
+        }
+      ]) accounts
+    );
 
     home.packages = [ cfg.package ];
 
     xdg.configFile."pigeon/settings.json" = lib.mkIf (cfg.settings != null) {
       source = json.generate "pigeon-settings.json" cfg.settings;
+    };
+
+    xdg.configFile."pigeon/accounts.json" = lib.mkIf (accounts != { }) {
+      source = json.generate "pigeon-accounts.json" accountsFile;
     };
 
     systemd.user.services.pigeon = lib.mkIf cfg.autostart.enable {

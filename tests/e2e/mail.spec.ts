@@ -55,6 +55,7 @@ test.beforeEach(async ({ page }) => {
                 accounts: state.accounts,
                 folders: state.folders,
                 saved_searches: state.saved_searches,
+                managed_warnings: state.managed_warnings ?? [],
                 actions: {
                   pending: count(["queued", "applying"]),
                   failed: count(["failed"]),
@@ -496,4 +497,40 @@ test("formatted view reports embedded images it could not download", async ({ pa
   await page.getByRole("button", { name: /Invoice 4471/ }).click();
   await expect(page.getByRole("heading", { name: "Invoice 4471", exact: true })).toBeVisible();
   await expect(page.getByText(/could not be downloaded/)).toHaveCount(0);
+});
+
+test("a Home Manager account is read-only apart from its password", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (localStorage.getItem("pigeon-fixture-state")) return;
+    localStorage.setItem(
+      "pigeon-fixture-state",
+      JSON.stringify({
+        accounts: [
+          {
+            id: "managed-personal",
+            config: {
+              name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993,
+              username: "mail@example.test", security: "tls", ca_certificate: null, managed: true,
+              sending: { smtp: { host: "smtp.example.test", port: 587, security: "start_tls", username: "mail@example.test" }, display_name: "Me", signature: "", save_sent_copy: true },
+            },
+            status: "error", error: "enter this account’s password to start syncing",
+            last_synced: null, sync_folder: null, sync_cached: 0, sync_total: 0,
+          },
+        ],
+        folders: [],
+        saved_searches: [],
+        managed_warnings: ["accounts.json: Account “bad name!” could not be used"],
+      }),
+    );
+  });
+  await page.goto("/");
+  await expect(page.getByRole("alert").filter({ hasText: "bad name!" }).first()).toBeVisible();
+  await expect(page.getByText("enter this account’s password to start syncing").first()).toBeVisible();
+  await page.getByRole("button", { name: "Manage Personal", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Manage account", exact: true });
+  await expect(dialog.getByText("Managed by Home Manager.")).toBeVisible();
+  await expect(dialog.getByText("smtp.example.test:587")).toBeVisible();
+  await expect(dialog.getByLabel("Password or app password", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Remove from this device", exact: true })).toHaveCount(0);
+  await expect(dialog.getByText("Sending", { exact: true })).toHaveCount(0);
 });

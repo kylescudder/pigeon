@@ -294,6 +294,7 @@ impl MailSession for Session {
 
 fn config() -> AccountConfig {
     AccountConfig {
+        managed: false,
         name: "Personal".into(),
         address: "mail@pigeon.test".into(),
         host: "imap.pigeon.test".into(),

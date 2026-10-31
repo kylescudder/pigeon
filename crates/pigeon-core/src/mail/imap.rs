@@ -900,6 +900,7 @@ mod tests {
         let account = engine
             .add_account(
                 AccountConfig {
+                    managed: false,
                     name: "Synthetic".into(),
                     address: "synthetic@example.test".into(),
                     host: "localhost".into(),

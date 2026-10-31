@@ -845,6 +845,7 @@ impl MailEngine {
         settings: SendingSettings,
     ) -> Result<Account, MailError> {
         let _lease = self.access_lease("sending-settings")?;
+        self.refuse_if_managed(id)?;
         let mut account = self.account(id)?;
         validate_sending(&settings)?;
         if let Some(smtp) = &settings.smtp

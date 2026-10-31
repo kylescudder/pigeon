@@ -66,6 +66,8 @@ export type AccountConfig = {
   security: TransportSecurity;
   ca_certificate: string | null;
   sending?: SendingSettings;
+  /** Declared in the Nix configuration; the app cannot edit or remove it. */
+  managed?: boolean;
 };
 export type MailAccount = {
   id: string;
@@ -104,6 +106,8 @@ export type MailState = {
   folders: MailFolder[];
   saved_searches: SavedSearch[];
   actions: ActionCounts;
+  /** Problems with the declared accounts file, in words for the user. */
+  managed_warnings?: string[];
 };
 export type MailActionKind =
   | { type: "mark_read" }

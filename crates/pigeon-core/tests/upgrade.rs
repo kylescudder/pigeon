@@ -122,6 +122,7 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
         let account = engine
             .add_account(
                 AccountConfig {
+                    managed: false,
                     name: "Upgrade".into(),
                     address: "mail@pigeon.test".into(),
                     host: "imap.pigeon.test".into(),
@@ -245,6 +246,7 @@ fn restore_keeps_real_drafts_outbox_and_mailbox_work_but_never_runs_them() {
     let account = source
         .add_account(
             AccountConfig {
+                managed: false,
                 name: "Recovery".into(),
                 address: "mail@pigeon.test".into(),
                 host: "imap.pigeon.test".into(),

@@ -70,6 +70,7 @@ fn indexed_search_first_page_p95_is_under_200_ms_for_100k_messages() {
         let account = engine
             .add_account(
                 AccountConfig {
+                    managed: false,
                     name: format!("Mailbox {index}"),
                     address: format!("mailbox{index}@example.test"),
                     host: "imap.example.test".into(),
@@ -152,6 +153,7 @@ fn indexed_search_first_page_p95_is_under_200_ms_for_100k_messages() {
     let extra = engine
         .add_account(
             AccountConfig {
+                managed: false,
                 name: "Indexing account".into(),
                 address: "indexing@example.test".into(),
                 host: "imap.example.test".into(),

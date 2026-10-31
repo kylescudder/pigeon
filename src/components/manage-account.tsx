@@ -44,6 +44,7 @@ export function ManageAccount({
     update.reset();
     remove.reset();
   }, [account?.id]);
+  const managed = !!account?.config.managed;
   const pending = update.isPending || remove.isPending;
   // The mail state is recounted every few seconds, so this falls as removal
   // works through the account's batches.
@@ -64,6 +65,13 @@ export function ManageAccount({
             {confirmRemove ? "Remove this account?" : account.config.name}
           </h2>
           <p>{account.config.address}</p>
+          {managed && (
+            <p className="field-help">
+              Managed by Home Manager. Server and sending settings come from{" "}
+              <code>accounts.email.accounts</code>; change them in your Nix
+              configuration. Your password stays on this device.
+            </p>
+          )}
           {confirmRemove ? (
             <>
               <p className="removal-note">
@@ -128,7 +136,9 @@ export function ManageAccount({
                 }}
               >
                 <label htmlFor="replacement-password">
-                  New password or app password
+                  {account.error && managed
+                    ? "Password or app password"
+                    : "New password or app password"}
                   <input
                     id="replacement-password"
                     type="password"
@@ -159,27 +169,42 @@ export function ManageAccount({
                   </button>
                 </div>
               </form>
-              <SendingForm
-                key={account.id}
-                account={account}
-                open={focusSending || !account.config.sending?.smtp}
-                disabled={pending}
-              />
-              <div className="account-danger-zone">
-                <p>Remove this account’s data from this device.</p>
-                <button
-                  type="button"
-                  className="button button-danger"
-                  onClick={() => setConfirmRemove(true)}
-                  disabled={
-                    pending ||
-                    mail.active.has(account.id) ||
-                    account.status === "syncing"
-                  }
-                >
-                  Remove from this device
-                </button>
-              </div>
+              {managed ? (
+                <dl className="account-connection-details">
+                  <div>
+                    <dt>Outgoing server</dt>
+                    <dd>
+                      {account.config.sending?.smtp
+                        ? `${account.config.sending.smtp.host}:${account.config.sending.smtp.port}`
+                        : "Not set up"}
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <SendingForm
+                  key={account.id}
+                  account={account}
+                  open={focusSending || !account.config.sending?.smtp}
+                  disabled={pending}
+                />
+              )}
+              {!managed && (
+                <div className="account-danger-zone">
+                  <p>Remove this account’s data from this device.</p>
+                  <button
+                    type="button"
+                    className="button button-danger"
+                    onClick={() => setConfirmRemove(true)}
+                    disabled={
+                      pending ||
+                      mail.active.has(account.id) ||
+                      account.status === "syncing"
+                    }
+                  >
+                    Remove from this device
+                  </button>
+                </div>
+              )}
               <div className="modal-actions">
                 <button
                   type="button"

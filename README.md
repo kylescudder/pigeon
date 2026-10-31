@@ -11,6 +11,7 @@ Pigeon is early software. It connects IMAP accounts, caches mail in an encrypted
 - [Milestone 0 foundation spike](docs/foundation-spike.md)
 - [Desktop integration and NixOS checklist](docs/desktop.md)
 - [Getting Pigeon into Home Manager](docs/home-manager-upstream.md)
+- [Declarative accounts](docs/declarative-accounts.md)
 
 ## Install on NixOS
 

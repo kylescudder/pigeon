@@ -312,6 +312,7 @@ fn synced_mail_is_searchable_without_duplicates_and_readable_after_restart_offli
 
 fn config() -> AccountConfig {
     AccountConfig {
+        managed: false,
         name: "Personal".into(),
         address: "mail@pigeon.test".into(),
         host: "imap.pigeon.test".into(),
