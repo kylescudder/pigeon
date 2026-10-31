@@ -6,4 +6,5 @@
   pigeon-accounts = ./accounts.nix;
   pigeon-accounts-none = ./accounts-none.nix;
   pigeon-accounts-oauth = ./accounts-oauth.nix;
+  pigeon-accounts-bad-name = ./accounts-bad-name.nix;
 }

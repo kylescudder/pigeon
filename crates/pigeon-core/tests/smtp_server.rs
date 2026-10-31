@@ -25,6 +25,7 @@ fn smtp(port: u16, security: TransportSecurity) -> SmtpConfig {
 
 fn config(outgoing: SmtpConfig) -> AccountConfig {
     AccountConfig {
+        managed: false,
         name: "Test account".into(),
         address: "mail@pigeon.test".into(),
         host: "localhost".into(),

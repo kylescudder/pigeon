@@ -21,6 +21,7 @@ mod attachments;
 mod cache;
 mod diagnostics;
 mod imap;
+pub mod managed;
 mod net;
 pub mod operations;
 mod query;
@@ -45,7 +46,7 @@ pub enum TransportSecurity {
     StartTls,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccountConfig {
     pub name: String,
     pub address: String,
@@ -58,6 +59,10 @@ pub struct AccountConfig {
     /// Outgoing server and identity. Absent in accounts added before sending.
     #[serde(default)]
     pub sending: SendingSettings,
+    /// Declared in `accounts.json` (Home Manager): the app cannot edit or
+    /// remove it, and its password is still entered here.
+    #[serde(default)]
+    pub managed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +192,8 @@ pub enum MailError {
         operation: &'static str,
         reason: &'static str,
     },
+    #[error("enter this account’s password to start syncing")]
+    PasswordNeeded,
     #[error("the desktop keyring is locked or unavailable; unlock it before continuing")]
     Locked,
     #[error("encrypted mail storage is unavailable: {0}")]
@@ -331,6 +338,7 @@ impl MailEngine {
 
     pub fn remove_account(&self, id: &str) -> Result<(), MailError> {
         let _lease = self.lease(id)?;
+        self.refuse_if_managed(id)?;
         self.check_no_unsent(id)?;
         // Mail goes first, in batches: each row also rewrites the search index,
         // so one transaction would hold the store and freeze every other view.
@@ -422,9 +430,11 @@ impl MailEngine {
 
     pub fn add_account(
         &self,
-        config: AccountConfig,
+        mut config: AccountConfig,
         password: Secret,
     ) -> Result<Account, MailError> {
+        // Only the declaration file can make an account managed.
+        config.managed = false;
         validate_config(&config)?;
         sending::validate_sending(&config.sending)?;
         if password.is_empty() {
@@ -535,7 +545,11 @@ impl MailEngine {
             .secrets
             .get(&password_name(id))
             .map_err(|_| MailError::Locked)?
-            .ok_or(MailError::Authentication)?;
+            .ok_or(if account.config.managed {
+                MailError::PasswordNeeded
+            } else {
+                MailError::Authentication
+            })?;
         // Queued changes go first, so the snapshots below already reflect them.
         self.apply_queue(&account, &password)?;
         let mut session = self.connector.connect(&account.config, &password)?;

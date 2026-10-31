@@ -7,6 +7,7 @@ use zeroize::Zeroizing;
 
 fn config() -> AccountConfig {
     AccountConfig {
+        managed: false,
         name: "Test IMAP".into(),
         address: "mail@pigeon.test".into(),
         host: "localhost".into(),

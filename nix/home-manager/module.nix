@@ -152,6 +152,10 @@ in
     ++ lib.concatLists (
       lib.mapAttrsToList (name: account: [
         {
+          assertion = builtins.match "[A-Za-z0-9_-]{1,64}" name != null;
+          message = "Pigeon needs accounts.email.accounts.${name} to be named with up to 64 letters, digits, - or _.";
+        }
+        {
           assertion = account.imap != null && account.imap.tls.enable;
           message = "Pigeon needs an IMAP server with TLS or STARTTLS for accounts.email.accounts.${name}.";
         }

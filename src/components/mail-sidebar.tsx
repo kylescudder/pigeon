@@ -108,6 +108,11 @@ export function MailSidebar() {
           </div>
         </div>
       )}
+      {mail.state?.managed_warnings?.map((warning) => (
+        <p role="alert" className="mail-inline-error" key={warning}>
+          {warning}
+        </p>
+      ))}
       <PendingLink />
       {!!mail.state?.saved_searches.length && (
         <div className="saved-searches">

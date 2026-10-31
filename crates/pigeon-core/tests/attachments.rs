@@ -198,6 +198,7 @@ fn fixture_with(initial: State) -> Fixture {
     let account = engine
         .add_account(
             AccountConfig {
+                managed: false,
                 name: "Personal".into(),
                 address: "mail@pigeon.test".into(),
                 host: "imap.pigeon.test".into(),

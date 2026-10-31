@@ -1,5 +1,6 @@
 //! Main-window adapters for the mail engine. No SQL or protocol logic here.
 use pigeon_core::backup::{self, BackupError, Summary};
+use pigeon_core::mail::managed;
 use pigeon_core::mail::{
     Account, AccountConfig, ActionCounts, ActionKind, Draft, DraftInput, Folder, MailEngine,
     MailError, Message, OutboxItem, PendingAction, SavedSearch, SearchQuery, SearchResults,
@@ -29,6 +30,7 @@ impl From<MailError> for MailApiError {
             MailError::ParseRetryLimit => "parse_retry_limit",
             MailError::Imap { .. } => "imap",
             MailError::ResponseParse { .. } => "imap_parse",
+            MailError::PasswordNeeded => "password_needed",
             MailError::Locked => "locked",
             MailError::Storage(_) => "storage",
             MailError::NotFound => "not_found",
@@ -66,6 +68,8 @@ pub struct MailState {
     folders: Vec<Folder>,
     saved_searches: Vec<SavedSearch>,
     actions: ActionCounts,
+    /// Problems with the declared accounts file, in words for the user.
+    managed_warnings: Vec<String>,
 }
 
 fn guard(webview: &tauri::Webview) -> Result<(), MailApiError> {
@@ -112,12 +116,30 @@ pub async fn mail_state(
     webview: tauri::Webview,
 ) -> Result<MailState, MailApiError> {
     guard(&webview)?;
-    task(app, |engine| {
+    let declared = app
+        .path()
+        .config_dir()
+        .map(|dir| managed::accounts_path(&dir))
+        .ok();
+    task(app, move |engine| {
+        let mut managed_warnings = Vec::new();
+        if let Some(path) = declared {
+            // Re-read on every refresh so a Home Manager switch shows without a restart.
+            let declaration = managed::load(&path);
+            managed_warnings = declaration.warnings.clone();
+            match engine.reconcile_managed(&declaration) {
+                // Another operation holds the store; the next refresh retries.
+                Ok(()) | Err(MailError::Busy | MailError::Restoring) => {}
+                Err(error @ (MailError::Locked | MailError::KeyMissing)) => return Err(error),
+                Err(error) => managed_warnings.push(error.to_string()),
+            }
+        }
         Ok(MailState {
             accounts: engine.accounts()?,
             folders: engine.folders()?,
             saved_searches: engine.saved_searches()?,
             actions: engine.action_counts()?,
+            managed_warnings,
         })
     })
     .await

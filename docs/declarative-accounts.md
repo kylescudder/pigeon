@@ -28,6 +28,7 @@ Only accounts with `enable` and `pigeon.enable` are written. Presets such as
 
 Rules the module enforces (as assertions):
 
+- The account name is up to 64 letters, digits, `-` or `_`.
 - IMAP is required, and IMAP and SMTP must use TLS or STARTTLS.
 - Sign-in is a password only: `authentication` must be unset, `plain` or `login`
   (no OAuth yet).
@@ -64,24 +65,26 @@ Rules the module enforces (as assertions):
   `append`.
 - `security` uses the same names as the app's stored accounts.
 
-## App side (not done)
+## App side
 
-The app does not read this file yet. The intended behaviour:
+On every mail refresh the app reads the file and reconciles it with its store:
 
-1. **Stable identity.** A managed account's id is derived from its key (for
-   example `managed:personal`), not random, so the keyring password and cached
-   mail survive a rebuild.
-2. **Reconcile on start and when the file changes.** Missing accounts are
-   created without a password and show "enter your password". Changed server
-   settings are updated in place.
-3. **Read-only in the UI.** Managed accounts show server settings as managed
-   (as settings already do), still accept a password, and cannot be removed
-   in the app.
-4. **Removal is not deletion.** An account that disappears from the file stops
+1. **Stable identity.** A declared account's id is `managed-<name>`, so its
+   keyring password and cached mail survive a rebuild.
+2. **Created without a password.** The account appears with "enter this
+   account's password to start syncing". The password is verified when entered,
+   as for any account, and kept in the keyring.
+3. **Updated in place.** Changed server settings, display name and signature
+   apply without a restart. The "save a copy to Sent" preference is not
+   declared and stays as the user set it.
+4. **Read-only in the UI.** Managed accounts cannot be removed or have their
+   sending settings edited in the app (the engine refuses too), and a request
+   from the interface cannot mark an account managed.
+5. **Removal is not deletion.** An account that disappears from the file stops
    being managed and stays as an ordinary account, so a config mistake never
    deletes cached mail.
-5. **Backup and restore.** Restoring on another machine keeps managed accounts
-   managed if the file still lists them.
-
-The engine currently verifies the password when an account is added, so the
-main change is a "created, waiting for a password" state in the engine.
+6. **Bad files change nothing.** A file that cannot be parsed, or has an
+   unknown `version`, leaves managed accounts as they are and shows a warning.
+   A bad entry is skipped with a warning and the rest still apply.
+7. **Backup and restore.** A restored account keeps its managed flag and is
+   re-reconciled against the file on the next refresh.

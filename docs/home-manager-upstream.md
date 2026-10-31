@@ -48,7 +48,7 @@ After the package is in nixpkgs unstable:
      -A build.pigeon-default -A build.pigeon-settings \
      -A build.pigeon-app-owned-settings -A build.pigeon-autostart \
      -A build.pigeon-accounts -A build.pigeon-accounts-none \
-     -A build.pigeon-accounts-oauth
+     -A build.pigeon-accounts-oauth -A build.pigeon-accounts-bad-name
    ```
 
 5. Commit as `pigeon: add module` (maintainer entry in its own earlier commit
