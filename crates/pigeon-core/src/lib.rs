@@ -5,6 +5,7 @@ pub mod backup;
 pub mod desktop;
 pub mod diagnostics;
 pub mod mail;
+pub mod notify;
 pub mod secrets;
 pub mod store;
 pub mod unlock;
