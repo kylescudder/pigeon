@@ -43,7 +43,11 @@ impl MailSession for Session {
                 uid: *uid,
                 content: MessageContent {
                     sender: "Alice Example <alice@pigeon.test>".into(),
-                    recipients: "Me <mail@pigeon.test>, Bob <bob@pigeon.test>".into(),
+                    // Sync stores Bcc in `recipients`; replies must not use it.
+                    recipients: "Me <mail@pigeon.test>, Bob <bob@pigeon.test>, secret@pigeon.test"
+                        .into(),
+                    to_list: "Me <mail@pigeon.test>, Bob <bob@pigeon.test>".into(),
+                    references: "<root@pigeon.test>".into(),
                     subject: "Quarterly receipts".into(),
                     body_text: "Please find the receipts.".into(),
                     message_id: "<orig-1@pigeon.test>".into(),
@@ -91,6 +95,8 @@ fn a_reply_is_saved_as_a_threaded_draft_from_the_receiving_account() {
     assert_eq!(draft.cc, "\"Bob\" <bob@pigeon.test>");
     assert_eq!(draft.subject, "Re: Quarterly receipts");
     assert_eq!(draft.in_reply_to, "orig-1@pigeon.test");
+    assert_eq!(draft.references, "root@pigeon.test orig-1@pigeon.test");
+    assert!(!format!("{draft:?}").contains("secret"));
     assert!(draft.body.contains("> Please find the receipts."));
     let accounts = engine.accounts().unwrap();
     assert_eq!(draft.account_id.as_deref(), Some(accounts[0].id.as_str()));

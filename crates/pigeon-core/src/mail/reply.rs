@@ -12,6 +12,7 @@ use super::{MailEngine, MailError, storage_error};
 
 /// How much of the original is quoted, so a huge message cannot fill a draft.
 const MAX_QUOTED: usize = 50_000;
+const MAX_REFERENCES: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -31,6 +32,12 @@ pub struct Original {
     pub body: String,
     pub date: i64,
     pub message_id: String,
+    pub reply_to: String,
+    pub references: String,
+    pub to_list: String,
+    pub cc_list: String,
+    /// Sent and Drafts mail can carry a Bcc line that `recipients` includes.
+    pub from_own_folder: bool,
 }
 
 /// The draft for `kind`, written from `own_address`'s account.
@@ -55,13 +62,28 @@ pub fn compose(original: &Original, kind: ReplyKind, own_address: &str) -> Draft
         }
         ReplyKind::Reply | ReplyKind::ReplyAll => {
             draft.subject = prefixed(&subject, "Re: ", &["re:"]);
-            draft.to = single_line(&original.sender);
+            let own_message = first_address(&original.sender)
+                .is_some_and(|address| address.eq_ignore_ascii_case(own_address));
+            // Replying to a message you sent goes to the people you sent it to.
+            let to_header = original.to();
+            draft.to = if own_message {
+                single_line(&to_header)
+            } else if original.reply_to.trim().is_empty() {
+                single_line(&original.sender)
+            } else {
+                single_line(&original.reply_to)
+            };
             if kind == ReplyKind::ReplyAll {
-                draft.cc = others(&original.recipients, &original.sender, own_address);
+                let others = if own_message {
+                    original.cc()
+                } else {
+                    format!("{}, {}", original.to(), original.cc())
+                };
+                draft.cc = others_of(&others, &draft.to, own_address);
             }
             let id = bare_id(&original.message_id);
             draft.in_reply_to = id.clone();
-            draft.references = id;
+            draft.references = chain(&original.references, &id);
             let who = parse_recipients(&original.sender, "From")
                 .ok()
                 .and_then(|list| list.into_iter().next())
@@ -76,21 +98,51 @@ pub fn compose(original: &Original, kind: ReplyKind, own_address: &str) -> Draft
     draft
 }
 
-/// The other people on the message: everyone except the replier and the sender.
-fn others(recipients: &str, sender: &str, own_address: &str) -> String {
-    let sender_address = parse_recipients(sender, "From")
+impl Original {
+    fn has_lists(&self) -> bool {
+        !self.to_list.is_empty() || !self.cc_list.is_empty()
+    }
+
+    /// The To header, never including Bcc. Messages stored before the header
+    /// facts were kept have none: incoming mail then falls back to
+    /// `recipients`, which holds Bcc only for mail you sent, so mail in Sent
+    /// and Drafts gets nothing rather than risk exposing a blind recipient.
+    fn to(&self) -> String {
+        if self.has_lists() {
+            self.to_list.clone()
+        } else if self.from_own_folder {
+            String::new()
+        } else {
+            self.recipients.clone()
+        }
+    }
+
+    fn cc(&self) -> String {
+        self.cc_list.clone()
+    }
+}
+
+fn first_address(field: &str) -> Option<String> {
+    parse_recipients(field, "From")
         .ok()
         .and_then(|list| list.into_iter().next())
-        .map(|(_, address)| address);
-    let Ok(list) = parse_recipients(recipients, "To") else {
+        .map(|(_, address)| address)
+}
+
+/// The people in `candidates` other than the replier and those already in `to`.
+fn others_of(candidates: &str, to: &str, own_address: &str) -> String {
+    let Ok(list) = parse_recipients(candidates.trim_matches([',', ' ']), "To") else {
         return String::new();
     };
+    let already: Vec<String> = parse_recipients(to, "To")
+        .map(|list| list.into_iter().map(|(_, address)| address).collect())
+        .unwrap_or_default();
     let mut kept: Vec<(Option<String>, String)> = Vec::new();
     for (name, address) in list {
         let skip = address.eq_ignore_ascii_case(own_address)
-            || sender_address
-                .as_deref()
-                .is_some_and(|sender| sender.eq_ignore_ascii_case(&address))
+            || already
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(&address))
             || kept
                 .iter()
                 .any(|(_, known)| known.eq_ignore_ascii_case(&address));
@@ -105,6 +157,26 @@ fn others(recipients: &str, sender: &str, own_address: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The earlier Message-IDs of the conversation with this one added, so a
+/// recipient who has only part of the thread can still place the reply.
+fn chain(earlier: &str, id: &str) -> String {
+    let mut ids: Vec<String> = earlier
+        .split_whitespace()
+        .map(bare_id)
+        .filter(|known| !known.is_empty())
+        .collect();
+    if !id.is_empty() && ids.last().map(String::as_str) != Some(id) {
+        ids.push(id.to_owned());
+    }
+    // Long threads keep the first message and the most recent ones.
+    if ids.len() > MAX_REFERENCES {
+        let tail = ids.split_off(ids.len() - (MAX_REFERENCES - 1));
+        ids.truncate(1);
+        ids.extend(tail);
+    }
+    ids.join(" ")
 }
 
 fn prefixed(subject: &str, prefix: &str, existing: &[&str]) -> String {
@@ -154,9 +226,10 @@ impl MailEngine {
             store
                 .connection()
                 .query_row(
-                    "SELECT account,sender,recipients,subject,body_text,date,message_id FROM messages WHERE id=?1",
+                    "SELECT m.account,m.sender,m.recipients,m.subject,m.body_text,m.date,m.message_id,m.reply_to,m.reply_refs,m.to_list,m.cc_list,coalesce(f.kind,'other') FROM messages m LEFT JOIN mail_folders f ON f.account=m.account AND f.name=m.folder WHERE m.id=?1",
                     params![message],
                     |row| {
+                        let kind: String = row.get(11)?;
                         Ok(Original {
                             account: row.get(0)?,
                             sender: row.get(1)?,
@@ -165,6 +238,11 @@ impl MailEngine {
                             body: row.get(4)?,
                             date: row.get(5)?,
                             message_id: row.get(6)?,
+                            reply_to: row.get(7)?,
+                            references: row.get(8)?,
+                            to_list: row.get(9)?,
+                            cc_list: row.get(10)?,
+                            from_own_folder: matches!(kind.as_str(), "sent" | "drafts"),
                         })
                     },
                 )
@@ -197,6 +275,11 @@ mod tests {
             body: "Line one\n\nLine three".into(),
             date: 1793005200,
             message_id: "<abc123@pigeon.test>".into(),
+            reply_to: String::new(),
+            references: String::new(),
+            to_list: "Me <me@pigeon.test>, Bob <bob@pigeon.test>".into(),
+            cc_list: "carol@pigeon.test, ME@pigeon.test".into(),
+            from_own_folder: false,
         }
     }
 
@@ -220,12 +303,99 @@ mod tests {
     #[test]
     fn reply_all_adds_the_others_but_not_me_or_the_sender() {
         let mut message = original();
-        message.recipients =
-            "Me <me@pigeon.test>, Bob <bob@pigeon.test>, carol@pigeon.test, ME@pigeon.test, alice@pigeon.test, bob@pigeon.test"
-                .into();
+        message.to_list = "Me <me@pigeon.test>, Bob <bob@pigeon.test>, alice@pigeon.test".into();
+        message.cc_list = "carol@pigeon.test, ME@pigeon.test, bob@pigeon.test".into();
         let draft = compose(&message, ReplyKind::ReplyAll, "me@pigeon.test");
         assert_eq!(draft.to, "Alice Example <alice@pigeon.test>");
+        // The sender is already in To, and neither I nor a duplicate is added.
         assert_eq!(draft.cc, "\"Bob\" <bob@pigeon.test>, carol@pigeon.test");
+    }
+
+    #[test]
+    fn reply_all_never_copies_a_blind_recipient() {
+        let mut message = original();
+        message.sender = "Me <me@pigeon.test>".into();
+        message.from_own_folder = true;
+        // `recipients` also holds the Bcc line, as stored by sync.
+        message.recipients = "alice@pigeon.test, carol@pigeon.test, secret@pigeon.test".into();
+        message.to_list = "alice@pigeon.test".into();
+        message.cc_list = "carol@pigeon.test".into();
+        let draft = compose(&message, ReplyKind::ReplyAll, "me@pigeon.test");
+        assert_eq!(draft.to, "alice@pigeon.test");
+        assert_eq!(draft.cc, "carol@pigeon.test");
+        assert!(!format!("{draft:?}").contains("secret"));
+    }
+
+    #[test]
+    fn mail_stored_before_the_lists_never_exposes_bcc_from_sent() {
+        let mut message = original();
+        message.sender = "Me <me@pigeon.test>".into();
+        message.from_own_folder = true;
+        message.recipients = "alice@pigeon.test, secret@pigeon.test".into();
+        message.to_list = String::new();
+        message.cc_list = String::new();
+        let draft = compose(&message, ReplyKind::ReplyAll, "me@pigeon.test");
+        assert_eq!((draft.to.as_str(), draft.cc.as_str()), ("", ""));
+        // Incoming old mail has no Bcc line, so its recipients are safe to use.
+        let mut incoming = original();
+        incoming.to_list = String::new();
+        incoming.cc_list = String::new();
+        incoming.recipients = "Me <me@pigeon.test>, Bob <bob@pigeon.test>".into();
+        let draft = compose(&incoming, ReplyKind::ReplyAll, "me@pigeon.test");
+        assert_eq!(draft.cc, "\"Bob\" <bob@pigeon.test>");
+    }
+
+    #[test]
+    fn replying_to_my_own_message_goes_to_who_i_wrote_to() {
+        let mut message = original();
+        message.sender = "Me <me@pigeon.test>".into();
+        message.to_list = "Alice <alice@pigeon.test>".into();
+        message.cc_list = "carol@pigeon.test".into();
+        let reply = compose(&message, ReplyKind::Reply, "me@pigeon.test");
+        assert_eq!(reply.to, "Alice <alice@pigeon.test>");
+        assert_eq!(reply.cc, "");
+        let all = compose(&message, ReplyKind::ReplyAll, "me@pigeon.test");
+        assert_eq!(all.to, "Alice <alice@pigeon.test>");
+        assert_eq!(all.cc, "carol@pigeon.test");
+    }
+
+    #[test]
+    fn reply_to_is_preferred_over_from() {
+        let mut message = original();
+        message.sender = "Mailing List <bounces@list.test>".into();
+        message.reply_to = "Discussion <list@list.test>".into();
+        let draft = compose(&message, ReplyKind::Reply, "me@pigeon.test");
+        assert_eq!(draft.to, "Discussion <list@list.test>");
+        message.reply_to = String::new();
+        assert_eq!(
+            compose(&message, ReplyKind::Reply, "me@pigeon.test").to,
+            "Mailing List <bounces@list.test>"
+        );
+    }
+
+    #[test]
+    fn the_references_chain_is_kept_and_extended() {
+        let mut message = original();
+        message.references = "<root@pigeon.test> <mid@pigeon.test>".into();
+        let draft = compose(&message, ReplyKind::Reply, "me@pigeon.test");
+        assert_eq!(
+            draft.references,
+            "root@pigeon.test mid@pigeon.test abc123@pigeon.test"
+        );
+        assert_eq!(draft.in_reply_to, "abc123@pigeon.test");
+        // A very long thread keeps its first message and the latest ones.
+        message.references = (0..40)
+            .map(|n| format!("<m{n}@x.test>"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let ids: Vec<_> = compose(&message, ReplyKind::Reply, "me@pigeon.test")
+            .references
+            .split(' ')
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(ids.len(), MAX_REFERENCES);
+        assert_eq!(ids[0], "m0@x.test");
+        assert_eq!(ids.last().unwrap(), "abc123@pigeon.test");
     }
 
     #[test]

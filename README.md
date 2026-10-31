@@ -140,9 +140,10 @@ or later under the account's **Sending** settings. Drafts save as you type.
 Sent mail waits in the Outbox for the undo delay (10 seconds by default, under
 Settings). If Pigeon cannot tell whether the server accepted a message, it says
 so and does not send it again unless you choose to. **Reply**, **Reply all**
-and **Forward** on an open message start a draft: replies quote the original and
-carry `In-Reply-To` and `References` so other mail clients keep the thread, and a
-forward includes the message text but not its attachments. Attachments on sent
+and **Forward** on an open message start a draft: replies quote the original, go to its `Reply-To` address when it has one, never
+copy blind (Bcc) recipients, and carry `In-Reply-To` and `References` so other
+mail clients keep the thread. A forward includes the message text but not its
+attachments. Attachments on sent
 mail and rich text come in later milestones. See the [receiving guide and test results](docs/mail-engine.md) for
 progress/recovery behaviour, limits, and the NixOS verification checklist.
 
