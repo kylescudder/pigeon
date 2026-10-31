@@ -30,6 +30,7 @@ fn main() {
             "retry_mail_action",
             "discard_mail_action",
             "send_state",
+            "reply_to_message",
             "save_draft",
             "delete_draft",
             "send_draft",

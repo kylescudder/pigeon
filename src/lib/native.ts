@@ -248,8 +248,12 @@ export type DraftInput = {
   bcc: string;
   subject: string;
   body: string;
+  /** Set on replies so other mail clients thread them. */
+  in_reply_to?: string;
+  references?: string;
 };
 export type Draft = DraftInput & { id: string; updated: number };
+export type ReplyKind = "reply" | "reply_all" | "forward";
 export type SendStatus =
   | { state: "queued"; send_at: number; error: string | null }
   | { state: "sending" }
@@ -282,6 +286,8 @@ export type SendDecision = "send_again" | "mark_sent" | "discard";
 export const sendState = () => invoke<SendState>("send_state");
 export const saveDraft = (draft: DraftInput) =>
   invoke<Draft>("save_draft", { draft });
+export const replyToMessage = (id: number, kind: ReplyKind) =>
+  invoke<Draft>("reply_to_message", { id, kind });
 export const deleteDraft = (id: string) => invoke<void>("delete_draft", { id });
 export const sendDraft = (draft: DraftInput) =>
   invoke<OutboxItem>("send_draft", { draft });

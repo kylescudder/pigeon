@@ -54,6 +54,10 @@ pub struct DraftInput {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    /// Message-ID of the message this replies to, without angle brackets.
+    pub in_reply_to: String,
+    /// Message-IDs of the conversation so far, space separated.
+    pub references: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -65,6 +69,8 @@ pub struct Draft {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    pub in_reply_to: String,
+    pub references: String,
     pub updated: i64,
 }
 
@@ -158,7 +164,7 @@ fn random_id() -> Result<String, MailError> {
     Ok(hex::encode(bytes))
 }
 
-fn invalid(message: &str) -> MailError {
+pub(super) fn invalid(message: &str) -> MailError {
     MailError::InvalidConfig(message.into())
 }
 
@@ -177,7 +183,10 @@ fn check_draft(draft: &DraftInput) -> Result<(), MailError> {
 
 /// Parses a comma-separated recipient field into bare addresses and the
 /// display form used in headers.
-fn parse_recipients(field: &str, label: &str) -> Result<Vec<(Option<String>, String)>, MailError> {
+pub(super) fn parse_recipients(
+    field: &str,
+    label: &str,
+) -> Result<Vec<(Option<String>, String)>, MailError> {
     if field.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -211,7 +220,7 @@ fn parse_recipients(field: &str, label: &str) -> Result<Vec<(Option<String>, Str
     Ok(out)
 }
 
-fn single_line(value: &str) -> String {
+pub(super) fn single_line(value: &str) -> String {
     value.replace(['\r', '\n'], " ").trim().to_owned()
 }
 
@@ -253,6 +262,8 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
     }
     let body = crlf(&body);
     let display_name = single_line(&sending.display_name);
+    let in_reply_to = header_id(&draft.in_reply_to);
+    let references = header_ids(&draft.references);
 
     let addresses =
         |list: &[(Option<String>, String)]| -> mail_builder::headers::address::Address<'static> {
@@ -278,6 +289,12 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
             .message_id(message_id.clone())
             .date(now_secs)
             .text_body(body.clone());
+        if !in_reply_to.is_empty() {
+            builder = builder.in_reply_to(in_reply_to.clone());
+        }
+        if !references.is_empty() {
+            builder = builder.references(references.clone());
+        }
         if !to.is_empty() {
             builder = builder.to(addresses(&to));
         }
@@ -325,6 +342,26 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
     })
 }
 
+/// One Message-ID for a threading header: no angle brackets, spaces or control
+/// characters, so a draft cannot inject headers.
+fn header_id(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(['<', '>'])
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control() && !matches!(c, '<' | '>'))
+        .collect()
+}
+
+/// Several Message-IDs, separated by spaces, the oldest first.
+fn header_ids(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .map(header_id)
+        .filter(|id| !id.is_empty())
+        .collect()
+}
+
 fn draft_from_payload(id: &str, payload: &str, updated: i64) -> Result<Draft, MailError> {
     let input: DraftInput = serde_json::from_str(payload)
         .map_err(|_| MailError::Storage("a saved draft could not be read".into()))?;
@@ -336,11 +373,13 @@ fn draft_from_payload(id: &str, payload: &str, updated: i64) -> Result<Draft, Ma
         bcc: input.bcc,
         subject: input.subject,
         body: input.body,
+        in_reply_to: input.in_reply_to,
+        references: input.references,
         updated,
     })
 }
 
-fn upsert_draft(conn: &Connection, draft: &DraftInput) -> Result<Draft, MailError> {
+pub(super) fn upsert_draft(conn: &Connection, draft: &DraftInput) -> Result<Draft, MailError> {
     check_draft(draft)?;
     let id = match &draft.id {
         Some(id) if !id.is_empty() && id.len() <= 64 => id.clone(),
@@ -502,7 +541,7 @@ fn backoff(attempts: u32) -> Duration {
 }
 
 impl MailEngine {
-    fn account(&self, id: &str) -> Result<Account, MailError> {
+    pub(super) fn account(&self, id: &str) -> Result<Account, MailError> {
         self.accounts()?
             .into_iter()
             .find(|account| account.id == id)
@@ -628,6 +667,8 @@ impl MailEngine {
             bcc: saved.bcc.clone(),
             subject: saved.subject.clone(),
             body: saved.body.clone(),
+            in_reply_to: saved.in_reply_to.clone(),
+            references: saved.references.clone(),
         };
         let built = build(&account, &input, operations::now_ms() / 1000)?;
         let outbox_id = random_id()?;
@@ -1113,5 +1154,83 @@ impl operations::OperationHandler for SentCopyHandler {
             Ok(()) => Outcome::Done,
             Err(error) => failed(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mail::{AccountConfig, TransportSecurity};
+
+    fn account() -> Account {
+        Account {
+            id: "acc".into(),
+            config: AccountConfig {
+                managed: false,
+                name: "Test".into(),
+                address: "me@pigeon.test".into(),
+                host: "imap.pigeon.test".into(),
+                port: 993,
+                username: "me@pigeon.test".into(),
+                security: TransportSecurity::Tls,
+                ca_certificate: None,
+                sending: Default::default(),
+            },
+            status: "idle".into(),
+            error: None,
+            last_synced: None,
+            sync_folder: None,
+            sync_cached: 0,
+            sync_total: 0,
+        }
+    }
+
+    fn text(draft: &DraftInput) -> String {
+        String::from_utf8(build(&account(), draft, 0).unwrap().message).unwrap()
+    }
+
+    #[test]
+    fn replies_carry_threading_headers() {
+        let message = text(&DraftInput {
+            to: "alice@pigeon.test".into(),
+            subject: "Re: receipts".into(),
+            body: "Thanks".into(),
+            in_reply_to: "abc@pigeon.test".into(),
+            references: "<first@pigeon.test> abc@pigeon.test".into(),
+            ..Default::default()
+        });
+        assert!(
+            message.contains("In-Reply-To: <abc@pigeon.test>"),
+            "{message}"
+        );
+        assert!(
+            message.contains("References: <first@pigeon.test> <abc@pigeon.test>"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn new_messages_have_no_threading_headers() {
+        let message = text(&DraftInput {
+            to: "alice@pigeon.test".into(),
+            subject: "Hello".into(),
+            ..Default::default()
+        });
+        assert!(!message.contains("In-Reply-To") && !message.contains("References"));
+    }
+
+    #[test]
+    fn threading_values_cannot_inject_headers() {
+        let message = text(&DraftInput {
+            to: "alice@pigeon.test".into(),
+            subject: "Hello".into(),
+            in_reply_to: "x@y.test>\r\nBcc: evil@x.test".into(),
+            references: "a@b.test\nBcc: evil@x.test".into(),
+            ..Default::default()
+        });
+        assert!(
+            !message.contains("\r\nBcc:") && !message.contains("\nBcc:"),
+            "{message}"
+        );
     }
 }

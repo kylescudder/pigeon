@@ -26,6 +26,7 @@ mod net;
 pub mod operations;
 mod query;
 mod recovery;
+pub mod reply;
 mod sending;
 pub mod smtp;
 pub mod source;
@@ -96,6 +97,13 @@ pub struct MessageContent {
     pub date: i64,
     pub message_id: String,
     pub attachments: Vec<Attachment>,
+    /// The Reply-To header, when the message has one.
+    pub reply_to: String,
+    /// The References header: Message-IDs of the conversation so far.
+    pub references: String,
+    /// The To and Cc headers alone. `recipients` also holds Bcc.
+    pub to_list: String,
+    pub cc_list: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,6 +277,8 @@ pub struct MailEngine {
     parts: Mutex<attachments::PartCache>,
     operations: Mutex<operations::Runtime>,
     operations_signal: (Mutex<bool>, Condvar),
+    /// Unread Inbox mail stored since the last `take_arrivals`, per account.
+    arrivals: Mutex<HashMap<String, cache::Arrived>>,
 }
 
 /// One message this client could not parse. Holds no folder name, UID, or
@@ -425,6 +435,7 @@ impl MailEngine {
             parts: Mutex::new(attachments::PartCache::default()),
             operations: Mutex::new(runtime),
             operations_signal: (Mutex::new(false), Condvar::new()),
+            arrivals: Mutex::new(HashMap::new()),
         }
     }
 
@@ -716,6 +727,7 @@ impl MailEngine {
                     context.validity,
                     &messages,
                     context.flags,
+                    context.folder_kind == "inbox",
                 )
             }
         }

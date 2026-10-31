@@ -201,6 +201,7 @@ impl Fixture {
             bcc: "dave@pigeon.test".into(),
             subject: "Quarterly receipts".into(),
             body: "Hello\n.leading dot".into(),
+            ..Default::default()
         }
     }
     fn drain(&self) {

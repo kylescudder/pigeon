@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use pigeon_core::diagnostics::Check;
 use pigeon_core::mail::MailEngine;
+use pigeon_core::notify;
 use pigeon_core::secrets::{KeyringState, SecretStore};
 use pigeon_core::unlock::{UnlockOutcome, open_store};
 use pigeon_core::viewer::{self, InlineImage, InlineImages, RemoteContent};
@@ -19,6 +20,7 @@ use tauri_plugin_opener::OpenerExt;
 
 mod desktop;
 mod mail;
+mod notifier;
 mod tray;
 
 pub(crate) const MAIN: &str = "main";
@@ -550,6 +552,37 @@ fn start_sync_diagnostic(app: AppHandle, engine: Arc<MailEngine>) {
     });
 }
 
+/// One refresh of every account. Unread mail that arrived in an Inbox that
+/// had already synced once is announced as a single notification, unless the
+/// window is open and focused (the user is looking at it) or notifications
+/// are off. An account's first sync never notifies about its backlog.
+fn sync_and_notify(app: &AppHandle, engine: &MailEngine) {
+    let policy = app.state::<desktop::DesktopState>().notification_policy();
+    let mut total = 0;
+    let mut newest = Vec::new();
+    if let Ok(accounts) = engine.accounts() {
+        for account in accounts {
+            let synced_before = account.last_synced.is_some();
+            let _ = engine.sync_account(&account.id);
+            // Always taken, so arrivals never pile up behind a first sync or
+            // while notifications are off.
+            if let Ok(mut arrived) = engine.take_arrivals(&account.id)
+                && synced_before
+            {
+                total += arrived.total;
+                newest.append(&mut arrived.newest);
+            }
+        }
+    }
+    newest.sort_by_key(|message| std::cmp::Reverse(message.date));
+    let looking = app
+        .get_webview_window(MAIN)
+        .is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
+    if !looking && let Some(note) = notify::compose(policy, total, &newest) {
+        notifier::show(&note);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // A running instance swallows this process via single-instance, silently.
@@ -607,13 +640,10 @@ pub fn run() {
                         }
                     }
                 });
+                let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     loop {
-                        if let Ok(accounts) = engine.accounts() {
-                            for account in accounts {
-                                let _ = engine.sync_account(&account.id);
-                            }
-                        }
+                        sync_and_notify(&handle, &engine);
                         std::thread::sleep(Duration::from_secs(60));
                     }
                 });
@@ -663,6 +693,7 @@ pub fn run() {
             mail::retry_mail_action,
             mail::discard_mail_action,
             mail::send_state,
+            mail::reply_to_message,
             mail::save_draft,
             mail::delete_draft,
             mail::send_draft,

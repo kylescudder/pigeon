@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use pigeon_core::desktop::{self, DesktopSettings, LoadedSettings};
+use pigeon_core::desktop::{self, DesktopSettings, LoadedSettings, NotificationPolicy};
 use tauri::{AppHandle, Manager};
 
 /// Starts without showing the window. Used by the login service.
@@ -30,6 +30,11 @@ impl DesktopState {
     /// added or removed while Pigeon runs.
     pub fn tray_enabled(&self) -> bool {
         desktop::load(&self.path).settings.tray
+    }
+
+    /// Read fresh each time, so a Home Manager switch applies without a restart.
+    pub fn notification_policy(&self) -> NotificationPolicy {
+        desktop::load(&self.path).settings.notifications
     }
 
     /// Reads the file at close time, so a Home Manager switch applies at once.
