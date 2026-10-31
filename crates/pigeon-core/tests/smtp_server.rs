@@ -297,7 +297,8 @@ fn relay(target: u16, offline: Arc<std::sync::atomic::AtomicBool>) -> u16 {
 fn offline_send_waits_then_sends_after_reconnecting() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let offline = Arc::new(AtomicBool::new(false));
-    let h = harness(smtp(relay(465, offline.clone()), TransportSecurity::Tls));
+    let port = relay(465, offline.clone());
+    let h = harness(smtp(port, TransportSecurity::Tls));
     offline.store(true, Ordering::SeqCst);
     std::thread::sleep(Duration::from_millis(100));
     let token = token();
@@ -310,6 +311,10 @@ fn offline_send_waits_then_sends_after_reconnecting() {
     assert_eq!(spooled(&token), 0);
 
     offline.store(false, Ordering::SeqCst);
+    // The relay reopens its port asynchronously; wait until it is back.
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     h.engine.retry_send(&queued.id).unwrap();
     h.drain();
     assert!(matches!(
