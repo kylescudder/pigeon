@@ -98,10 +98,34 @@ export type SearchQuery = {
   offset?: number | null;
 };
 export type SavedSearch = { id: string; name: string; query: SearchQuery };
+export type ActionCounts = { pending: number; failed: number; conflict: number };
 export type MailState = {
   accounts: MailAccount[];
   folders: MailFolder[];
   saved_searches: SavedSearch[];
+  actions: ActionCounts;
+};
+export type MailActionKind =
+  | { type: "mark_read" }
+  | { type: "mark_unread" }
+  | { type: "archive" }
+  | { type: "trash" }
+  | { type: "delete_permanently" }
+  | { type: "move"; folder_id: string };
+/** An outstanding server change. Completed changes are not listed. */
+export type PendingMailAction = {
+  id: number;
+  account_id: string;
+  kind: "mark_read" | "mark_unread" | "archive" | "trash" | "move" | "delete_permanently";
+  folder: string;
+  target: string | null;
+  subject: string | null;
+  count: number;
+  conflicts: number;
+  state: "queued" | "applying" | "failed" | "conflict";
+  error: string | null;
+  created: number;
+  updated: number;
 };
 export type MessageSummary = {
   id: number;
@@ -175,8 +199,10 @@ export async function searchMail(
 }
 export const readMailMessage = (id: number) =>
   invoke<MailMessage>("read_mail_message", { id });
+/** Embedded images that could not be downloaded, for example while offline. */
+export type OpenedMessage = { missing_inline: number };
 export const openMailMessage = (id: number) =>
-  invoke<void>("open_mail_message", { id });
+  invoke<OpenedMessage>("open_mail_message", { id });
 export const saveMailSearch = (name: string, query: SearchQuery) =>
   invoke<SavedSearch>("save_mail_search", { name, query });
 export const deleteMailSearch = (id: string) =>
@@ -186,6 +212,14 @@ export const removeMailAccount = (id: string) =>
 export const updateMailPassword = (id: string, password: string) =>
   invoke<void>("update_mail_password", { id, password });
 export const unlockMail = () => invoke<void>("unlock_mail");
+/** Queues a server change; resolves with how many messages it affects. */
+export const queueMailActions = (ids: number[], kind: MailActionKind) =>
+  invoke<number>("queue_mail_actions", { ids, kind });
+export const mailActions = () => invoke<PendingMailAction[]>("mail_actions");
+export const retryMailAction = (id: number) =>
+  invoke<void>("retry_mail_action", { id });
+export const discardMailAction = (id: number) =>
+  invoke<void>("discard_mail_action", { id });
 
 // Composing and sending. Drafts and queued messages stay in the encrypted
 // store; outcomes are reported without server reply text.

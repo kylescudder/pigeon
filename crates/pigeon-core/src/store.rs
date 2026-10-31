@@ -136,8 +136,63 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX operations_due ON operations(state, not_before);
     CREATE INDEX operations_account ON operations(account);",
-    // Local drafts and the outbox (mail/sending.rs). Queued messages keep
-    // their built bytes so what is sent is exactly what was queued.
+    // 7: keep schema 6 unchanged; also repair early attachment builds that
+    // used version 6 before the operations queue landed. Preserve their blobs.
+    // Attachment payloads the user chose to keep. They go with their message
+    // row, so pruning, UIDVALIDITY replacement and account removal clear them.
+    "CREATE TABLE IF NOT EXISTS operations (
+        id TEXT PRIMARY KEY, account TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL,
+        state TEXT NOT NULL, not_before INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0, irreversible INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT, depends_on TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS operations_due ON operations(state, not_before);
+    CREATE INDEX IF NOT EXISTS operations_account ON operations(account);
+    CREATE TABLE IF NOT EXISTS attachment_blobs (
+        message INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        part TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        data BLOB NOT NULL,
+        stored_at INTEGER NOT NULL,
+        PRIMARY KEY (message, part)
+    );
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    // 8: durable queue of mailbox changes to apply to the server (mail/actions.rs). Messages carry the local
+    // effect of outstanding changes so views and sync can respect them; the
+    // search and count indexes include it to stay covering.
+    "CREATE TABLE mail_actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account TEXT NOT NULL REFERENCES mail_accounts(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        folder TEXT NOT NULL,
+        uid_validity INTEGER NOT NULL,
+        target TEXT,
+        payload TEXT,
+        state TEXT NOT NULL CHECK (state IN ('queued','applying','failed','conflict')),
+        attempted INTEGER NOT NULL DEFAULT 0,
+        step TEXT,
+        error TEXT,
+        created INTEGER NOT NULL,
+        updated INTEGER NOT NULL
+    );
+    CREATE INDEX mail_actions_account_state ON mail_actions(account, state, id);
+    CREATE TABLE mail_action_items (
+        action INTEGER NOT NULL REFERENCES mail_actions(id) ON DELETE CASCADE,
+        uid INTEGER NOT NULL,
+        prior_unread INTEGER,
+        state TEXT NOT NULL CHECK (state IN ('pending','conflict')),
+        PRIMARY KEY (action, uid)
+    );
+    ALTER TABLE messages ADD COLUMN local_hidden INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE messages ADD COLUMN flags_pending INTEGER NOT NULL DEFAULT 0;
+    DROP INDEX messages_search_metadata;
+    CREATE INDEX messages_search_metadata ON messages(id,account,folder,uid_validity,local_hidden,date,unread,has_attachments,sender,recipients,subject);
+    DROP INDEX messages_folder_counts;
+    CREATE INDEX messages_folder_counts ON messages(account,folder,uid_validity,local_hidden,unread);",
+    // 9: local drafts and the outbox (mail/sending.rs). Queued messages keep
+    // their built bytes so what is sent is exactly what was queued. The
+    // settings table already exists from 7.
     "CREATE TABLE drafts (
         id TEXT PRIMARY KEY, account TEXT, payload TEXT NOT NULL,
         created INTEGER NOT NULL, updated INTEGER NOT NULL
@@ -149,8 +204,7 @@ const MIGRATIONS: &[&str] = &[
         submit_op TEXT NOT NULL, sent_copy_op TEXT, accepted INTEGER,
         dismissed INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL
     );
-    CREATE INDEX outbox_account ON outbox(account);
-    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    CREATE INDEX outbox_account ON outbox(account);",
 ];
 
 impl Store {

@@ -45,3 +45,23 @@ html['Date'] = 'Mon, 26 Oct 2026 11:00:00 +0000'
 html['Message-ID'] = '<html@pigeon.test>'
 html.set_content('<h1>Launch status</h1><p>The roadrunner build is ready.</p><script>hidden_secret_script</script>', subtype='html')
 (root / 'new' / 'fixture-html').write_bytes(html.as_bytes())
+
+# An HTML newsletter with an embedded (cid:) logo and a separate attachment,
+# for on-request part download. The PNG is a real 1x1 image.
+PNG = bytes.fromhex(
+    '89504e470d0a1a0a0000000d4948445200000001000000010806000000'
+    '1f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d'
+    '0000000049454e44ae426082')
+related = EmailMessage(policy=policy.SMTP)
+related['From'] = 'Pelican News <news@pigeon.test>'
+related['To'] = 'mail@pigeon.test'
+related['Subject'] = 'Embedded logo newsletter'
+related['Date'] = 'Mon, 26 Oct 2026 12:00:00 +0000'
+related['Message-ID'] = '<embedded@pigeon.test>'
+related.set_content('Plain pelican newsletter fallback.')
+related.add_alternative(
+    '<p>Pelican newsletter</p><img src="cid:logo@pigeon.test" alt="logo">'
+    '<img src="https://tracker.example/pixel.gif" alt="remote">', subtype='html')
+related.get_payload()[1].add_related(PNG, maintype='image', subtype='png', cid='<logo@pigeon.test>')
+related.add_attachment(b'MANUAL_PAYLOAD_CANARY-' * 100000, maintype='application', subtype='pdf', filename='manual.pdf')
+(root / 'new' / 'fixture-embedded').write_bytes(related.as_bytes())

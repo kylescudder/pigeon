@@ -13,6 +13,10 @@ use crate::secrets::{KeyringState, Secret, SecretStore};
 use crate::store::Store;
 use crate::unlock::{UnlockOutcome, open_store};
 
+pub use attachments::{AttachmentData, MAX_ATTACHMENT_BYTES, ViewerDocument};
+
+mod actions;
+mod attachments;
 mod cache;
 mod diagnostics;
 mod imap;
@@ -22,11 +26,11 @@ mod query;
 mod sending;
 pub mod smtp;
 pub mod source;
+pub use actions::{ActionCounts, ActionKind, PendingAction};
 pub use sending::{
     Draft, DraftInput, OutboxItem, SendDecision, SendState, SendStatus, SendingSettings,
     SentCopyStatus,
 };
-
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
 const MAX_PARSE_FAILURES: usize = 20;
 const REMOVAL_BATCH: i64 = 500;
@@ -192,6 +196,14 @@ pub enum MailError {
     Cancelled,
     #[error("invalid search: {0}")]
     InvalidSearch(String),
+    #[error("the mail server does not support {0} safely")]
+    Unsupported(&'static str),
+    #[error("this account has no Trash folder; delete permanently instead")]
+    NoTrashFolder,
+    #[error("this account has no Archive folder")]
+    NoArchiveFolder,
+    #[error("{0}")]
+    InvalidAction(&'static str),
     #[error("{0}")]
     Conflict(String),
     #[error("while {operation}: {reason}")]
@@ -202,6 +214,15 @@ pub enum MailError {
         /// Our description and the reply code; never the server's text.
         reason: String,
     },
+}
+
+impl MailError {
+    /// The server answered the command with NO or BAD: retrying unchanged
+    /// will not help, unlike a dropped connection.
+    fn is_rejection(&self) -> bool {
+        matches!(self, MailError::Imap { reason, .. } if reason.contains("IMAP NO") || reason.contains("IMAP BAD"))
+            || matches!(self, MailError::Unsupported(_))
+    }
 }
 
 struct FetchContext<'a> {
@@ -223,6 +244,9 @@ pub struct MailEngine {
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
     parse_failures: Mutex<Vec<ParseFailure>>,
+    /// Downloaded but not kept attachment payloads, in memory for this
+    /// session only. Cleared whenever the store becomes unavailable.
+    parts: Mutex<attachments::PartCache>,
     operations: Mutex<operations::Runtime>,
     operations_signal: (Mutex<bool>, Condvar),
 }
@@ -321,6 +345,7 @@ impl MailEngine {
             // The store mutex is not fair; give waiting readers a turn.
             std::thread::sleep(Duration::from_millis(1));
         }
+        self.forget_session_parts(Some(id));
         self.secrets
             .delete(&format!("account:{id}:password"))
             .map_err(|_| MailError::Locked)?;
@@ -382,6 +407,7 @@ impl MailEngine {
             syncing: Mutex::new(HashMap::new()),
             searches: Mutex::new(HashMap::new()),
             parse_failures: Mutex::new(Vec::new()),
+            parts: Mutex::new(attachments::PartCache::default()),
             operations: Mutex::new(runtime),
             operations_signal: (Mutex::new(false), Condvar::new()),
         }
@@ -510,6 +536,8 @@ impl MailEngine {
             .get(&format!("account:{id}:password"))
             .map_err(|_| MailError::Locked)?
             .ok_or(MailError::Authentication)?;
+        // Queued changes go first, so the snapshots below already reflect them.
+        self.apply_queue(&account, &password)?;
         let mut session = self.connector.connect(&account.config, &password)?;
         let folders = session.folders()?;
         let mut failed_messages = 0;
@@ -571,7 +599,8 @@ impl MailEngine {
         }
         check_cancel(cancel)?;
         self.remove_absent_folders(id, &folders)?;
-        Ok(())
+        // Changes queued while this sync ran.
+        self.apply_queue(&account, &password)
     }
 
     fn record_parse_failure(&self, failure: ParseFailure) {
@@ -688,12 +717,22 @@ impl MailEngine {
             .map_err(|_| MailError::Storage("mail store lock unavailable".into()))?;
         if self.secrets.state() != KeyringState::Unlocked {
             *guard = None;
+            self.forget_session_parts(None);
             return Err(MailError::Locked);
         }
         if guard.is_none() {
             match open_store(self.secrets.as_ref(), &self.path) {
                 UnlockOutcome::Opened { store, .. } => {
                     store.connection().execute("UPDATE mail_accounts SET sync_status='interrupted', last_error='Sync was interrupted; reconnect to resume' WHERE sync_status='syncing'", []).map_err(storage_error)?;
+                    // A change cut off mid-apply is re-checked against the
+                    // server before anything is written again.
+                    store
+                        .connection()
+                        .execute(
+                            "UPDATE mail_actions SET state='queued' WHERE state='applying'",
+                            [],
+                        )
+                        .map_err(storage_error)?;
                     self.reconcile_operations(store.connection())?;
                     *guard = Some(store);
                 }
