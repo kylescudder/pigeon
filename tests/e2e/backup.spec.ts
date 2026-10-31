@@ -85,7 +85,7 @@ test("settings explain the loss model outside the desktop app", async ({
   const facts = section.getByRole("list", { name: "What you can lose" });
   await expect(facts).toContainText("Mail on your servers is unaffected");
   await expect(facts).toContainText("gone for good");
-  await expect(facts).toContainText("Restoring never sends anything");
+  await expect(facts).toContainText("Restoring never sends mail or applies mailbox changes");
   await expect(section).toContainText("available in Pigeon’s desktop app");
   await expect(
     section.getByRole("button", { name: "Back up now…" }),

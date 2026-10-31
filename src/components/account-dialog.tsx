@@ -22,6 +22,11 @@ export function AccountDialog({
   const [security, setSecurity] = useState<"tls" | "start_tls">("tls");
   const [port, setPort] = useState("993");
   const [certificate, setCertificate] = useState("");
+  // Outgoing mail defaults follow the IMAP host until edited.
+  const [smtpHost, setSmtpHost] = useState<string | null>(null);
+  const [smtpSecurity, setSmtpSecurity] = useState<"tls" | "start_tls">("tls");
+  const [smtpPort, setSmtpPort] = useState("465");
+  const outgoingHost = smtpHost ?? host.trim().replace(/^imap\./i, "smtp.");
   const connect = useMutation({
     mutationFn: () =>
       addMailAccount(
@@ -33,6 +38,19 @@ export function AccountDialog({
           username: username.trim() || address.trim(),
           security,
           ca_certificate: certificate.trim() || null,
+          sending: {
+            smtp: outgoingHost.trim()
+              ? {
+                  host: outgoingHost.trim(),
+                  port: Number(smtpPort),
+                  security: smtpSecurity,
+                  username: username.trim() || address.trim(),
+                }
+              : null,
+            display_name: "",
+            signature: "",
+            save_sent_copy: true,
+          },
         },
         password,
       ),
@@ -137,6 +155,22 @@ export function AccountDialog({
             Use an app password if your provider requires one. OAuth sign-in is
             not available in this build.
           </p>
+          <label htmlFor={`${id}-smtp-host`}>
+            Outgoing (SMTP) server
+            <input
+              id={`${id}-smtp-host`}
+              value={outgoingHost}
+              onChange={(event) => setSmtpHost(event.target.value)}
+              placeholder="smtp.example.com"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={253}
+            />
+          </label>
+          <p className="field-help">
+            Signs in with the same username and password. Leave empty to add
+            sending later.
+          </p>
           <details className="advanced-settings">
             <summary>Connection settings</summary>
             <div className="form-grid">
@@ -162,6 +196,35 @@ export function AccountDialog({
                   type="number"
                   value={port}
                   onChange={(event) => setPort(event.target.value)}
+                  min={1}
+                  max={65535}
+                  required
+                />
+              </label>
+            </div>
+            <div className="form-grid">
+              <label htmlFor={`${id}-smtp-security`}>
+                Outgoing encryption
+                <select
+                  id={`${id}-smtp-security`}
+                  value={smtpSecurity}
+                  onChange={(event) => {
+                    const value = event.target.value as "tls" | "start_tls";
+                    setSmtpSecurity(value);
+                    setSmtpPort(value === "tls" ? "465" : "587");
+                  }}
+                >
+                  <option value="tls">TLS</option>
+                  <option value="start_tls">STARTTLS</option>
+                </select>
+              </label>
+              <label htmlFor={`${id}-smtp-port`}>
+                Outgoing port
+                <input
+                  id={`${id}-smtp-port`}
+                  type="number"
+                  value={smtpPort}
+                  onChange={(event) => setSmtpPort(event.target.value)}
                   min={1}
                   max={65535}
                   required

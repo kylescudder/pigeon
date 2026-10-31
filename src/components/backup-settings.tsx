@@ -32,7 +32,7 @@ export function BackupSettings() {
       <h2>Backup and restore</h2>
       <p>
         Back up what exists only on this device: account settings and
-        passwords, saved searches, and later your drafts and unsent mail. Mail
+        passwords, saved searches, drafts, unsent mail and pending mailbox changes. Mail
         on your servers is not included. Pigeon downloads it again after a
         restore.
       </p>
@@ -64,7 +64,7 @@ export function BackupSettings() {
         <li>
           <Icon name="check" size={14} />
           <span>
-            Restoring never sends anything. Unsent mail in a backup stays paused
+            Restoring never sends mail or applies mailbox changes. Outgoing work stays paused
             until you review it.
           </span>
         </li>
@@ -189,7 +189,7 @@ function PassphraseDialog({
       <p>
         {backup
           ? "Choose a passphrase you will remember. Without it the backup cannot be opened, and Pigeon cannot reset it."
-          : "Restoring replaces the accounts and saved searches on this device with the backup’s. The current store is kept aside, not deleted. Syncing stops while the restore runs."}
+          : "Restoring replaces local accounts, saved searches, drafts and queued work on this device with the backup’s. The current store is kept aside, not deleted. Syncing stops while the restore runs."}
       </p>
       <form onSubmit={submit} noValidate>
         <label htmlFor="backup-passphrase">

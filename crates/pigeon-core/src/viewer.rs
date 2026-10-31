@@ -3,8 +3,49 @@
 //! capabilities, so a sanitiser bypass alone must not reach native commands.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use ammonia::{Builder, UrlRelative};
+
+/// Largest single embedded image placed in a viewer document.
+pub const MAX_INLINE_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+/// Combined embedded-image budget for one viewer document.
+pub const MAX_INLINE_DOCUMENT_BYTES: usize = 25 * 1024 * 1024;
+/// Raster types only: they are decoded as images and never run script.
+const INLINE_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+];
+
+/// A downloaded MIME part a message refers to with `cid:`.
+#[derive(Debug, Clone)]
+pub struct InlineImage {
+    pub content_type: String,
+    pub data: Vec<u8>,
+}
+
+/// Embedded images keyed by normalised Content-ID (see [`normalise_cid`]).
+pub type InlineImages = HashMap<String, InlineImage>;
+
+/// The comparable form of a Content-ID or `cid:` URL: percent-decoded, without
+/// the scheme or angle brackets.
+pub fn normalise_cid(value: &str) -> String {
+    let value = value.trim();
+    let value = match value.get(..4) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("cid:") => &value[4..],
+        _ => value,
+    };
+    percent_encoding::percent_decode_str(value)
+        .decode_utf8_lossy()
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_owned()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteContent {
@@ -16,14 +57,68 @@ pub enum RemoteContent {
 /// and styles are removed. With remote content blocked, only `data:` and
 /// `cid:` images survive.
 pub fn sanitise(html: &str, remote: RemoteContent) -> String {
+    clean(html, move |element, attribute, value| {
+        filter_attribute(remote, element, attribute, value)
+    })
+}
+
+/// Content-IDs of the images a message would show, as they survive sanitising.
+pub fn referenced_cids(html: &str) -> Vec<String> {
+    let found = Arc::new(Mutex::new(Vec::new()));
+    let sink = found.clone();
+    clean(html, move |element, attribute, value| {
+        let kept = filter_attribute(RemoteContent::Blocked, element, attribute, value);
+        if (element, attribute) == ("img", "src")
+            && kept.is_some()
+            && value.trim_start().to_ascii_lowercase().starts_with("cid:")
+            && let Ok(mut found) = sink.lock()
+        {
+            found.push(normalise_cid(value));
+        }
+        kept
+    });
+    std::mem::take(&mut *found.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Like [`sanitise`], but resolves `cid:` images to `data:` URLs from parts
+/// already downloaded. Unresolved, non-raster, or over-budget images lose
+/// their source and show only their alt text; no `cid:` reference remains.
+pub fn sanitise_inline(html: &str, remote: RemoteContent, inline: &InlineImages) -> String {
+    let inline = Arc::new(inline.clone());
+    let budget = Mutex::new(MAX_INLINE_DOCUMENT_BYTES);
+    clean(html, move |element, attribute, value| {
+        let kept = filter_attribute(remote, element, attribute, value)?;
+        if (element, attribute) != ("img", "src")
+            || !value.trim_start().to_ascii_lowercase().starts_with("cid:")
+        {
+            return Some(kept);
+        }
+        let image = inline.get(&normalise_cid(value))?;
+        let content_type = image.content_type.to_ascii_lowercase();
+        if !INLINE_TYPES.contains(&content_type.as_str())
+            || image.data.len() > MAX_INLINE_IMAGE_BYTES
+        {
+            return None;
+        }
+        let mut left = budget.lock().unwrap_or_else(|e| e.into_inner());
+        *left = left.checked_sub(image.data.len())?;
+        Some(Cow::Owned(format!(
+            "data:{content_type};base64,{}",
+            data_encoding::BASE64.encode(&image.data)
+        )))
+    })
+}
+
+fn clean(
+    html: &str,
+    filter: impl for<'u> Fn(&str, &str, &'u str) -> Option<Cow<'u, str>> + Send + Sync + 'static,
+) -> String {
     let mut builder = Builder::default();
     builder
         .url_relative(UrlRelative::Deny)
         .link_rel(Some("noopener noreferrer"))
         .add_url_schemes(&["cid", "data"])
-        .attribute_filter(move |element, attribute, value| {
-            filter_attribute(remote, element, attribute, value)
-        });
+        .attribute_filter(filter);
     builder.clean(html).to_string()
 }
 

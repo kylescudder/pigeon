@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -14,12 +14,26 @@ use crate::secrets::{KeyringState, Secret, SecretStore};
 use crate::store::Store;
 use crate::unlock::{StoreBlocked, UnlockOutcome, open_store};
 
+pub use attachments::{AttachmentData, MAX_ATTACHMENT_BYTES, ViewerDocument};
+
+mod actions;
+mod attachments;
 mod cache;
 mod diagnostics;
 mod imap;
+mod net;
+pub mod operations;
 mod query;
 mod recovery;
+mod sending;
+pub mod smtp;
 pub mod source;
+pub use actions::{ActionCounts, ActionKind, PendingAction};
+pub use sending::{
+    Draft, DraftInput, OutboxItem, SendDecision, SendState, SendStatus, SendingSettings,
+    SentCopyStatus,
+};
+static NEXT_ACCESS: AtomicU64 = AtomicU64::new(0);
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
 const MAX_PARSE_FAILURES: usize = 20;
 const REMOVAL_BATCH: i64 = 500;
@@ -41,6 +55,9 @@ pub struct AccountConfig {
     pub security: TransportSecurity,
     /// Optional additional trust root. Certificate validation remains enabled.
     pub ca_certificate: Option<String>,
+    /// Outgoing server and identity. Absent in accounts added before sending.
+    #[serde(default)]
+    pub sending: SendingSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,6 +207,33 @@ pub enum MailError {
     KeyMissing,
     #[error(transparent)]
     Backup(#[from] BackupError),
+    #[error("the mail server does not support {0} safely")]
+    Unsupported(&'static str),
+    #[error("this account has no Trash folder; delete permanently instead")]
+    NoTrashFolder,
+    #[error("this account has no Archive folder")]
+    NoArchiveFolder,
+    #[error("{0}")]
+    InvalidAction(&'static str),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("while {operation}: {reason}")]
+    Smtp {
+        operation: &'static str,
+        /// A 4xx reply: the same request may succeed later.
+        temporary: bool,
+        /// Our description and the reply code; never the server's text.
+        reason: String,
+    },
+}
+
+impl MailError {
+    /// The server answered the command with NO or BAD: retrying unchanged
+    /// will not help, unlike a dropped connection.
+    fn is_rejection(&self) -> bool {
+        matches!(self, MailError::Imap { reason, .. } if reason.contains("IMAP NO") || reason.contains("IMAP BAD"))
+            || matches!(self, MailError::Unsupported(_))
+    }
 }
 
 struct FetchContext<'a> {
@@ -206,12 +250,18 @@ pub struct MailEngine {
     path: PathBuf,
     secrets: Arc<dyn SecretStore>,
     connector: Arc<dyn source::MailConnector>,
+    smtp: Arc<dyn smtp::SmtpTransport>,
     store: Mutex<Option<Store>>,
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// Serialises backups and restores with one another.
     recovery: Mutex<()>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
     parse_failures: Mutex<Vec<ParseFailure>>,
+    /// Downloaded but not kept attachment payloads, in memory for this
+    /// session only. Cleared whenever the store becomes unavailable.
+    parts: Mutex<attachments::PartCache>,
+    operations: Mutex<operations::Runtime>,
+    operations_signal: (Mutex<bool>, Condvar),
 }
 
 /// One message this client could not parse. Holds no folder name, UID, or
@@ -281,6 +331,7 @@ impl MailEngine {
 
     pub fn remove_account(&self, id: &str) -> Result<(), MailError> {
         let _lease = self.lease(id)?;
+        self.check_no_unsent(id)?;
         // Mail goes first, in batches: each row also rewrites the search index,
         // so one transaction would hold the store and freeze every other view.
         // The account and password outlast it, so any failure can be retried.
@@ -300,6 +351,7 @@ impl MailEngine {
             // The store mutex is not fair; give waiting readers a turn.
             std::thread::sleep(Duration::from_millis(1));
         }
+        self.forget_session_parts(Some(id));
         self.secrets
             .delete(&password_name(id))
             .map_err(|_| MailError::Locked)?;
@@ -307,6 +359,11 @@ impl MailEngine {
             store
                 .connection()
                 .execute("DELETE FROM mail_accounts WHERE id=?1", [id])
+                .map_err(storage_error)?;
+            // Only settled messages remain; unsent ones blocked removal above.
+            store
+                .connection()
+                .execute("DELETE FROM outbox WHERE account=?1", [id])
                 .map_err(storage_error)?;
             Ok(())
         })
@@ -319,15 +376,47 @@ impl MailEngine {
         secrets: Arc<dyn SecretStore>,
         connector: Arc<dyn source::MailConnector>,
     ) -> Self {
+        Self::with_transports(
+            path,
+            secrets,
+            connector,
+            Arc::new(smtp::SmtpClient::default()),
+        )
+    }
+    /// The real IMAP connector with a chosen SMTP transport.
+    pub fn with_smtp(
+        path: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+        smtp: Arc<dyn smtp::SmtpTransport>,
+    ) -> Self {
+        Self::with_transports(path, secrets, Arc::new(imap::ImapConnector), smtp)
+    }
+    pub fn with_transports(
+        path: PathBuf,
+        secrets: Arc<dyn SecretStore>,
+        connector: Arc<dyn source::MailConnector>,
+        smtp: Arc<dyn smtp::SmtpTransport>,
+    ) -> Self {
+        let mut runtime = operations::Runtime::default();
+        for handler in [
+            Arc::new(sending::SubmitHandler) as Arc<dyn operations::OperationHandler>,
+            Arc::new(sending::SentCopyHandler),
+        ] {
+            runtime.handlers.insert(handler.kind(), handler);
+        }
         Self {
             path,
             secrets,
             connector,
+            smtp,
             store: Mutex::new(None),
             syncing: Mutex::new(HashMap::new()),
             recovery: Mutex::new(()),
             searches: Mutex::new(HashMap::new()),
             parse_failures: Mutex::new(Vec::new()),
+            parts: Mutex::new(attachments::PartCache::default()),
+            operations: Mutex::new(runtime),
+            operations_signal: (Mutex::new(false), Condvar::new()),
         }
     }
 
@@ -337,6 +426,7 @@ impl MailEngine {
         password: Secret,
     ) -> Result<Account, MailError> {
         validate_config(&config)?;
+        sending::validate_sending(&config.sending)?;
         if password.is_empty() {
             return Err(MailError::InvalidConfig("enter an account password".into()));
         }
@@ -353,6 +443,15 @@ impl MailEngine {
         let mut session = self.connector.connect(&config, &password)?;
         session.folders()?;
         drop(session);
+        if let Some(outgoing) = &config.sending.smtp {
+            self.smtp.verify(
+                &smtp::SmtpServer {
+                    config: outgoing,
+                    ca_certificate: config.ca_certificate.as_deref(),
+                },
+                &password,
+            )?;
+        }
         let account = Account {
             id,
             config,
@@ -437,6 +536,8 @@ impl MailEngine {
             .get(&password_name(id))
             .map_err(|_| MailError::Locked)?
             .ok_or(MailError::Authentication)?;
+        // Queued changes go first, so the snapshots below already reflect them.
+        self.apply_queue(&account, &password)?;
         let mut session = self.connector.connect(&account.config, &password)?;
         let folders = session.folders()?;
         let mut failed_messages = 0;
@@ -498,7 +599,8 @@ impl MailEngine {
         }
         check_cancel(cancel)?;
         self.remove_absent_folders(id, &folders)?;
-        Ok(())
+        // Changes queued while this sync ran.
+        self.apply_queue(&account, &password)
     }
 
     fn record_parse_failure(&self, failure: ParseFailure) {
@@ -609,18 +711,30 @@ impl MailEngine {
         &self,
         f: impl FnOnce(&Store) -> Result<T, MailError>,
     ) -> Result<T, MailError> {
+        let _access = self.access_lease("store")?;
         let mut guard = self
             .store
             .lock()
             .map_err(|_| MailError::Storage("mail store lock unavailable".into()))?;
         if self.secrets.state() != KeyringState::Unlocked {
             *guard = None;
+            self.forget_session_parts(None);
             return Err(MailError::Locked);
         }
         if guard.is_none() {
             match open_store(self.secrets.as_ref(), &self.path) {
                 UnlockOutcome::Opened { store, .. } => {
                     store.connection().execute("UPDATE mail_accounts SET sync_status='interrupted', last_error='Sync was interrupted; reconnect to resume' WHERE sync_status='syncing'", []).map_err(storage_error)?;
+                    // A change cut off mid-apply is re-checked against the
+                    // server before anything is written again.
+                    store
+                        .connection()
+                        .execute(
+                            "UPDATE mail_actions SET state='queued' WHERE state='applying'",
+                            [],
+                        )
+                        .map_err(storage_error)?;
+                    self.reconcile_operations(store.connection())?;
                     *guard = Some(store);
                 }
                 UnlockOutcome::Blocked(StoreBlocked::KeyMissing) => {
@@ -648,6 +762,13 @@ struct SyncLease<'a> {
 const RESTORE_LEASE: &str = "\0restore";
 
 impl MailEngine {
+    fn access_lease(&self, purpose: &str) -> Result<SyncLease<'_>, MailError> {
+        self.lease(&format!(
+            "\0{purpose}:{}",
+            NEXT_ACCESS.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
     fn lease(&self, id: &str) -> Result<SyncLease<'_>, MailError> {
         let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
         if active.contains_key(RESTORE_LEASE) {

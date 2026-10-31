@@ -11,15 +11,16 @@ use pigeon_core::diagnostics::Check;
 use pigeon_core::mail::MailEngine;
 use pigeon_core::secrets::{KeyringState, SecretStore};
 use pigeon_core::unlock::{UnlockOutcome, open_store};
-use pigeon_core::viewer::{self, RemoteContent};
+use pigeon_core::viewer::{self, InlineImage, InlineImages, RemoteContent};
 use serde::Serialize;
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 
+mod desktop;
 mod mail;
 
-const MAIN: &str = "main";
+pub(crate) const MAIN: &str = "main";
 const DIAGNOSE_SYNC: &str = "--diagnose-sync";
 const VIEWER_SCHEME: &str = "pigeon-viewer";
 const VIEWER_PREFIX: &str = "viewer-";
@@ -34,6 +35,8 @@ struct ShellState {
     /// What the probe page saw, delivered by navigating to `/probe-done`
     /// rather than over IPC (which the viewer cannot use).
     probe_results: Mutex<Option<Vec<ProbeResult>>>,
+    /// What the embedded-image self-test observed, reported the same way.
+    inline_results: Mutex<Option<Vec<ProbeResult>>>,
     viewer_documents: Mutex<HashMap<String, String>>,
 }
 
@@ -51,7 +54,7 @@ struct FoundationReport {
 
 /// Defence in depth for Tauri's documented Linux limitation: capability checks
 /// cannot tell frames apart, so every command also checks the calling webview.
-fn require_main(webview: &tauri::Webview) -> Result<(), String> {
+pub(crate) fn require_main(webview: &tauri::Webview) -> Result<(), String> {
     if webview.label() == MAIN {
         Ok(())
     } else {
@@ -159,13 +162,28 @@ fn viewer_checks(state: &ShellState) -> Vec<Check> {
             result.detail,
         ));
     }
+    // Only the self-test opens this view, so it is reported only once run.
+    if let Some(results) = state.inline_results.lock().unwrap().clone() {
+        checks.push(Check::new(
+            "Viewer: embedded image without network",
+            !results.is_empty() && results.iter().all(|result| result.ok),
+            "synthetic cid: image rendered from inline data; nothing fetched",
+        ));
+        for result in results {
+            checks.push(Check::new(
+                format!("Embedded image: {}", result.name),
+                result.ok,
+                result.detail,
+            ));
+        }
+    }
     checks
 }
 
 #[tauri::command]
 fn open_viewer_fixture(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
     require_main(&webview)?;
-    open_viewer(&app, "fixture", "Hostile fixture (sanitised)")
+    open_viewer(&app, "fixture", "Hostile fixture (sanitised)").map(drop)
 }
 
 /// Opens a page that assumes the attacker already has script execution in the
@@ -176,7 +194,7 @@ fn open_viewer_probe(app: AppHandle, webview: tauri::Webview) -> Result<(), Stri
     app.state::<ShellState>()
         .probe_opened
         .store(true, Ordering::SeqCst);
-    open_viewer(&app, "probe", "Viewer isolation probe")
+    open_viewer(&app, "probe", "Viewer isolation probe").map(drop)
 }
 
 /// Granted to no capability. If this body ever runs, isolation failed.
@@ -194,7 +212,8 @@ fn quit_app(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
     Ok(())
 }
 
-fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<(), String> {
+/// Opens a viewer webview for `page` and returns its label.
+fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<String, String> {
     let n = app
         .state::<ShellState>()
         .viewer_count
@@ -202,25 +221,22 @@ fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<(), String> {
     let url =
         Url::parse(&format!("{VIEWER_SCHEME}://localhost/{page}")).map_err(|e| e.to_string())?;
     let handle = app.clone();
-    let window = WebviewWindowBuilder::new(
-        app,
-        format!("{VIEWER_PREFIX}{n}"),
-        WebviewUrl::CustomProtocol(url),
-    )
-    .title(title)
-    .inner_size(800.0, 700.0)
-    .on_navigation(move |url| {
-        if url.scheme() == VIEWER_SCHEME {
-            return true;
-        }
-        // Links leave the app for the user's normal browser.
-        if matches!(url.scheme(), "https" | "http" | "mailto") {
-            let _ = handle.opener().open_url(url.as_str(), None::<&str>);
-        }
-        false
-    })
-    .build()
-    .map_err(|e| e.to_string())?;
+    let label = format!("{VIEWER_PREFIX}{n}");
+    let window = WebviewWindowBuilder::new(app, label.clone(), WebviewUrl::CustomProtocol(url))
+        .title(title)
+        .inner_size(800.0, 700.0)
+        .on_navigation(move |url| {
+            if url.scheme() == VIEWER_SCHEME {
+                return true;
+            }
+            // Links leave the app for the user's normal browser.
+            if matches!(url.scheme(), "https" | "http" | "mailto") {
+                let _ = handle.opener().open_url(url.as_str(), None::<&str>);
+            }
+            false
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
     let handle = app.clone();
     let page = page.to_owned();
     window.on_window_event(move |event| {
@@ -233,21 +249,13 @@ fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<(), String> {
                 .remove(&page);
         }
     });
-    Ok(())
+    Ok(label)
 }
 
 fn viewer_response(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let (body, csp) = match request.uri().path() {
         "/probe-done" => {
-            let results = Url::parse(&request.uri().to_string())
-                .ok()
-                .and_then(|u| {
-                    u.query_pairs()
-                        .find(|(k, _)| k == "r")
-                        .map(|(_, v)| v.into_owned())
-                })
-                .and_then(|json| serde_json::from_str::<Vec<ProbeResult>>(&json).ok());
-            if let Some(results) = results {
+            if let Some(results) = probe_query(request) {
                 *app.state::<ShellState>().probe_results.lock().unwrap() = Some(results);
             }
             (
@@ -263,6 +271,33 @@ fn viewer_response(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Cow<
             viewer::content_security_policy(RemoteContent::Blocked),
         ),
         "/probe" => (PROBE_PAGE.to_owned(), PROBE_CSP.to_owned()),
+        // Built exactly as a message's formatted view is: same sanitiser,
+        // document wrapper and CSP, with the cid: part already downloaded.
+        "/inline-fixture" => {
+            let images = InlineImages::from([(
+                "logo@pigeon.test".to_owned(),
+                InlineImage {
+                    content_type: "image/png".into(),
+                    data: SELFTEST_PNG.to_vec(),
+                },
+            )]);
+            (
+                viewer::document(
+                    &viewer::sanitise_inline(INLINE_FIXTURE, RemoteContent::Blocked, &images),
+                    RemoteContent::Blocked,
+                ),
+                viewer::content_security_policy(RemoteContent::Blocked),
+            )
+        }
+        "/inline-done" => {
+            if let Some(results) = probe_query(request) {
+                *app.state::<ShellState>().inline_results.lock().unwrap() = Some(results);
+            }
+            (
+                "<!doctype html><p>Embedded image check complete.</p>".to_owned(),
+                viewer::content_security_policy(RemoteContent::Blocked),
+            )
+        }
         _ => {
             if let Some(document) = app
                 .state::<ShellState>()
@@ -298,6 +333,56 @@ fn viewer_response(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Cow<
         .unwrap()
 }
 
+fn probe_query(request: &Request<Vec<u8>>) -> Option<Vec<ProbeResult>> {
+    Url::parse(&request.uri().to_string())
+        .ok()
+        .and_then(|u| {
+            u.query_pairs()
+                .find(|(k, _)| k == "r")
+                .map(|(_, v)| v.into_owned())
+        })
+        .and_then(|json| serde_json::from_str::<Vec<ProbeResult>>(&json).ok())
+}
+
+/// A real 1x1 PNG standing in for a downloaded `cid:` part.
+const SELFTEST_PNG: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0,
+    0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+    0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+];
+
+const INLINE_FIXTURE: &str = r#"<p>Embedded image self-test</p>
+<img src="cid:logo@pigeon.test" alt="embedded logo" width="16" height="16">
+<img src="https://example.org/selftest-pixel.gif" alt="remote pixel">
+<p style="background:url(https://example.org/selftest-bg.png)">Styled paragraph</p>
+<img src="cid:absent@pigeon.test" alt="absent part">"#;
+
+// Injected by the self-test through the webview API, not by the page: the
+// document's own CSP forbids scripts. Reports by navigation, like the probe.
+const INLINE_CHECK: &str = r#"(() => {
+  if (location.pathname !== "/inline-fixture" || window.__pigeonInlineChecked) return;
+  const run = () => {
+    window.__pigeonInlineChecked = true;
+    const images = [...document.images];
+    const find = (alt) => images.find((image) => image.alt === alt);
+    const logo = find("embedded logo");
+    const remote = find("remote pixel");
+    const absent = find("absent part");
+    const fetched = performance.getEntriesByType("resource").map((entry) => entry.name);
+    const results = [
+      { name: "inline image rendered", ok: !!logo && logo.complete && logo.naturalWidth === 1 && logo.src.startsWith("data:image/png;base64,"), detail: logo ? "naturalWidth=" + logo.naturalWidth : "missing" },
+      { name: "remote image not loaded", ok: !!remote && !remote.getAttribute("src") && remote.naturalWidth === 0, detail: remote ? "src=" + remote.getAttribute("src") : "missing" },
+      { name: "unresolved cid dropped", ok: !!absent && !absent.getAttribute("src"), detail: absent ? "src=" + absent.getAttribute("src") : "missing" },
+      { name: "no cid: reference remains", ok: !document.documentElement.outerHTML.includes("cid:"), detail: "document scanned" },
+      { name: "no network resource requested", ok: fetched.length === 0, detail: fetched.length + " resource entries" },
+    ];
+    location.href = "/inline-done?r=" + encodeURIComponent(JSON.stringify(results));
+  };
+  if (document.readyState === "complete") run(); else addEventListener("load", run, { once: true });
+})();"#;
+
 // Scripts and IPC connections are permitted here on purpose, so the probe
 // exercises the capability layer rather than being stopped by CSP first.
 const PROBE_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; \
@@ -330,6 +415,10 @@ async function attempt(name, cmd, args) {
   await attempt("viewer_probe_reached", "viewer_probe_reached");
   await attempt("foundation_report", "foundation_report");
   await attempt("quit_app", "quit_app");
+  await attempt("backup mail", "backup_mail", { passphrase: "viewer-probe-only" });
+  await attempt("restore mail", "restore_mail", { passphrase: "viewer-probe-only" });
+  await attempt("desktop settings", "desktop_settings");
+  await attempt("set desktop settings", "set_desktop_settings", { settings: { closeToBackground: false } });
   await attempt("core window close", "plugin:window|close", { label: "main" });
   await attempt("mail state", "mail_state");
   await attempt("search mail", "search_mail", { query: { text: "" }, requestId: "probe" });
@@ -343,6 +432,21 @@ async function attempt(name, cmd, args) {
   await attempt("delete search", "delete_mail_search", { id: "probe" });
   await attempt("remove account", "remove_mail_account", { id: "probe" });
   await attempt("update password", "update_mail_password", { id: "probe", password: "synthetic-probe-value" });
+  await attempt("queue mail change", "queue_mail_actions", { ids: [1], kind: { type: "delete_permanently" } });
+  await attempt("list mail changes", "mail_actions");
+  await attempt("retry mail change", "retry_mail_action", { id: 1 });
+  await attempt("discard mail change", "discard_mail_action", { id: 1 });
+  await attempt("send state", "send_state");
+  await attempt("save draft", "save_draft", { draft: { to: "probe@example.test" } });
+  await attempt("delete draft", "delete_draft", { id: "probe" });
+  await attempt("send draft", "send_draft", { draft: { to: "probe@example.test" } });
+  await attempt("return to drafts", "return_to_drafts", { id: "probe" });
+  await attempt("retry send", "retry_send", { id: "probe" });
+  await attempt("retry sent copy", "retry_sent_copy", { id: "probe" });
+  await attempt("resolve send", "resolve_send", { id: "probe", decision: "send_again" });
+  await attempt("dismiss outbox", "dismiss_outbox", { id: "probe" });
+  await attempt("update mail sending", "update_mail_sending", { id: "probe", settings: {} });
+  await attempt("set undo send seconds", "set_undo_send_seconds", { seconds: 0 });
   await attempt("add account", "add_mail_account", { config: { name: "Probe", address: "probe@example.test", host: "example.test", port: 993, username: "probe", security: "tls", ca_certificate: null }, password: "synthetic-probe-value" });
   try {
     await fetch("https://example.org/");
@@ -379,15 +483,49 @@ fn start_selftest(app: AppHandle) {
         {
             std::thread::sleep(Duration::from_millis(200));
         }
+        let inline = run_inline_check(&app, &state);
         let mut checks = tauri::async_runtime::block_on(collect_checks(&app))
             .unwrap_or_else(|e| vec![Check::new("Collect checks", false, e)]);
         if let Err(e) = opened {
             checks.push(Check::new("Open probe viewer", false, e));
         }
+        if let Err(e) = inline {
+            checks.push(Check::new(
+                "Viewer: embedded image without network",
+                false,
+                e,
+            ));
+        }
         let ok = checks.iter().all(|c| c.ok);
         println!("{}", serde_json::to_string_pretty(&checks).unwrap());
         app.exit(if ok { 0 } else { 1 });
     });
+}
+
+/// Opens the embedded-image fixture in a real viewer webview and waits for
+/// the injected check to report back by navigation.
+fn run_inline_check(app: &AppHandle, state: &ShellState) -> Result<(), String> {
+    let label = {
+        let app = app.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = app.clone().run_on_main_thread(move || {
+            let _ = tx.send(open_viewer(&app, "inline-fixture", "Embedded image check"));
+        });
+        rx.recv_timeout(Duration::from_secs(10))
+            .unwrap_or_else(|_| Err("timed out opening the viewer".into()))?
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while state.inline_results.lock().unwrap().is_none() {
+        if Instant::now() > deadline {
+            return Err("the embedded image check did not report".into());
+        }
+        // Retried until the document has loaded; the script runs only once.
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.eval(INLINE_CHECK);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Ok(())
 }
 
 /// Prints a redacted sync report and exits. Needs no window, and shares the
@@ -419,11 +557,10 @@ pub fn run() {
     }
     tauri::Builder::default()
         // Relaunching from the desktop launcher reopens the running instance.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window(MAIN) {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+        // A second `--background` start (login racing a running instance) stays hidden.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == desktop::BACKGROUND) {
+                desktop::show_main(app);
             }
         }))
         .plugin(tauri_plugin_opener::init())
@@ -441,14 +578,31 @@ pub fn run() {
                 Arc::from(secret_store()),
             ));
             app.manage(engine.clone());
+            app.manage(desktop::DesktopState::load(app.handle())?);
             if std::env::var_os("PIGEON_SELFTEST").is_some() {
                 start_selftest(app.handle().clone());
             } else if std::env::args().any(|arg| arg == DIAGNOSE_SYNC) {
                 start_sync_diagnostic(app.handle().clone(), engine);
             } else {
+                // The window starts hidden so a login start never flashes it.
+                if !std::env::args().any(|arg| arg == desktop::BACKGROUND) {
+                    desktop::show_main(app.handle());
+                }
                 // A single background coordinator keeps account refreshes from
                 // multiplying when windows or routes mount. Network work never
                 // holds the store mutex; the interface can keep reading/searching.
+                let operations = engine.clone();
+                // One worker runs queued server changes in order. It idles
+                // while the store is locked and wakes when work is queued.
+                std::thread::spawn(move || {
+                    loop {
+                        match operations.run_next_operation() {
+                            Ok(true) => {}
+                            Ok(false) => operations.wait_for_operations(Duration::from_secs(1)),
+                            Err(_) => std::thread::sleep(Duration::from_secs(2)),
+                        }
+                    }
+                });
                 std::thread::spawn(move || {
                     loop {
                         if let Ok(accounts) = engine.accounts() {
@@ -463,12 +617,18 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the main window keeps Pigeon running in the background.
+            // Closing the main window keeps Pigeon running in the background
+            // unless the user turned that off; Quit Pigeon always exits.
             if let WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == MAIN
             {
-                let _ = window.hide();
-                api.prevent_close();
+                let app = window.app_handle();
+                if app.state::<desktop::DesktopState>().close_to_background() {
+                    let _ = window.hide();
+                    api.prevent_close();
+                } else {
+                    app.exit(0);
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -477,6 +637,8 @@ pub fn run() {
             open_viewer_probe,
             viewer_probe_reached,
             quit_app,
+            desktop::desktop_settings,
+            desktop::set_desktop_settings,
             mail::mail_state,
             mail::add_mail_account,
             mail::sync_mail_account,
@@ -492,6 +654,21 @@ pub fn run() {
             mail::open_mail_message,
             mail::backup_mail,
             mail::restore_mail,
+            mail::queue_mail_actions,
+            mail::mail_actions,
+            mail::retry_mail_action,
+            mail::discard_mail_action,
+            mail::send_state,
+            mail::save_draft,
+            mail::delete_draft,
+            mail::send_draft,
+            mail::return_to_drafts,
+            mail::retry_send,
+            mail::retry_sent_copy,
+            mail::resolve_send,
+            mail::dismiss_outbox,
+            mail::update_mail_sending,
+            mail::set_undo_send_seconds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pigeon");

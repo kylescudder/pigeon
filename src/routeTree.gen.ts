@@ -10,13 +10,27 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ComposeRouteImport } from './routes/compose'
+import { Route as DraftsRouteImport } from './routes/drafts'
 import { Route as FoundationRouteImport } from './routes/foundation'
 import { Route as MailRouteImport } from './routes/mail'
+import { Route as OutboxRouteImport } from './routes/outbox'
+import { Route as PendingRouteImport } from './routes/pending'
 import { Route as SettingsRouteImport } from './routes/settings'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComposeRoute = ComposeRouteImport.update({
+  id: '/compose',
+  path: '/compose',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DraftsRoute = DraftsRouteImport.update({
+  id: '/drafts',
+  path: '/drafts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FoundationRoute = FoundationRouteImport.update({
@@ -29,6 +43,16 @@ const MailRoute = MailRouteImport.update({
   path: '/mail',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OutboxRoute = OutboxRouteImport.update({
+  id: '/outbox',
+  path: '/outbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PendingRoute = PendingRouteImport.update({
+  id: '/pending',
+  path: '/pending',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -37,35 +61,76 @@ const SettingsRoute = SettingsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/compose': typeof ComposeRoute
+  '/drafts': typeof DraftsRoute
   '/foundation': typeof FoundationRoute
   '/mail': typeof MailRoute
+  '/outbox': typeof OutboxRoute
+  '/pending': typeof PendingRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/compose': typeof ComposeRoute
+  '/drafts': typeof DraftsRoute
   '/foundation': typeof FoundationRoute
   '/mail': typeof MailRoute
+  '/outbox': typeof OutboxRoute
+  '/pending': typeof PendingRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/compose': typeof ComposeRoute
+  '/drafts': typeof DraftsRoute
   '/foundation': typeof FoundationRoute
   '/mail': typeof MailRoute
+  '/outbox': typeof OutboxRoute
+  '/pending': typeof PendingRoute
   '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/foundation' | '/mail' | '/settings'
+  fullPaths:
+    | '/'
+    | '/compose'
+    | '/drafts'
+    | '/foundation'
+    | '/mail'
+    | '/outbox'
+    | '/pending'
+    | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/foundation' | '/mail' | '/settings'
-  id: '__root__' | '/' | '/foundation' | '/mail' | '/settings'
+  to:
+    | '/'
+    | '/compose'
+    | '/drafts'
+    | '/foundation'
+    | '/mail'
+    | '/outbox'
+    | '/pending'
+    | '/settings'
+  id:
+    | '__root__'
+    | '/'
+    | '/compose'
+    | '/drafts'
+    | '/foundation'
+    | '/mail'
+    | '/outbox'
+    | '/pending'
+    | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ComposeRoute: typeof ComposeRoute
+  DraftsRoute: typeof DraftsRoute
   FoundationRoute: typeof FoundationRoute
   MailRoute: typeof MailRoute
+  OutboxRoute: typeof OutboxRoute
+  PendingRoute: typeof PendingRoute
   SettingsRoute: typeof SettingsRoute
 }
 
@@ -76,6 +141,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compose': {
+      id: '/compose'
+      path: '/compose'
+      fullPath: '/compose'
+      preLoaderRoute: typeof ComposeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/drafts': {
+      id: '/drafts'
+      path: '/drafts'
+      fullPath: '/drafts'
+      preLoaderRoute: typeof DraftsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/foundation': {
@@ -92,6 +171,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MailRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/outbox': {
+      id: '/outbox'
+      path: '/outbox'
+      fullPath: '/outbox'
+      preLoaderRoute: typeof OutboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pending': {
+      id: '/pending'
+      path: '/pending'
+      fullPath: '/pending'
+      preLoaderRoute: typeof PendingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -104,8 +197,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ComposeRoute: ComposeRoute,
+  DraftsRoute: DraftsRoute,
   FoundationRoute: FoundationRoute,
   MailRoute: MailRoute,
+  OutboxRoute: OutboxRoute,
+  PendingRoute: PendingRoute,
   SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport

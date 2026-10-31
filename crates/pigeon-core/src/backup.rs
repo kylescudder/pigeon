@@ -56,6 +56,42 @@ pub const TABLES: &[(&str, TableRole)] = &[
         },
     ),
     ("saved_searches", TableRole::Backed { on_restore: &[] }),
+    ("settings", TableRole::Backed { on_restore: &[] }),
+    // Drafts never execute; only an explicit Send creates an operation.
+    ("drafts", TableRole::Backed { on_restore: &[] }),
+    (
+        "operations",
+        TableRole::Backed {
+            on_restore: &[
+                "UPDATE operations SET state='held',last_error='Restored from backup; review before running' WHERE state NOT IN ('done','cancelled')",
+            ],
+        },
+    ),
+    (
+        "outbox",
+        TableRole::Backed {
+            on_restore: &[
+                "UPDATE operations SET state='held',last_error='Restored from backup; review before sending' WHERE id IN (SELECT submit_op FROM outbox UNION SELECT sent_copy_op FROM outbox) AND state NOT IN ('done','cancelled')",
+            ],
+        },
+    ),
+    (
+        "mail_actions",
+        TableRole::Backed {
+            on_restore: &[
+                "UPDATE mail_actions SET state='conflict',error='Restored from backup; review before Retry'",
+            ],
+        },
+    ),
+    (
+        "mail_action_items",
+        TableRole::Backed {
+            on_restore: &[
+                "UPDATE mail_actions SET state='conflict',error='Restored from backup; review before Retry' WHERE id IN (SELECT action FROM mail_action_items)",
+            ],
+        },
+    ),
+    ("attachment_blobs", TableRole::Redownloaded),
     ("mail_folders", TableRole::Redownloaded),
     ("messages", TableRole::Redownloaded),
     ("messages_fts", TableRole::Redownloaded),
@@ -506,7 +542,15 @@ fn decrypt_error(error: age::DecryptError) -> BackupError {
 mod tests {
     use super::*;
 
-    const OUTGOING: &[&str] = &["outbox", "queue", "pending", "send", "scheduled", "draft"];
+    const OUTGOING: &[&str] = &[
+        "outbox",
+        "queue",
+        "pending",
+        "send",
+        "scheduled",
+        "operation",
+        "mail_action",
+    ];
 
     fn store(dir: &Path, name: &str, key: &DbKey) -> Store {
         Store::open(&dir.join(name), key).unwrap()
@@ -553,38 +597,23 @@ mod tests {
 
     #[test]
     fn restored_outgoing_work_comes_back_paused() {
-        // There is no outbox yet. This models the contract one must follow.
-        const OUTBOX: &str = "CREATE TABLE outbox (id INTEGER PRIMARY KEY, state TEXT NOT NULL, body TEXT NOT NULL);";
-        let mut tables = TABLES.to_vec();
-        tables.push((
-            "outbox",
-            TableRole::Backed {
-                on_restore: &["UPDATE outbox SET state='paused_after_restore'"],
-            },
-        ));
         let dir = tempfile::tempdir().unwrap();
         let key = DbKey::generate().unwrap();
         let source = store(dir.path(), "source.db", &key);
-        source.connection().execute_batch(OUTBOX).unwrap();
-        source
-            .connection()
-            .execute_batch(
-                "INSERT INTO outbox(state,body) VALUES ('queued','one'),('sending','two'),('unknown_outcome','three');",
-            )
-            .unwrap();
-        let payload = snapshot_tables(source.connection(), &tables).unwrap();
+        source.connection().execute_batch("INSERT INTO operations(id,kind,payload,state,not_before,created,updated) VALUES ('a','send','{}','pending',0,0,0),('b','send','{}','running',0,0,0),('c','send','{}','unknown',0,0,0),('d','send','{}','done',0,0,0),('e','send','{}','cancelled',0,0,0);").unwrap();
+        let payload = snapshot(source.connection()).unwrap();
         let target = dir.path().join("restored.db");
-        build_store_with(&target, &key, &payload, &tables, OUTBOX).unwrap();
+        build_store(&target, &key, &payload).unwrap();
         let restored = Store::open(&target, &key).unwrap();
         let states: Vec<String> = restored
             .connection()
-            .prepare("SELECT state FROM outbox ORDER BY id")
+            .prepare("SELECT state FROM operations ORDER BY id")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert_eq!(states, vec!["paused_after_restore"; 3]);
+        assert_eq!(states, ["held", "held", "held", "done", "cancelled"]);
         let restored_at: String = restored
             .connection()
             .query_row(

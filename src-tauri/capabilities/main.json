@@ -9,6 +9,8 @@
     "allow-open-viewer-fixture",
     "allow-open-viewer-probe",
     "allow-quit-app",
+    "allow-desktop-settings",
+    "allow-set-desktop-settings",
     "allow-mail-state",
     "allow-add-mail-account",
     "allow-sync-mail-account",
@@ -23,6 +25,21 @@
     "allow-unlock-mail",
     "allow-open-mail-message",
     "allow-backup-mail",
-    "allow-restore-mail"
+    "allow-restore-mail",
+    "allow-queue-mail-actions",
+    "allow-mail-actions",
+    "allow-retry-mail-action",
+    "allow-discard-mail-action",
+    "allow-send-state",
+    "allow-save-draft",
+    "allow-delete-draft",
+    "allow-send-draft",
+    "allow-return-to-drafts",
+    "allow-retry-send",
+    "allow-retry-sent-copy",
+    "allow-resolve-send",
+    "allow-dismiss-outbox",
+    "allow-update-mail-sending",
+    "allow-set-undo-send-seconds"
   ]
 }

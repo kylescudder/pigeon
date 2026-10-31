@@ -9,7 +9,7 @@ Status: first slice, 2026-10-30. Manual backups of local-only data, protected by
 | Account settings (`mail_accounts`) | Cached messages and the search index; restored accounts download them again |
 | Account passwords from the keyring | The folder list, which comes back with the next sync |
 | Saved searches | The store's database key; a restored store gets this device's key, or a new one |
-| Later: drafts, outbox, queued actions (see the contract below) | Sync progress, which is reset so each account starts again |
+| Drafts, outbox, operations, pending mailbox actions and local settings | Sync progress, which is reset so each account starts again |
 
 Because a backup contains account passwords, it is as sensitive as the keyring. It is not a copy of the encrypted database, so restoring needs only the backup file and its passphrase, not the old keyring.
 
@@ -26,7 +26,7 @@ A backup is a standard [age v1](https://age-encryption.org/v1) file, conventiona
   "format": "pigeon-backup",
   "version": 1,
   "created_at": 1793005200,
-  "schema_version": 6,
+  "schema_version": 10,
   "tables": {
     "mail_accounts": { "columns": ["id", "config", "..."], "rows": [["3f…", "{…}", "..."]] },
     "saved_searches": { "columns": ["id", "name", "query"], "rows": [] }
@@ -50,7 +50,7 @@ The file is written as `.<name>.partial-<random>` beside the destination with mo
 
 ## Restore
 
-1. A restore is refused while any account is syncing, being added, having its password changed, or being removed. While it runs, all of those are refused with "a backup is being restored", so no account change can land in the store that is about to be set aside.
+1. A restore is refused while any account is syncing, being added, having its settings or password changed, being removed, or while an outgoing operation is active. Accepted outcomes awaiting storage recovery also block restore. While it runs, all of those are refused with "a backup is being restored", so no account change can land in the store that is about to be set aside.
 2. The backup is decrypted and validated in memory before anything changes.
 3. A complete new store is built as `.mail.db.restore-<random>`. It is encrypted with this device's existing key, or with a newly generated key if the keyring has lost it.
 4. Account passwords are written to the keyring.
@@ -68,17 +68,17 @@ Restoring must never send mail or apply server actions without review. Every sto
 - `Redownloaded`: server data, fetched again after a restore.
 - `Device`: describes this device's store and is never backed up.
 
-The tests enforce this:
+The integrated schema is 10. Operations remains migration 6, attachments 7, mailbox actions 8 and drafts/outbox 9; `store_meta` is appended as migration 10.
 
-- `every_store_table_declares_whether_it_is_backed_up` fails when a migration adds a table that is not in the registry.
-- `backed_up_outgoing_work_must_pause_on_restore` fails when a backed-up table whose name suggests outgoing work (`outbox`, `queue`, `pending`, `send`, `scheduled`, `draft`) has no `on_restore` statements.
-- `restored_outgoing_work_comes_back_paused` models an outbox whose rows all return as `paused_after_restore`.
+On restore:
+- Drafts and settings are preserved. Drafts never run automatically; Send is always explicit.
+- Every nonterminal operation becomes `held`, including unknown outcomes and pending Sent-copy work. Completed and cancelled operations retain their terminal states, so accepted sends cannot be resubmitted automatically.
+- The Outbox offers an explicit reviewed decision for held messages. Sending again requires the duplicate-risk confirmation; saving a held Sent copy is a separate explicit action and never resubmits the message.
+- Mailbox actions and their UID records are preserved in `conflict` state with a restore explanation. Only an explicit Retry releases them; normal sync cannot apply them.
+- Cached messages, folders, search indexes and attachment blobs are downloaded again rather than copied into a backup. The session attachment cache is cleared on a successful restore.
+- `store_meta.restored_at` records the restore time for provenance; persisted queue states enforce the pause across restarts.
 
-When the outbox and queued-action tables land, they must:
-
-1. Be registered as `Backed`, with `on_restore` moving every row to a paused state that only an explicit user action releases.
-2. Treat `store_meta.restored_at` (Unix seconds, set by every restore) as a second guard. Never send or apply anything created before that time without the user's confirmation.
-3. Keep "outcome unknown" sends paused after a restore, never retried automatically.
+The registry test rejects any unclassified table, and the outgoing-work rule requires restore handling for execution tables. The real engine regression backs up and restores drafts, a queued send and a mailbox action, runs sync and the operation worker, restarts, and verifies no transmission. It then releases one send explicitly and separately restores an accepted send with a pending Sent copy, verifying copying never sends again. Failure-injection tests cover credential and filesystem rollback, and a blocked-handler test verifies restore cannot replace the store while server work is in flight.
 
 ## Loss model
 

@@ -1,0 +1,17 @@
+<html><head>
+<script>document.write('<img src="https://tracker.example/written.gif">')</script>
+<style>body { background: url(cid:logo@pigeon.test) }</style>
+</head><body>
+<h1>Synthetic inline-image fixture</h1>
+<img src="cid:logo@pigeon.test" alt="logo">
+<img src="CID:%3Cbanner%40pigeon.test%3E" alt="banner">
+<img src="cid:missing@pigeon.test" alt="missing image">
+<img src="cid:vector@pigeon.test" alt="vector">
+<img src="cid:document@pigeon.test" alt="document">
+<img src="cid:huge@pigeon.test" alt="huge">
+<img src="https://tracker.example/pixel.gif" alt="remote">
+<img srcset="cid:logo@pigeon.test 2x" alt="srcset">
+<a href="cid:logo@pigeon.test">cid link</a>
+<table background="cid:logo@pigeon.test"><tr><td>cell</td></tr></table>
+<img src="cid:logo@pigeon.test" onerror="fetch('https://tracker.example/err')" alt="handler">
+</body></html>

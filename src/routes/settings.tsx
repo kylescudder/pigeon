@@ -1,7 +1,18 @@
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { BackupSettings } from "../components/backup-settings";
 import { Icon } from "../components/icon";
+import { useRefreshSend, useSendState } from "../components/send-state";
 import { PageHeading, useWorkspace } from "../components/workspace";
+import {
+  desktopSettings,
+  errorMessage,
+  isDesktop,
+  type LoadedDesktopSettings,
+  setDesktopSettings,
+  setUndoSendSeconds,
+} from "../lib/native";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -77,6 +88,8 @@ function Settings() {
         </div>
       </section>
       <BackupSettings />
+      <UndoDelay />
+      <DesktopSection />
       <div className="settings-note">
         <Icon name="monitor" size={16} />
         <p>
@@ -84,6 +97,130 @@ function Settings() {
           desktop’s light or dark appearance.
         </p>
       </div>
+    </section>
+  );
+}
+
+const UNDO_CHOICES = [0, 5, 10, 20, 30] as const;
+
+function UndoDelay() {
+  const send = useSendState();
+  const refresh = useRefreshSend();
+  const change = useMutation({
+    mutationFn: setUndoSendSeconds,
+    onSuccess: refresh,
+  });
+  if (!send.data) return null;
+  const current = change.isPending
+    ? change.variables
+    : send.data.undo_send_seconds;
+  return (
+    <section className="settings-section density-section">
+      <div>
+        <h2>Undo send</h2>
+        <p>
+          How long Pigeon waits before sending, so you can take a message back.
+        </p>
+        {change.isError && (
+          <p role="alert" className="mail-inline-error">
+            {errorMessage(change.error)}
+          </p>
+        )}
+      </div>
+      <div className="segmented-control" role="group" aria-label="Undo send">
+        {UNDO_CHOICES.map((seconds) => (
+          <button
+            key={seconds}
+            type="button"
+            aria-pressed={current === seconds}
+            disabled={change.isPending}
+            onClick={() => change.mutate(seconds)}
+          >
+            {seconds === 0 ? "Off" : `${seconds}s`}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DesktopSection() {
+  const [loaded, setLoaded] = useState<LoadedDesktopSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isDesktop()) return;
+    desktopSettings()
+      .then(setLoaded)
+      .catch((reason) => setError(errorMessage(reason)));
+  }, []);
+
+  if (!loaded && !error) return null;
+  const settings = loaded?.settings;
+  const locked = !settings || loaded?.managed || saving;
+
+  async function choose(closeToBackground: boolean) {
+    if (!settings) return;
+    setSaving(true);
+    setError(null);
+    try {
+      setLoaded(await setDesktopSettings({ ...settings, closeToBackground }));
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="settings-section" aria-labelledby="desktop-heading">
+      <div className="density-section">
+        <div>
+          <h2 id="desktop-heading">When the window closes</h2>
+          <p>
+            Keep Pigeon syncing in the background and reopen it from your
+            launcher, or quit completely. Quit Pigeon in the sidebar always
+            exits.
+          </p>
+        </div>
+        <div
+          className="segmented-control"
+          role="group"
+          aria-label="When the window closes"
+        >
+          {(
+            [
+              { value: true, label: "Keep running" },
+              { value: false, label: "Quit" },
+            ] as const
+          ).map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              aria-pressed={settings?.closeToBackground === option.value}
+              disabled={locked}
+              onClick={() => void choose(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loaded?.managed && (
+        <p>
+          Managed by Home Manager. Change <code>programs.pigeon.settings</code>{" "}
+          in your Nix configuration.
+        </p>
+      )}
+      {loaded?.warning && (
+        <p role="status">{loaded.warning}</p>
+      )}
+      {error && (
+        <div className="notice notice-error" role="alert">
+          Could not change desktop settings: {error}
+        </div>
+      )}
     </section>
   );
 }

@@ -12,6 +12,8 @@ import { AppMark, Icon, type IconName } from "./icon";
 import { Modal } from "./modal";
 import { MailSidebar } from "./mail-sidebar";
 import { useMail } from "./mail-provider";
+import { needsAttention, useSendState } from "./send-state";
+import { UndoSendBar } from "./undo-send-bar";
 
 type Theme = "system" | "light" | "dark";
 type Density = "comfortable" | "compact";
@@ -107,14 +109,20 @@ export function Workspace({ children }: { children: ReactNode }) {
     setCommandsOpen(false);
     setAboutOpen(true);
   };
+  const send = useSendState();
+  const drafts = send.data?.drafts.length ?? 0;
+  const attention = send.data?.outbox.filter(needsAttention).length ?? 0;
+  const outgoing = send.data?.outbox.length ?? 0;
   const currentPage =
-    pathname === "/foundation"
-      ? "Diagnostics"
-      : pathname === "/settings"
-        ? "Settings"
-        : pathname === "/mail"
-          ? "Mail"
-          : "Overview";
+    {
+      "/foundation": "Diagnostics",
+      "/settings": "Settings",
+      "/mail": "Mail",
+      "/pending": "Pending changes",
+      "/compose": "New message",
+      "/drafts": "Drafts",
+      "/outbox": "Outbox",
+    }[pathname] ?? "Overview";
 
   return (
     <WorkspaceContext.Provider
@@ -188,6 +196,38 @@ export function Workspace({ children }: { children: ReactNode }) {
             >
               <Icon name="mail" />
               <span className="sidebar-label">All mail</span>
+            </Link>
+            <Link
+              to="/compose"
+              search={{}}
+              className="nav-item"
+              title="New message"
+            >
+              <Icon name="edit" />
+              <span className="sidebar-label">New message</span>
+            </Link>
+            <Link to="/drafts" className="nav-item" title="Drafts">
+              <Icon name="file" />
+              <span className="sidebar-label">Drafts</span>
+              {drafts > 0 && (
+                <span className="nav-count sidebar-label">{drafts}</span>
+              )}
+            </Link>
+            <Link to="/outbox" className="nav-item" title="Outbox">
+              <Icon name="outbox" />
+              <span className="sidebar-label">Outbox</span>
+              {outgoing > 0 && (
+                <span
+                  className={`nav-count sidebar-label${attention ? " nav-count-alert" : ""}`}
+                  aria-label={
+                    attention
+                      ? `${attention} need${attention === 1 ? "s" : ""} attention`
+                      : undefined
+                  }
+                >
+                  {attention || outgoing}
+                </span>
+              )}
             </Link>
           </nav>
           <MailSidebar />
@@ -279,6 +319,7 @@ export function Workspace({ children }: { children: ReactNode }) {
             )}
             {children}
           </main>
+          <UndoSendBar />
           <footer className="workspace-footer">
             <span>
               <Icon name="lock" size={12} />
@@ -396,6 +437,30 @@ function CommandMenu({
       },
     },
     {
+      label: "New message",
+      detail: "Write an email",
+      icon: "edit",
+      run: () => {
+        void navigate({ to: "/compose", search: {} });
+      },
+    },
+    {
+      label: "Outbox",
+      detail: "Messages being sent",
+      icon: "outbox",
+      run: () => {
+        void navigate({ to: "/outbox" });
+      },
+    },
+    {
+      label: "Drafts",
+      detail: "Saved on this device",
+      icon: "file",
+      run: () => {
+        void navigate({ to: "/drafts" });
+      },
+    },
+    {
       label: "Overview",
       detail: "All your accounts",
       icon: "grid",
@@ -405,7 +470,7 @@ function CommandMenu({
     },
     {
       label: "Settings",
-      detail: "Theme, density, backup and restore",
+      detail: "Theme, density, sending, backup and restore",
       icon: "settings",
       run: () => {
         void navigate({ to: "/settings" });

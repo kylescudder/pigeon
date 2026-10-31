@@ -176,8 +176,9 @@ function Overview() {
         <div className="overview-connected-footer">
           <Icon name="lock" size={16} />
           <p>
-            Your mail and search index are encrypted on this device. Sending and
-            mailbox changes are not available in this read-only build.
+            Your mail, search index, drafts and outbox are encrypted on this
+            device. Mailbox changes such as moving and deleting are not
+            available yet.
           </p>
         </div>
         <ManageAccount account={managed} onDismiss={() => setManaged(null)} />

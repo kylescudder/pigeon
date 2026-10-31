@@ -50,6 +50,13 @@ impl MailEngine {
             MailError::Busy => BackupError::Busy.into(),
             other => other,
         })?;
+        {
+            let runtime = self.operations.lock().map_err(|_| MailError::Busy)?;
+            // An accepted result awaiting unlock belongs to the old store.
+            if !runtime.executing.is_empty() || !runtime.unrecorded.is_empty() {
+                return Err(BackupError::Busy.into());
+            }
+        }
         if self.secrets.state() != KeyringState::Unlocked {
             return Err(MailError::Locked);
         }
@@ -157,6 +164,7 @@ impl MailEngine {
             }
             return Err(BackupError::Io(error.to_string()).into());
         }
+        self.forget_session_parts(None);
         backup::sync_parent(&self.path);
         Ok(previous)
     }
