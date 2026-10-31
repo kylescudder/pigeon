@@ -479,7 +479,10 @@ fn sent_copy_status(op: Option<&Operation>) -> SentCopyStatus {
         return SentCopyStatus::NotRequested;
     };
     match op.state {
-        OperationState::Pending | OperationState::Held => SentCopyStatus::Waiting {
+        OperationState::Held => SentCopyStatus::Failed {
+            error: "Restored from backup; review before saving the Sent copy".into(),
+        },
+        OperationState::Pending => SentCopyStatus::Waiting {
             error: op.last_error.clone(),
         },
         OperationState::Running => SentCopyStatus::Saving,
@@ -723,7 +726,11 @@ impl MailEngine {
     pub fn retry_sent_copy(&self, outbox_id: &str) -> Result<(), MailError> {
         let row = self.with_store(|store| load_outbox(store.connection(), outbox_id))?;
         let op = row.sent_copy_op.ok_or(MailError::NotFound)?;
-        self.retry_operation(&op)
+        if self.operation(&op)?.state == OperationState::Held {
+            self.release_operation(&op)
+        } else {
+            self.retry_operation(&op)
+        }
     }
 
     /// The user's decision about a message whose outcome is unknown.
@@ -742,7 +749,7 @@ impl MailEngine {
                     operations::transition(
                         &tx,
                         &row.submit_op,
-                        &[OperationState::Unknown],
+                        &[OperationState::Unknown, OperationState::Held],
                         OperationState::Done,
                         ",last_error=NULL",
                     )?;
@@ -760,7 +767,7 @@ impl MailEngine {
                 operations::transition(
                     &tx,
                     &row.submit_op,
-                    &[OperationState::Unknown],
+                    &[OperationState::Unknown, OperationState::Held],
                     OperationState::Cancelled,
                     "",
                 )?;
@@ -837,6 +844,7 @@ impl MailEngine {
         id: &str,
         settings: SendingSettings,
     ) -> Result<Account, MailError> {
+        let _lease = self.access_lease("sending-settings")?;
         let mut account = self.account(id)?;
         validate_sending(&settings)?;
         if let Some(smtp) = &settings.smtp

@@ -415,6 +415,8 @@ async function attempt(name, cmd, args) {
   await attempt("viewer_probe_reached", "viewer_probe_reached");
   await attempt("foundation_report", "foundation_report");
   await attempt("quit_app", "quit_app");
+  await attempt("backup mail", "backup_mail", { passphrase: "viewer-probe-only" });
+  await attempt("restore mail", "restore_mail", { passphrase: "viewer-probe-only" });
   await attempt("desktop settings", "desktop_settings");
   await attempt("set desktop settings", "set_desktop_settings", { settings: { closeToBackground: false } });
   await attempt("core window close", "plugin:window|close", { label: "main" });
@@ -562,6 +564,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        // Used only from Rust for backup files; the webview has no dialog access.
+        .plugin(tauri_plugin_dialog::init())
         .manage(ShellState::default())
         .register_uri_scheme_protocol(VIEWER_SCHEME, |ctx, request| {
             viewer_response(ctx.app_handle(), &request)
@@ -648,6 +652,8 @@ pub fn run() {
             mail::update_mail_password,
             mail::unlock_mail,
             mail::open_mail_message,
+            mail::backup_mail,
+            mail::restore_mail,
             mail::queue_mail_actions,
             mail::mail_actions,
             mail::retry_mail_action,

@@ -28,7 +28,7 @@ impl DbKey {
     }
 
     fn pragma_value(&self) -> Zeroizing<String> {
-        Zeroizing::new(format!("\"x'{}'\"", hex::encode(self.0.as_ref())))
+        Zeroizing::new(format!("\"x'{}'\"", hex::encode(&self.0[..])))
     }
 }
 
@@ -205,22 +205,38 @@ const MIGRATIONS: &[&str] = &[
         dismissed INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL
     );
     CREATE INDEX outbox_account ON outbox(account);",
+    // Facts about this device's store, such as when it was last restored from
+    // a backup. Never backed up itself; see `backup::TABLES`.
+    "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
 ];
+
+/// The schema version a fully migrated store reports in `user_version`.
+pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
 
 impl Store {
     /// Opens (creating if absent) an encrypted store. Fails closed if SQLCipher
     /// is not linked or the key is wrong.
     pub fn open(path: &Path, key: &DbKey) -> Result<Self, StoreError> {
+        Self::open_at_version(path, key, SCHEMA_VERSION)
+    }
+
+    /// Opens a store migrated only as far as `version`. Restore uses this to
+    /// load a backup into the schema it was taken from before migrating on.
+    pub(crate) fn open_at_version(
+        path: &Path,
+        key: &DbKey,
+        version: usize,
+    ) -> Result<Self, StoreError> {
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        Self::configure(conn, key)
+        Self::configure(conn, key, version)
     }
 
-    fn configure(conn: Connection, key: &DbKey) -> Result<Self, StoreError> {
+    fn configure(conn: Connection, key: &DbKey, version: usize) -> Result<Self, StoreError> {
         let cipher_version: Option<String> = conn
             .query_row("PRAGMA cipher_version", [], |r| r.get(0))
             .ok();
@@ -254,15 +270,15 @@ impl Store {
         if !store.compile_option("ENABLE_FTS5")? {
             return Err(StoreError::NoFts5);
         }
-        store.migrate()?;
+        store.migrate_to(version)?;
         Ok(store)
     }
 
-    fn migrate(&self) -> Result<(), StoreError> {
+    pub(crate) fn migrate_to(&self, version: usize) -> Result<(), StoreError> {
         let current: usize =
             self.conn
                 .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? as usize;
-        for (index, sql) in MIGRATIONS.iter().enumerate().skip(current) {
+        for (index, sql) in MIGRATIONS.iter().enumerate().take(version).skip(current) {
             let tx = self.conn.unchecked_transaction()?;
             tx.execute_batch(sql)?;
             tx.execute_batch(&format!("PRAGMA user_version = {}", index + 1))?;
@@ -319,7 +335,7 @@ impl Store {
             ),
             Check::new(
                 "Schema migrated",
-                schema as usize == MIGRATIONS.len(),
+                schema as usize == SCHEMA_VERSION,
                 format!("user_version={schema}"),
             ),
         ])

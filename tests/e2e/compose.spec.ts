@@ -8,7 +8,7 @@ async function fixture(
   options: {
     smtp?: boolean;
     undo?: number;
-    outcome?: "accepted" | "unknown" | "failed";
+    outcome?: "accepted" | "unknown" | "failed" | "held";
     drafts?: Record<string, string>[];
   },
 ) {
@@ -74,7 +74,7 @@ async function fixture(
       for (const item of state.outbox) {
         if (item.send.state === "queued" && item.send.send_at <= Date.now()) {
           item.send =
-            options.outcome === "unknown"
+            options.outcome === "held" ? { state: "held" } : options.outcome === "unknown"
               ? { state: "unknown", error: "the connection ended after the message was sent, before the server confirmed it; it may have been delivered" }
               : options.outcome === "failed"
                 ? { state: "failed", error: "the server refused bob@example.test (550 5.1.1)" }
@@ -393,3 +393,23 @@ test("a new message opened from a draft starts empty and leaves the draft intact
   );
 });
 
+
+
+test("restored outbox work stays paused until an explicit reviewed decision", async ({ page }, testInfo) => {
+  await fixture(page, { undo: 0, outcome: "held" });
+  await page.goto("/compose");
+  const form = page.getByRole("form", { name: "New message" });
+  await form.getByLabel("To", { exact: true }).fill("bob@example.test");
+  await form.getByLabel("Subject", { exact: true }).fill("Restored canary");
+  await form.getByRole("button", { name: "Send", exact: true }).click();
+  const item = page.getByRole("listitem").filter({ hasText: "Restored canary" });
+  await expect(item).toContainText("Paused until you review it");
+  await item.getByRole("button", { name: "Send again…" }).click();
+  const confirm = page.getByRole("dialog", { name: "Send again" });
+  await expect(confirm).toContainText("recipients could get it twice");
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(item).toContainText("Paused until you review it");
+  await page.screenshot({ path: testInfo.outputPath("restored-outbox-held.png") });
+  await item.getByRole("button", { name: "It was sent" }).click();
+  await expect(item).toContainText("Saved to Sent");
+});

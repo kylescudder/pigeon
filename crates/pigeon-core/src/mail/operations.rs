@@ -458,7 +458,7 @@ impl MailEngine {
             transition(
                 store.connection(),
                 id,
-                &[OperationState::Unknown],
+                &[OperationState::Unknown, OperationState::Held],
                 to,
                 extra,
             )
@@ -497,6 +497,8 @@ impl MailEngine {
     /// handler runs without holding the store, so reading and searching stay
     /// available.
     pub fn run_next_operation(&self) -> Result<bool, MailError> {
+        // A restore must never replace the store while a handler is on the wire.
+        let _lease = self.access_lease("operation")?;
         let kinds: Vec<&'static str> = {
             let runtime = self.runtime()?;
             runtime.handlers.keys().copied().collect()

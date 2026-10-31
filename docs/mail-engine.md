@@ -255,4 +255,3 @@ The real-server tests cover:
 Evidence is in `evidence/composer-sending/` (ignored). It used synthetic mail and credentials only, and no real mail was sent.
 
 Still to check on the user's NixOS desktop: send through the real provider, check that the Sent copy appears in webmail, and decide whether that provider files sent mail itself (if so, turn off "Save a copy").
-

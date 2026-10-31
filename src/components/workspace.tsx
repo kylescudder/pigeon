@@ -470,7 +470,7 @@ function CommandMenu({
     },
     {
       label: "Settings",
-      detail: "Theme, density and sending",
+      detail: "Theme, density, sending, backup and restore",
       icon: "settings",
       run: () => {
         void navigate({ to: "/settings" });

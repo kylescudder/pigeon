@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+age.workspace = true
 ammonia.workspace = true
 hex.workspace = true
 getrandom.workspace = true

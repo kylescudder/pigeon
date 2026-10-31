@@ -410,3 +410,35 @@ fn operations_list_newest_last_with_account_filter() {
     assert_eq!(kinds, vec!["a", "c"]);
     assert_eq!(engine.operations(None).unwrap().len(), 3);
 }
+
+#[test]
+fn restore_refuses_to_replace_the_store_while_an_operation_is_on_the_wire() {
+    let fixture = Fixture::new();
+    let engine = Arc::new(fixture.engine());
+    let backup = fixture._dir.path().join("before-send.pigeon-backup");
+    engine
+        .create_backup(&backup, "correct horse battery staple")
+        .unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+    let finish_rx = Mutex::new(finish_rx);
+    let handler = Scripted::new("send", move |ctx, _| {
+        ctx.begin_irreversible().unwrap();
+        entered_tx.send(()).unwrap();
+        finish_rx.lock().unwrap().recv().unwrap();
+        Outcome::Done
+    });
+    engine.register_operation_handler(handler.clone());
+    engine.enqueue_operation(job("send")).unwrap();
+    let worker_engine = engine.clone();
+    let worker = std::thread::spawn(move || worker_engine.run_next_operation());
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let result = engine.restore_backup(&backup, "correct horse battery staple");
+    finish_tx.send(()).unwrap();
+    assert!(worker.join().unwrap().unwrap());
+    assert!(matches!(
+        result,
+        Err(MailError::Backup(pigeon_core::backup::BackupError::Busy))
+    ));
+    assert_eq!(handler.calls(), 1);
+}

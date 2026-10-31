@@ -15,7 +15,7 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 
 use super::source::{MailSession, WriteCapabilities};
-use super::{Account, MailEngine, MailError, SyncLease, now, storage_error};
+use super::{Account, MailEngine, MailError, now, storage_error};
 use crate::secrets::Secret;
 
 const MAX_REQUEST: usize = 5000;
@@ -694,21 +694,6 @@ impl MailEngine {
                 }
             }
             tx.commit().map_err(storage_error)
-        })
-    }
-
-    pub(super) fn lease(&self, id: &str) -> Result<SyncLease<'_>, MailError> {
-        let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
-        if active.contains_key(id) {
-            return Err(MailError::Busy);
-        }
-        active.insert(
-            id.to_owned(),
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        );
-        Ok(SyncLease {
-            active: &self.syncing,
-            id: id.to_owned(),
         })
     }
 }

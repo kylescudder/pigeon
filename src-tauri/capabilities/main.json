@@ -24,6 +24,8 @@
     "allow-update-mail-password",
     "allow-unlock-mail",
     "allow-open-mail-message",
+    "allow-backup-mail",
+    "allow-restore-mail",
     "allow-queue-mail-actions",
     "allow-mail-actions",
     "allow-retry-mail-action",

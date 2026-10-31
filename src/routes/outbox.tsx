@@ -156,7 +156,7 @@ function Outbox() {
                     </button>
                   </>
                 )}
-                {item.send.state === "unknown" && (
+                {(item.send.state === "unknown" || item.send.state === "held") && (
                   <>
                     <button
                       type="button"

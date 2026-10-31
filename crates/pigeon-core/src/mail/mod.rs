@@ -9,9 +9,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::backup::{BackupError, password_name};
 use crate::secrets::{KeyringState, Secret, SecretStore};
 use crate::store::Store;
-use crate::unlock::{UnlockOutcome, open_store};
+use crate::unlock::{StoreBlocked, UnlockOutcome, open_store};
 
 pub use attachments::{AttachmentData, MAX_ATTACHMENT_BYTES, ViewerDocument};
 
@@ -23,6 +24,7 @@ mod imap;
 mod net;
 pub mod operations;
 mod query;
+mod recovery;
 mod sending;
 pub mod smtp;
 pub mod source;
@@ -31,6 +33,7 @@ pub use sending::{
     Draft, DraftInput, OutboxItem, SendDecision, SendState, SendStatus, SendingSettings,
     SentCopyStatus,
 };
+static NEXT_ACCESS: AtomicU64 = AtomicU64::new(0);
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
 const MAX_PARSE_FAILURES: usize = 20;
 const REMOVAL_BATCH: i64 = 500;
@@ -192,10 +195,18 @@ pub enum MailError {
     NotFound,
     #[error("this account is already synchronising")]
     Busy,
+    #[error("a backup is being restored; try again when it finishes")]
+    Restoring,
     #[error("the operation was cancelled; cached mail is still available")]
     Cancelled,
     #[error("invalid search: {0}")]
     InvalidSearch(String),
+    #[error(
+        "this device's mail store key is missing from the keyring; restore a backup to recover local data"
+    )]
+    KeyMissing,
+    #[error(transparent)]
+    Backup(#[from] BackupError),
     #[error("the mail server does not support {0} safely")]
     Unsupported(&'static str),
     #[error("this account has no Trash folder; delete permanently instead")]
@@ -242,6 +253,8 @@ pub struct MailEngine {
     smtp: Arc<dyn smtp::SmtpTransport>,
     store: Mutex<Option<Store>>,
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Serialises backups and restores with one another.
+    recovery: Mutex<()>,
     searches: Mutex<HashMap<String, Arc<AtomicBool>>>,
     parse_failures: Mutex<Vec<ParseFailure>>,
     /// Downloaded but not kept attachment payloads, in memory for this
@@ -288,6 +301,9 @@ impl MailEngine {
         if password.is_empty() {
             return Err(MailError::InvalidConfig("enter an account password".into()));
         }
+        // Excludes a restore, which would replace this account's password and
+        // settings underneath the update. Syncing the account may continue.
+        let _lease = self.lease(&format!("\0password:{id}"))?;
         let account = self
             .accounts()?
             .into_iter()
@@ -296,7 +312,7 @@ impl MailEngine {
         self.connector.connect(&account.config, &password)?;
         self.secrets
             .put(
-                &format!("account:{id}:password"),
+                &password_name(id),
                 "Pigeon mail account password",
                 &password,
             )
@@ -314,18 +330,8 @@ impl MailEngine {
     }
 
     pub fn remove_account(&self, id: &str) -> Result<(), MailError> {
+        let _lease = self.lease(id)?;
         self.check_no_unsent(id)?;
-        {
-            let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
-            if active.contains_key(id) {
-                return Err(MailError::Busy);
-            }
-            active.insert(id.to_owned(), Arc::new(AtomicBool::new(false)));
-        }
-        let _lease = SyncLease {
-            active: &self.syncing,
-            id: id.to_owned(),
-        };
         // Mail goes first, in batches: each row also rewrites the search index,
         // so one transaction would hold the store and freeze every other view.
         // The account and password outlast it, so any failure can be retried.
@@ -347,7 +353,7 @@ impl MailEngine {
         }
         self.forget_session_parts(Some(id));
         self.secrets
-            .delete(&format!("account:{id}:password"))
+            .delete(&password_name(id))
             .map_err(|_| MailError::Locked)?;
         self.with_store(|store| {
             store
@@ -405,6 +411,7 @@ impl MailEngine {
             smtp,
             store: Mutex::new(None),
             syncing: Mutex::new(HashMap::new()),
+            recovery: Mutex::new(()),
             searches: Mutex::new(HashMap::new()),
             parse_failures: Mutex::new(Vec::new()),
             parts: Mutex::new(attachments::PartCache::default()),
@@ -424,6 +431,13 @@ impl MailEngine {
             return Err(MailError::InvalidConfig("enter an account password".into()));
         }
         self.with_store(|_| Ok(()))?;
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes)
+            .map_err(|_| MailError::Storage("could not create account identifier".into()))?;
+        let id = hex::encode(bytes);
+        // Held until the account row is written, so a restore cannot move the
+        // store aside between saving the password and saving the account.
+        let _lease = self.lease(&format!("\0add:{id}"))?;
         // Authentication happens outside the SQLite mutex. Browsing cached mail
         // remains available while the network is slow or unavailable.
         let mut session = self.connector.connect(&config, &password)?;
@@ -438,11 +452,8 @@ impl MailEngine {
                 &password,
             )?;
         }
-        let mut bytes = [0u8; 16];
-        getrandom::fill(&mut bytes)
-            .map_err(|_| MailError::Storage("could not create account identifier".into()))?;
         let account = Account {
-            id: hex::encode(bytes),
+            id,
             config,
             status: "idle".into(),
             error: None,
@@ -451,7 +462,7 @@ impl MailEngine {
             sync_cached: 0,
             sync_total: 0,
         };
-        let secret_name = format!("account:{}:password", account.id);
+        let secret_name = password_name(&account.id);
         self.secrets
             .put(&secret_name, "Pigeon mail account password", &password)
             .map_err(|_| MailError::Locked)?;
@@ -486,19 +497,8 @@ impl MailEngine {
     }
 
     pub fn sync_account(&self, id: &str) -> Result<(), MailError> {
-        let cancel = Arc::new(AtomicBool::new(false));
-        {
-            let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
-            if active.contains_key(id) {
-                return Err(MailError::Busy);
-            }
-            active.insert(id.to_owned(), cancel.clone());
-        }
-        let _lease = SyncLease {
-            active: &self.syncing,
-            id: id.to_owned(),
-        };
-        let result = self.sync_inner(id, &cancel);
+        let lease = self.lease(id)?;
+        let result = self.sync_inner(id, &lease.cancel);
         let now = now();
         let error = result.as_ref().err().map(ToString::to_string);
         let status = match &result {
@@ -533,7 +533,7 @@ impl MailEngine {
         self.with_store(|store| { store.connection().execute("UPDATE mail_accounts SET sync_status='syncing',last_error=NULL,sync_folder=NULL WHERE id=?1", [id]).map_err(storage_error)?; Ok(()) })?;
         let password = self
             .secrets
-            .get(&format!("account:{id}:password"))
+            .get(&password_name(id))
             .map_err(|_| MailError::Locked)?
             .ok_or(MailError::Authentication)?;
         // Queued changes go first, so the snapshots below already reflect them.
@@ -711,6 +711,7 @@ impl MailEngine {
         &self,
         f: impl FnOnce(&Store) -> Result<T, MailError>,
     ) -> Result<T, MailError> {
+        let _access = self.access_lease("store")?;
         let mut guard = self
             .store
             .lock()
@@ -736,6 +737,9 @@ impl MailEngine {
                     self.reconcile_operations(store.connection())?;
                     *guard = Some(store);
                 }
+                UnlockOutcome::Blocked(StoreBlocked::KeyMissing) => {
+                    return Err(MailError::KeyMissing);
+                }
                 UnlockOutcome::Blocked(reason) => {
                     return Err(MailError::Storage(format!("{reason:?}")));
                 }
@@ -747,9 +751,40 @@ impl MailEngine {
     }
 }
 
+/// Held for the duration of an account sync or removal, or of a restore
+/// (under [`RESTORE_LEASE`]). A restore excludes every other lease.
 struct SyncLease<'a> {
     active: &'a Mutex<HashMap<String, Arc<AtomicBool>>>,
     id: String,
+    cancel: Arc<AtomicBool>,
+}
+
+const RESTORE_LEASE: &str = "\0restore";
+
+impl MailEngine {
+    fn access_lease(&self, purpose: &str) -> Result<SyncLease<'_>, MailError> {
+        self.lease(&format!(
+            "\0{purpose}:{}",
+            NEXT_ACCESS.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn lease(&self, id: &str) -> Result<SyncLease<'_>, MailError> {
+        let mut active = self.syncing.lock().map_err(|_| MailError::Busy)?;
+        if active.contains_key(RESTORE_LEASE) {
+            return Err(MailError::Restoring);
+        }
+        if active.contains_key(id) || (id == RESTORE_LEASE && !active.is_empty()) {
+            return Err(MailError::Busy);
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        active.insert(id.to_owned(), cancel.clone());
+        Ok(SyncLease {
+            active: &self.syncing,
+            id: id.to_owned(),
+            cancel,
+        })
+    }
 }
 impl Drop for SyncLease<'_> {
     fn drop(&mut self) {

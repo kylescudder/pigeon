@@ -10,7 +10,7 @@ use crate::secrets::{KeyringState, SecretError, SecretStore};
 use crate::store::{DbKey, Store, StoreError};
 
 pub const DB_KEY_NAME: &str = "database-key";
-const DB_KEY_LABEL: &str = "Pigeon mail store key";
+pub(crate) const DB_KEY_LABEL: &str = "Pigeon mail store key";
 // Engine polling and diagnostics can initialise storage concurrently. Do not
 // let both observe a missing key and overwrite one another's generated key.
 static OPEN_LOCK: Mutex<()> = Mutex::new(());
