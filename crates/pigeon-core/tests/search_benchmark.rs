@@ -77,6 +77,7 @@ fn indexed_search_first_page_p95_is_under_200_ms_for_100k_messages() {
                     username: format!("mailbox{index}@example.test"),
                     security: TransportSecurity::Tls,
                     ca_certificate: None,
+                    sending: Default::default(),
                 },
                 Zeroizing::new(b"benchmark-only".to_vec()),
             )
@@ -158,6 +159,7 @@ fn indexed_search_first_page_p95_is_under_200_ms_for_100k_messages() {
                 username: "indexing@example.test".into(),
                 security: TransportSecurity::Tls,
                 ca_certificate: None,
+                sending: Default::default(),
             },
             Secret::new(b"benchmark-only".to_vec()),
         )

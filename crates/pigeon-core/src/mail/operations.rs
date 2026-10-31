@@ -157,6 +157,17 @@ pub trait OperationHandler: Send + Sync {
     /// Runs outside the store lock. Must not panic across the point of no
     /// return without having called `begin_irreversible`.
     fn run(&self, ctx: &OperationContext<'_>, op: &Operation) -> Outcome;
+    /// Runs in the same transaction that records `outcome`, so follow-up
+    /// work is stored together with the result or not at all. Also runs when
+    /// an outcome reached while the store was locked is written after unlock.
+    fn recorded(
+        &self,
+        _conn: &Connection,
+        _op: &Operation,
+        _outcome: &Outcome,
+    ) -> Result<(), MailError> {
+        Ok(())
+    }
 }
 
 pub struct OperationContext<'a> {
@@ -365,7 +376,7 @@ pub(crate) struct Runtime {
     /// Operations this process is running. Store recovery leaves them alone.
     pub(crate) executing: Vec<String>,
     /// Outcomes reached while the store was unavailable, written on reopen.
-    pub(crate) unrecorded: Vec<(String, Outcome)>,
+    pub(crate) unrecorded: Vec<(Operation, Outcome)>,
 }
 
 impl MailEngine {
@@ -530,7 +541,7 @@ impl MailEngine {
             id: &op.id,
             irreversible: std::cell::Cell::new(false),
         };
-        let outcome = match handler {
+        let outcome = match &handler {
             None => Outcome::Retry {
                 after: Duration::from_secs(60),
                 error: "no handler is available for this operation".into(),
@@ -547,12 +558,13 @@ impl MailEngine {
                     }
                 }),
         };
-        let recorded = self.with_store(|store| record(store.connection(), &op.id, &outcome));
+        let recorded =
+            self.with_store(|store| settle(store.connection(), handler.as_deref(), &op, &outcome));
         let mut runtime = self.runtime()?;
         if let Err(error) = recorded {
             // Keep the claim so recovery cannot requeue it; the outcome is
             // written when the store reopens.
-            runtime.unrecorded.push((op.id, outcome));
+            runtime.unrecorded.push((op, outcome));
             return Err(error);
         }
         runtime.executing.retain(|id| *id != op.id);
@@ -595,11 +607,27 @@ impl MailEngine {
 
     fn write_unrecorded(&self, conn: &Connection) -> Result<(), MailError> {
         let mut runtime = self.runtime()?;
-        while let Some((id, outcome)) = runtime.unrecorded.first().cloned() {
-            record(conn, &id, &outcome)?;
+        while let Some((op, outcome)) = runtime.unrecorded.first().cloned() {
+            let handler = runtime.handlers.get(op.kind.as_str()).cloned();
+            settle(conn, handler.as_deref(), &op, &outcome)?;
             runtime.unrecorded.remove(0);
-            runtime.executing.retain(|running| *running != id);
+            runtime.executing.retain(|running| *running != op.id);
         }
         Ok(())
     }
+}
+
+/// Records an outcome and the handler's follow-up work in one transaction.
+fn settle(
+    conn: &Connection,
+    handler: Option<&dyn OperationHandler>,
+    op: &Operation,
+    outcome: &Outcome,
+) -> Result<(), MailError> {
+    let tx = conn.unchecked_transaction().map_err(storage_error)?;
+    record(&tx, &op.id, outcome)?;
+    if let Some(handler) = handler {
+        handler.recorded(&tx, op, outcome)?;
+    }
+    tx.commit().map_err(storage_error)
 }

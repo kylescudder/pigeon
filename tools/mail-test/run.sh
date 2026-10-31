@@ -18,7 +18,7 @@ docker volume create "$pki" >/dev/null
 docker run -d --name "$server" -v "$pki":/pki pigeon-mail-test >/dev/null
 ready=false
 for attempt in {1..30}; do
-  if docker exec "$server" python3 -c 'import socket; socket.create_connection(("127.0.0.1",993),2).close()' >/dev/null 2>&1; then
+  if docker exec "$server" python3 -c 'import socket; [socket.create_connection(("127.0.0.1",p),2).close() for p in (993,465,587)]' >/dev/null 2>&1; then
     ready=true
     break
   fi
@@ -31,5 +31,7 @@ fi
 docker run --rm --network "container:$server" \
   -v "$repo":/src -v "$pki":/pki:ro \
   -v pigeon-cargo:/usr/local/cargo/registry -v pigeon-target:/src/target \
-  pigeon-linux-dev cargo test --locked -p pigeon-core --test imap_server \
-  -- --ignored --test-threads=1 --nocapture
+  pigeon-linux-dev sh -c 'cargo test --locked -p pigeon-core --test imap_server \
+    -- --ignored --test-threads=1 --nocapture &&
+  cargo test --locked -p pigeon-core --test smtp_server \
+    -- --ignored --test-threads=1 --nocapture'

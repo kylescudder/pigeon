@@ -14,6 +14,7 @@ fn config() -> AccountConfig {
         username: "mail@pigeon.test".into(),
         security: TransportSecurity::Tls,
         ca_certificate: Some(std::fs::read_to_string("/pki/ca.pem").unwrap()),
+        sending: Default::default(),
     }
 }
 

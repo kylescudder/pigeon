@@ -215,6 +215,8 @@ test.beforeEach(async ({ page }) => {
               return { missing_inline: args.id === 2 ? 1 : 0 };
             case "update_mail_password":
               return;
+            case "send_state":
+              return { drafts: [], outbox: [], undo_send_seconds: 10 };
             case "quit_app":
               throw new Error("Not available in a frontend test");
             default:

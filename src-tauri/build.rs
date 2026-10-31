@@ -27,6 +27,17 @@ fn main() {
             "mail_actions",
             "retry_mail_action",
             "discard_mail_action",
+            "send_state",
+            "save_draft",
+            "delete_draft",
+            "send_draft",
+            "return_to_drafts",
+            "retry_send",
+            "retry_sent_copy",
+            "resolve_send",
+            "dismiss_outbox",
+            "update_mail_sending",
+            "set_undo_send_seconds",
         ]),
     ))
     .expect("failed to run tauri-build");

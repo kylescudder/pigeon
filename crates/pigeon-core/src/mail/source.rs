@@ -25,6 +25,17 @@ pub trait MailSession: Send {
         Ok(())
     }
     fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError>;
+    /// Stores a message in `folder`, marked as read.
+    fn append(&mut self, _folder: &str, _message: &[u8]) -> Result<(), MailError> {
+        Err(MailError::Imap {
+            operation: "saving to the Sent folder",
+            reason: "this connection cannot save messages",
+        })
+    }
+    /// Whether `folder` already holds a message with this Message-ID.
+    fn has_message_id(&mut self, _folder: &str, _message_id: &str) -> Result<bool, MailError> {
+        Ok(false)
+    }
 
     // Writes. Only the action queue calls these, always on a folder opened with
     // `select_writable` and with UIDs it has just confirmed under the expected

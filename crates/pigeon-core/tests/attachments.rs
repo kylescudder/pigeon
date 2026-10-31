@@ -205,6 +205,7 @@ fn fixture_with(initial: State) -> Fixture {
                 username: "mail@pigeon.test".into(),
                 security: TransportSecurity::Tls,
                 ca_certificate: None,
+                sending: Default::default(),
             },
             Zeroizing::new(b"test-password".to_vec()),
         )

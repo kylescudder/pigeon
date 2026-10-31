@@ -1,5 +1,8 @@
 const paths = {
   plus: <path d="M12 5v14M5 12h14" />,
+  send: <path d="M21 3 10 14M21 3l-7 18-4-7-7-4Z" />,
+  edit: <><path d="M4 20h4L19 9l-4-4L4 16Z" /><path d="m13.5 6.5 4 4" /></>,
+  outbox: <><path d="M4 13v6h16v-6" /><path d="M12 15V4m-4 4 4-4 4 4" /></>,
   close: <path d="m6 6 12 12M6 18 18 6" />,
   inbox: <><path d="m4 5-2 9v5h20v-5l-2-9Z" /><path d="M2 14h6l2 3h4l2-3h6" /></>,
   archive: <><rect x="3" y="3" width="18" height="5" rx="1.5" /><path d="M5 8v12h14V8M10 12h4" /></>,

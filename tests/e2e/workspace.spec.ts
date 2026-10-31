@@ -140,7 +140,7 @@ test("real pages render without overflow or browser errors", async ({
   });
   for (const [path, heading] of [
     ["/", "Overview"],
-    ["/settings", "Appearance"],
+    ["/settings", "Settings"],
     ["/foundation", "Diagnostics"],
   ]) {
     await page.goto(path!);

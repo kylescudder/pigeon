@@ -9,10 +9,7 @@ use ::imap::types::NameAttribute;
 use ::imap::{Client, Session};
 use imap_proto::types::{BodyStructure, ContentEncoding, MessageSection, SectionPath};
 use mailparse::MailHeaderMap;
-use native_tls::{Certificate, Protocol, TlsConnector};
 use std::collections::{BTreeMap, HashMap};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Duration;
 use zeroize::Zeroizing;
 
 pub(super) struct ImapConnector;
@@ -22,31 +19,8 @@ impl MailConnector for ImapConnector {
         config: &AccountConfig,
         password: &Secret,
     ) -> Result<Box<dyn MailSession>, MailError> {
-        let mut builder = TlsConnector::builder();
-        builder.min_protocol_version(Some(Protocol::Tlsv12));
-        if let Some(pem) = &config.ca_certificate {
-            builder.add_root_certificate(Certificate::from_pem(pem.as_bytes()).map_err(|_| {
-                MailError::InvalidConfig("the additional CA certificate is not valid PEM".into())
-            })?);
-        }
-        let tls = builder.build().map_err(|_| MailError::Tls)?;
-        let addresses = (config.host.as_str(), config.port)
-            .to_socket_addrs()
-            .map_err(|_| MailError::Connection)?;
-        let mut connected = None;
-        for address in addresses.take(4) {
-            if let Ok(stream) = TcpStream::connect_timeout(&address, Duration::from_secs(8)) {
-                connected = Some(stream);
-                break;
-            }
-        }
-        let stream = connected.ok_or(MailError::Connection)?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(20)))
-            .map_err(|_| MailError::Connection)?;
-        stream
-            .set_write_timeout(Some(Duration::from_secs(20)))
-            .map_err(|_| MailError::Connection)?;
+        let tls = super::net::tls_connector(config.ca_certificate.as_deref())?;
+        let stream = super::net::tcp_connect(&config.host, config.port)?;
         let mut client = match config.security {
             TransportSecurity::Tls => {
                 let stream = tls
@@ -199,6 +173,28 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
             return Err(MailError::Protocol);
         }
         Ok(())
+    }
+
+    fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), MailError> {
+        self.session
+            .append_with_flags(folder, message, &[Flag::Seen])
+            .map_err(|error| imap_error("saving to the Sent folder", error))
+    }
+
+    fn has_message_id(&mut self, folder: &str, message_id: &str) -> Result<bool, MailError> {
+        // Pigeon generates these IDs; refuse anything that could break out
+        // of the quoted search string.
+        if message_id.contains(['"', '\\', '\r', '\n']) {
+            return Ok(false);
+        }
+        self.session
+            .examine(folder)
+            .map_err(|error| imap_error("opening the Sent folder", error))?;
+        let found = self
+            .session
+            .uid_search(format!("HEADER Message-ID \"{message_id}\""))
+            .map_err(|error| imap_error("checking the Sent folder", error))?;
+        Ok(!found.is_empty())
     }
 
     fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError> {
@@ -745,7 +741,8 @@ mod tests {
         }
     }
     use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
+    use std::time::Duration;
 
     // Real adapter calls over a disposable server connection. This exercises
     // response parsing and error translation, not a mock of that translation.
@@ -910,6 +907,7 @@ mod tests {
                     username: "synthetic".into(),
                     security: TransportSecurity::Tls,
                     ca_certificate: None,
+                    sending: Default::default(),
                 },
                 Secret::new(b"synthetic".to_vec()),
             )

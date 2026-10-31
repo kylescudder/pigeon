@@ -434,6 +434,17 @@ async function attempt(name, cmd, args) {
   await attempt("list mail changes", "mail_actions");
   await attempt("retry mail change", "retry_mail_action", { id: 1 });
   await attempt("discard mail change", "discard_mail_action", { id: 1 });
+  await attempt("send state", "send_state");
+  await attempt("save draft", "save_draft", { draft: { to: "probe@example.test" } });
+  await attempt("delete draft", "delete_draft", { id: "probe" });
+  await attempt("send draft", "send_draft", { draft: { to: "probe@example.test" } });
+  await attempt("return to drafts", "return_to_drafts", { id: "probe" });
+  await attempt("retry send", "retry_send", { id: "probe" });
+  await attempt("retry sent copy", "retry_sent_copy", { id: "probe" });
+  await attempt("resolve send", "resolve_send", { id: "probe", decision: "send_again" });
+  await attempt("dismiss outbox", "dismiss_outbox", { id: "probe" });
+  await attempt("update mail sending", "update_mail_sending", { id: "probe", settings: {} });
+  await attempt("set undo send seconds", "set_undo_send_seconds", { seconds: 0 });
   await attempt("add account", "add_mail_account", { config: { name: "Probe", address: "probe@example.test", host: "example.test", port: 993, username: "probe", security: "tls", ca_certificate: null }, password: "synthetic-probe-value" });
   try {
     await fetch("https://example.org/");
@@ -641,6 +652,17 @@ pub fn run() {
             mail::mail_actions,
             mail::retry_mail_action,
             mail::discard_mail_action,
+            mail::send_state,
+            mail::save_draft,
+            mail::delete_draft,
+            mail::send_draft,
+            mail::return_to_drafts,
+            mail::retry_send,
+            mail::retry_sent_copy,
+            mail::resolve_send,
+            mail::dismiss_outbox,
+            mail::update_mail_sending,
+            mail::set_undo_send_seconds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pigeon");

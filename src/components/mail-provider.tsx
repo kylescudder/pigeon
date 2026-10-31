@@ -76,6 +76,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
       client.removeQueries({ queryKey: ["mail", "search"] });
       client.removeQueries({ queryKey: ["mail", "message"] });
       client.removeQueries({ queryKey: ["mail", "actions"] });
+      client.removeQueries({ queryKey: ["send"] });
     }
   }, [stateQuery.isError, client]);
   // Changes apply in the background; refresh views when the queue drains.
@@ -89,6 +90,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
     await client.invalidateQueries({ queryKey: ["mail", "search"] });
     await client.invalidateQueries({ queryKey: ["mail", "message"] });
     await client.invalidateQueries({ queryKey: ["mail", "actions"] });
+    await client.invalidateQueries({ queryKey: ["send"] });
   };
   const act = async (ids: number[], kind: MailActionKind) => {
     setActionError(null);
