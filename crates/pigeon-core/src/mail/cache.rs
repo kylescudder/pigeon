@@ -126,12 +126,12 @@ impl MailEngine {
             stored_unread.clear();
             let tx = store.connection().unchecked_transaction().map_err(storage_error)?;
             {
-                let mut insert = tx.prepare("INSERT INTO messages(account,folder,uid_validity,uid,sender,recipients,subject,body_text,body_html,date,unread,has_attachments,message_id,attachments) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14) ON CONFLICT(account,folder,uid_validity,uid) DO NOTHING").map_err(storage_error)?;
+                let mut insert = tx.prepare("INSERT INTO messages(account,folder,uid_validity,uid,sender,recipients,subject,body_text,body_html,date,unread,has_attachments,message_id,attachments,reply_to,reply_refs,to_list,cc_list) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18) ON CONFLICT(account,folder,uid_validity,uid) DO NOTHING").map_err(storage_error)?;
                 for message in messages {
                     let content = &message.content;
                     let attachments = serde_json::to_string(&content.attachments).map_err(|_| MailError::Protocol)?;
                     let unread = flags.get(&message.uid).copied().unwrap_or(true);
-                    let stored = insert.execute(params![id,folder,validity,message.uid,content.sender,content.recipients,content.subject,content.body_text,content.body_html,content.date,unread,!content.attachments.is_empty(),content.message_id,attachments]).map_err(storage_error)?;
+                    let stored = insert.execute(params![id,folder,validity,message.uid,content.sender,content.recipients,content.subject,content.body_text,content.body_html,content.date,unread,!content.attachments.is_empty(),content.message_id,attachments,content.reply_to,content.references,content.to_list,content.cc_list]).map_err(storage_error)?;
                     if stored == 1 && unread && inbox {
                         stored_unread.push(tx.last_insert_rowid());
                     }

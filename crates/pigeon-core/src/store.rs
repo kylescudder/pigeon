@@ -208,6 +208,13 @@ const MIGRATIONS: &[&str] = &[
     // Facts about this device's store, such as when it was last restored from
     // a backup. Never backed up itself; see `backup::TABLES`.
     "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    // 11: header facts a reply needs. `to_list` and `cc_list` are kept apart
+    // from `recipients`, which also holds Bcc, so reply-all can never expose a
+    // blind recipient. Messages stored before this have them empty.
+    "ALTER TABLE messages ADD COLUMN reply_to TEXT NOT NULL DEFAULT '';
+    ALTER TABLE messages ADD COLUMN reply_refs TEXT NOT NULL DEFAULT '';
+    ALTER TABLE messages ADD COLUMN to_list TEXT NOT NULL DEFAULT '';
+    ALTER TABLE messages ADD COLUMN cc_list TEXT NOT NULL DEFAULT '';",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.

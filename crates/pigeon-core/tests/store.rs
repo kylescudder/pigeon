@@ -182,7 +182,7 @@ fn upgrading_main_schema_six_keeps_operations_and_adds_attachment_storage() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
 }
 
 /// A developer may already have run the pre-integration attachments build at schema 6.
@@ -259,7 +259,7 @@ fn upgrading_main_schema_seven_keeps_operations_attachments_and_mail_and_adds_ac
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 10);
+    assert_eq!(version, 11);
     let op: (String, String) = conn
         .query_row(
             "SELECT state,payload FROM operations WHERE id='keep-op'",
