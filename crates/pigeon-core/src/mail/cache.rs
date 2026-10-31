@@ -14,7 +14,9 @@ use super::{
 };
 
 const SUMMARY: &str = "m.id,m.account,m.folder,m.sender,m.recipients,m.subject,substr(m.body_text,1,180),m.date,m.unread,m.has_attachments";
-pub(super) const VISIBLE: &str = "(f.uid_validity IS NULL OR m.uid_validity=f.uid_validity)";
+/// Current folder epoch, and not hidden by an outstanding move or deletion.
+pub(super) const VISIBLE: &str =
+    "(f.uid_validity IS NULL OR m.uid_validity=f.uid_validity) AND m.local_hidden=0";
 
 fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
     Ok(MessageSummary {
@@ -34,7 +36,7 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
 impl MailEngine {
     pub fn folders(&self) -> Result<Vec<Folder>, MailError> {
         self.with_store(|store| {
-            let mut statement = store.connection().prepare("SELECT f.account,f.name,f.kind,f.total,count(m.id),coalesce(sum(m.unread),0),f.id,f.delimiter FROM mail_folders f LEFT JOIN messages m INDEXED BY messages_folder_counts ON m.account=f.account AND m.folder=f.name AND m.uid_validity=f.uid_validity GROUP BY f.account,f.name ORDER BY f.account,CASE WHEN f.kind='inbox' THEN 0 ELSE 1 END,f.name").map_err(storage_error)?;
+            let mut statement = store.connection().prepare("SELECT f.account,f.name,f.kind,f.total,count(m.id),coalesce(sum(m.unread),0),f.id,f.delimiter FROM mail_folders f LEFT JOIN messages m INDEXED BY messages_folder_counts ON m.account=f.account AND m.folder=f.name AND m.uid_validity=f.uid_validity AND m.local_hidden=0 GROUP BY f.account,f.name ORDER BY f.account,CASE WHEN f.kind='inbox' THEN 0 ELSE 1 END,f.name").map_err(storage_error)?;
             statement.query_map([], |row| Ok(Folder { id: row.get(6)?, account_id: row.get(0)?, name: row.get(1)?, kind: row.get(2)?, delimiter: row.get(7)?, total: row.get::<_,i64>(3)? as u64, cached: row.get::<_,i64>(4)? as u64, unread: row.get::<_,i64>(5)? as u64 })).map_err(storage_error)?.collect::<rusqlite::Result<_>>().map_err(storage_error)
         })
     }
@@ -88,7 +90,8 @@ impl MailEngine {
             tx.execute_batch("CREATE TEMP TABLE IF NOT EXISTS sync_uids(uid INTEGER PRIMARY KEY); DELETE FROM sync_uids;").map_err(storage_error)?;
             {
                 let mut insert = tx.prepare("INSERT INTO sync_uids(uid) VALUES (?1)").map_err(storage_error)?;
-                let mut update = tx.prepare("UPDATE messages SET unread=?5 WHERE account=?1 AND folder=?2 AND uid_validity=?3 AND uid=?4 AND unread!=?5").map_err(storage_error)?;
+                // A queued read/unread change wins until it is applied or released.
+                let mut update = tx.prepare("UPDATE messages SET unread=?5 WHERE account=?1 AND folder=?2 AND uid_validity=?3 AND uid=?4 AND unread!=?5 AND flags_pending=0").map_err(storage_error)?;
                 for message in &snapshot.messages {
                     insert.execute([message.uid]).map_err(storage_error)?;
                     update.execute(params![id,folder,snapshot.uid_validity,message.uid,message.unread]).map_err(storage_error)?;

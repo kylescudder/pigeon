@@ -1,6 +1,6 @@
 # Milestone 1: receive, persist, and search
 
-Status: implemented for local testing. The receiving engine and browser flows pass the checks below. The user's actual provider and this milestone's NixOS desktop account flow still need verification. This build is read-only: opening a message preserves its server read status.
+Status: implemented for local testing. The receiving engine and browser flows pass the checks below. The user's actual provider and this milestone's NixOS desktop account flow still need verification. Sync itself stays read-only; since Milestone 2, changes you make (read state, moves, deletion) reach the server through the [action queue](#milestone-2-changing-mailbox-state-2026-10-30).
 
 ## Try it on NixOS
 
@@ -38,7 +38,7 @@ Use **Manage account** on its overview card to verify a replacement password or 
 
 `MailEngine` is the service interface. It owns credentials, connection lifecycle, folder snapshots, cursors, transactions, index maintenance, saved searches, cancellation, and recovery. Tauri exposes narrowly scoped typed commands; the frontend has no SQL or IMAP access. `MailConnector`/`MailSession` are the external-server boundary used for deterministic recovery tests. Production uses verified native TLS and the IMAP adapter.
 
-Network operations run outside the encrypted-store mutex and off the interface thread. A sync snapshots each folder's UIDVALIDITY, UIDs, and flags using EXAMINE. It fetches only missing headers and text MIME sections using PEEK, committing/indexing batches of 100. It never sends STORE, MOVE, EXPUNGE, or message deletion commands. External seen/deleted changes are reflected after a successful snapshot. Folder renames are handled as a removed folder plus a new folder, so they require a re-download.
+Network operations run outside the encrypted-store mutex and off the interface thread. A sync snapshots each folder's UIDVALIDITY, UIDs, and flags using EXAMINE. It fetches only missing headers and text MIME sections using PEEK, committing/indexing batches of 100. Sync never sends STORE, MOVE, EXPUNGE, or message deletion commands; only the action queue writes, as described below. External seen/deleted changes are reflected after a successful snapshot. Folder renames are handled as a removed folder plus a new folder, so they require a re-download.
 
 Remote deletions are pruned only after the full folder snapshot is fetched successfully. If UIDVALIDITY changes, the old epoch stays readable until its replacement completes; partially received replacement batches survive restart. Ordinary sync still scans UID/flag metadata; CONDSTORE/QRESYNC/IDLE are not implemented. Concurrent changes that invalidate a snapshot surface as a retryable sync error rather than guessed message identity.
 
@@ -178,3 +178,43 @@ A new kind needs a handler with a stable `kind()` name and a JSON payload. Queue
 - claim and undo races, backoff, held work and parent ordering;
 - recovery after a crash on either side of the irreversible point, and panics;
 - locked-store pausing, and outcomes recorded after unlock.
+
+## Milestone 2: changing mailbox state, 2026-10-30
+
+Select messages with their checkboxes (Ctrl/Cmd-click toggles a row, Shift-click selects a range, and the list header selects the page), then use **Mark read**, **Mark unread**, **Archive**, **Delete**, **Move to…** or **Delete permanently**. The reader toolbar offers the same for the open message, and opening an unread message marks it read. Shortcuts in the message list: `E` archives, `Delete` or `#` moves to Trash, `Shift+Delete` deletes permanently, `Shift+I` and `Shift+U` mark read and unread, and `X` selects the open message.
+
+**Delete** moves mail to the account's Trash folder (special-use `\Trash`, or one named Trash or Deleted Items). If an account has no Trash, Delete is disabled and only **Delete permanently** is offered; Pigeon never creates server folders. Mail already in Trash is deleted permanently. Permanent deletion always asks for confirmation. Archive uses the account's `\Archive` folder (or one named Archive); `\All` is also treated as an archive, so Gmail-style labels are not yet modelled. Moves between accounts are not supported.
+
+### Durable action queue
+
+A change is queued in the encrypted store before anything else happens, so it survives restarts and works offline. The local view updates immediately: messages being moved or deleted are hidden, and read state changes. Queued work is applied in order when an account syncs, after the queue changes, and by the background coordinator about once a minute, so it resumes after reconnecting. A change counts as done only after the server has been checked; the local view alone is not success. **Pending changes** in the sidebar shows outstanding work with a count, and turns red when something has failed or conflicts. Its page offers **Retry** and **Discard**; discarding a waiting change restores the message's local view.
+
+Mailbox changes use their own tables (`mail_actions`, `mail_action_items`, migration 8), separate from the operations queue above; moving them onto that queue is later work. The tables are general enough for other queued work such as an outbox to reuse: a kind, an optional payload, a state (`queued`, `applying`, `failed`, `conflict`), a write-ahead `attempted` flag, a `step` for multi-command changes, and a safe error message. Completed changes are deleted.
+
+### Safety rules
+
+- **Only targeted writes.** Pigeon sends `UID STORE ±FLAGS.SILENT (\Seen)`, `UID MOVE`, and `UID EXPUNGE` for exactly the selected UIDs. It never sends a plain `EXPUNGE`, which would also remove mail another client has flagged `\Deleted`. Permanent deletion needs UIDPLUS; without it, the change fails visibly and nothing is sent. Moves use MOVE, or UIDPLUS `UID COPY` then `UID EXPUNGE` where MOVE is missing; without either, the move fails.
+- **Identity check before writing.** Each change records the folder, its UIDVALIDITY and UIDs. Before writing, Pigeon opens the folder read-write (only the queue does this; sync keeps EXAMINE), confirms the UIDVALIDITY, and fetches which UIDs are still there.
+- **Conflicts, never resurrection.** If the folder was reset, removed, or a message vanished before Pigeon acted, the change becomes a conflict. Pigeon never re-appends mail or guesses where it went by Message-ID, and the next sync removes the local copy. A read/unread change for mail that no longer exists is simply dropped, since there is nothing to preserve.
+- **Uncertain outcomes.** `attempted` is committed before a write is sent. If the connection drops or the app stops mid-write, the change is re-checked on the next run: flag changes and permanent deletion are idempotent, and a move whose UIDs are gone counts as done. For the copy fallback, an uncertain `UID COPY` becomes a conflict ("retrying could duplicate them"), and only an explicit Retry copies again. A change cut off in `applying` resets to `queued` when the store reopens.
+- **Server refusals.** A NO/BAD reply, a missing capability, or a malformed response fails that change (Retry/Discard) rather than blocking sync of the account. Connection and sign-in failures leave it queued.
+- **Sync respects pending changes.** While a read/unread change is pending, sync does not overwrite the local read state, and hidden messages stay hidden. Failed, conflicting or discarded changes restore the local view; the next sync then shows the server's state.
+
+Moved mail is removed locally from its source folder and downloaded again by the next sync of the destination, because the `imap` 2.4 adapter does not return COPYUID. That costs a body download per moved message. Relocating cached rows using COPYUID is a later optimisation. A long initial sync holds the account, so changes queued meanwhile apply when it finishes; the local view already reflects them.
+
+### Verification
+
+Source: `feature/mailbox-changes`; the delivery commit identifies the exact source. Logs are in ignored `evidence/mailbox-changes/`.
+
+| Check | Observed result |
+| --- | --- |
+| `cargo test --release -p pigeon-core` | All ordinary suites pass, including 13 new queue tests against a deterministic multi-folder server model: offline queueing across restart, Trash/Archive/move, no-Trash refusal, permanent delete sparing another client's `\Deleted` mail, missing UIDPLUS, remote deletion conflicts without resurrection, UIDVALIDITY change, connection loss before and after a write, the copy fallback's ambiguity guard, interrupted apply, discard, locked keyring, an unusable server response not blocking sync, and a canary showing queued folder names are absent from the database and WAL bytes. |
+| `tools/mail-test/run.sh` | Eight real Dovecot tests pass. Two new ones use a second real IMAP session to observe `\Seen` set and cleared, moves into Archive and Trash, permanent deletion from a folder and from Trash with another client's `\Deleted` message surviving, an offline-queued change applied after restart, and a message deleted by the second client becoming a conflict that is not recreated in any folder. |
+| Search benchmark (100,000 messages) | p95 106 ms after indexing (p50 88 ms); 121 ms during concurrent indexing. The search and folder-count indexes now include the hidden flag. |
+| `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check` | Pass. |
+| `bun run test` | Typecheck plus 29 Chromium tests pass in the three layouts, including multi-select, offline queueing with the pending badge, a conflict with Retry and Discard, confirmed permanent delete, mark-read on open, and the archive shortcut. |
+| `nix flake check -L` | All four checks pass on aarch64-linux: package, frontend, core tests with both Secret Service cases, and the packaged WebKitGTK self-test. All **30 native diagnostics** pass; the viewer is denied all four new queue commands by the ACL. x86_64-linux was not executed by this local builder. |
+
+After merging main at `0958b1b` (operations schema 6, attachments schema 7), mailbox actions became migration 8. A frozen copy of main's schema-7 SQL (`tests/fixtures/main-schema-7.sql`) upgrades with a queued operation, a kept attachment and a message intact, and the new action tables and columns usable. On the merged tree: all core suites pass (15 queue tests), 9 real Dovecot tests including attachment downloads, and 41 browser tests. Moving or permanently deleting a message also removes any attachment kept with its source row, as remote deletion already does.
+
+Not yet verified: x86_64 NixOS, and writes against the user's provider (Zoho). Try it on a disposable folder first: move a message, check webmail, then delete it permanently from Trash.

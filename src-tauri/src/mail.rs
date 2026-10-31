@@ -1,7 +1,7 @@
 //! Main-window adapters for the mail engine. No SQL or protocol logic here.
 use pigeon_core::mail::{
-    Account, AccountConfig, Folder, MailEngine, MailError, Message, SavedSearch, SearchQuery,
-    SearchResults,
+    Account, AccountConfig, ActionCounts, ActionKind, Folder, MailEngine, MailError, Message,
+    PendingAction, SavedSearch, SearchQuery, SearchResults,
 };
 use pigeon_core::secrets::Secret;
 use serde::Serialize;
@@ -32,6 +32,10 @@ impl From<MailError> for MailApiError {
             MailError::Busy => "busy",
             MailError::Cancelled => "cancelled",
             MailError::InvalidSearch(_) => "invalid_search",
+            MailError::Unsupported(_) => "unsupported",
+            MailError::NoTrashFolder => "no_trash_folder",
+            MailError::NoArchiveFolder => "no_archive_folder",
+            MailError::InvalidAction(_) => "invalid_action",
             MailError::Conflict(_) => "conflict",
         };
         Self {
@@ -46,6 +50,7 @@ pub struct MailState {
     accounts: Vec<Account>,
     folders: Vec<Folder>,
     saved_searches: Vec<SavedSearch>,
+    actions: ActionCounts,
 }
 
 fn guard(webview: &tauri::Webview) -> Result<(), MailApiError> {
@@ -97,6 +102,7 @@ pub async fn mail_state(
             accounts: engine.accounts()?,
             folders: engine.folders()?,
             saved_searches: engine.saved_searches()?,
+            actions: engine.action_counts()?,
         })
     })
     .await
@@ -278,4 +284,63 @@ pub async fn open_mail_message(
         message: "The message viewer was interrupted.".into(),
     })??;
     Ok(opened)
+}
+
+/// Queues a change and starts applying it in the background. Returns how many
+/// messages it affects; completion shows in the pending-change list.
+#[tauri::command]
+pub async fn queue_mail_actions(
+    app: AppHandle,
+    webview: tauri::Webview,
+    ids: Vec<i64>,
+    kind: ActionKind,
+) -> Result<usize, MailApiError> {
+    guard(&webview)?;
+    let queued = task(app.clone(), move |engine| engine.queue_actions(&ids, kind)).await?;
+    apply_in_background(&app);
+    Ok(queued)
+}
+
+/// Applies every account's queue. An account that is syncing is skipped: its
+/// sync applies the queue itself when it finishes.
+fn apply_in_background(app: &AppHandle) {
+    let engine = app.state::<Arc<MailEngine>>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(accounts) = engine.accounts() {
+            for account in accounts {
+                let _ = engine.apply_actions(&account.id);
+            }
+        }
+    });
+}
+
+#[tauri::command]
+pub async fn mail_actions(
+    app: AppHandle,
+    webview: tauri::Webview,
+) -> Result<Vec<PendingAction>, MailApiError> {
+    guard(&webview)?;
+    task(app, MailEngine::pending_actions).await
+}
+
+#[tauri::command]
+pub async fn retry_mail_action(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: i64,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app.clone(), move |engine| engine.retry_action(id)).await?;
+    apply_in_background(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn discard_mail_action(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: i64,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.discard_action(id)).await
 }

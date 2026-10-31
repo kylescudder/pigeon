@@ -1,5 +1,6 @@
 use super::source::{
     FolderSnapshot, MailConnector, MailSession, RemoteFlag, RemoteFolder, RemoteMessage,
+    WriteCapabilities,
 };
 use super::{AccountConfig, Attachment, MailError, MessageContent, TransportSecurity};
 use crate::secrets::Secret;
@@ -160,7 +161,8 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
             .collect())
     }
     fn snapshot(&mut self, folder: &str) -> Result<FolderSnapshot, MailError> {
-        // EXAMINE plus PEEK fetches never set Seen, and never expunge mail.
+        // Sync is read-only: EXAMINE plus PEEK fetches never set Seen and never
+        // expunge. Only the action queue's methods below write.
         let mailbox = self
             .session
             .examine(folder)
@@ -377,6 +379,84 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
         Ok(messages)
     }
 
+    fn capabilities(&mut self) -> Result<WriteCapabilities, MailError> {
+        let capabilities = self
+            .session
+            .capabilities()
+            .map_err(|error| imap_error("checking server capabilities", error))?;
+        Ok(WriteCapabilities {
+            moves: capabilities.has_str("MOVE"),
+            uidplus: capabilities.has_str("UIDPLUS"),
+        })
+    }
+
+    fn select_writable(&mut self, folder: &str) -> Result<u32, MailError> {
+        let mailbox = self
+            .session
+            .select(folder)
+            .map_err(|error| imap_error("opening a folder to change it", error))?;
+        mailbox.uid_validity.ok_or(MailError::Protocol)
+    }
+
+    fn present(&mut self, uids: &[u32]) -> Result<Vec<RemoteFlag>, MailError> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let fetched = self
+            .session
+            .uid_fetch(uid_set(uids), "(UID FLAGS)")
+            .map_err(|error| imap_error("checking messages before changing them", error))?;
+        let mut present = Vec::new();
+        for message in fetched.iter() {
+            // Servers may add unsolicited FETCH responses for other messages.
+            if let Some(uid) = message.uid.filter(|uid| uids.contains(uid)) {
+                present.push(RemoteFlag {
+                    uid,
+                    unread: !message.flags().contains(&Flag::Seen),
+                });
+            }
+        }
+        Ok(present)
+    }
+
+    fn set_seen(&mut self, uids: &[u32], seen: bool) -> Result<(), MailError> {
+        let change = if seen {
+            "+FLAGS.SILENT (\\Seen)"
+        } else {
+            "-FLAGS.SILENT (\\Seen)"
+        };
+        self.session
+            .uid_store(uid_set(uids), change)
+            .map_err(|error| imap_error("changing read status", error))?;
+        Ok(())
+    }
+
+    fn move_to(&mut self, uids: &[u32], target: &str) -> Result<(), MailError> {
+        // The library quotes the mailbox name for MOVE.
+        self.session
+            .uid_mv(uid_set(uids), target)
+            .map_err(|error| imap_error("moving messages", error))
+    }
+
+    fn copy_to(&mut self, uids: &[u32], target: &str) -> Result<(), MailError> {
+        // Unlike MOVE, the library sends the COPY mailbox name verbatim.
+        self.session
+            .uid_copy(uid_set(uids), quoted(target)?)
+            .map_err(|error| imap_error("copying messages", error))
+    }
+
+    fn expunge_uids(&mut self, uids: &[u32]) -> Result<(), MailError> {
+        let set = uid_set(uids);
+        self.session
+            .uid_store(&set, "+FLAGS.SILENT (\\Deleted)")
+            .map_err(|error| imap_error("marking messages for deletion", error))?;
+        // UID EXPUNGE removes only these UIDs; never a plain EXPUNGE.
+        self.session
+            .uid_expunge(&set)
+            .map_err(|error| imap_error("deleting messages permanently", error))?;
+        Ok(())
+    }
+
     fn fetch_part(
         &mut self,
         uid: u32,
@@ -485,6 +565,19 @@ fn find_part<'a>(body: &'a BodyStructure<'a>, path: &[u32]) -> Option<&'a BodySt
         (_, [1]) => Some(body),
         _ => None,
     }
+}
+
+/// An IMAP quoted string. Line breaks and NUL cannot be quoted.
+fn quoted(name: &str) -> Result<String, MailError> {
+    if name.contains(['\r', '\n', '\0']) {
+        return Err(MailError::InvalidAction(
+            "this folder name cannot be used in a command",
+        ));
+    }
+    Ok(format!(
+        "\"{}\"",
+        name.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
 }
 
 struct Draft {

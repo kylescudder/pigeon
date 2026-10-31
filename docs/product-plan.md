@@ -1,6 +1,6 @@
 # Pigeon product and delivery plan
 
-Status: confirmed by the user on 2026-10-23. Scope, architecture, acceptance gates, and service-first delivery order are agreed. Milestone 0 native diagnostics are user-verified. Milestone 1 receiving/search is implemented for local testing; see [mail-engine results](mail-engine.md) and [foundation results](foundation-spike.md) for checks and remaining desktop gates.
+Status: confirmed by the user on 2026-10-23. Scope, architecture, acceptance gates, and service-first delivery order are agreed. Milestone 0 native diagnostics are user-verified. Milestone 1 receiving/search and Milestone 2 mailbox changes (bulk read/move/archive/delete, the durable offline action queue, conflicts, Trash and permanent delete) are implemented for local testing; see [mail-engine results](mail-engine.md) and [foundation results](foundation-spike.md) for checks and remaining desktop gates.
 
 Planning baseline: `7c2f0242dd29ae229a65bcc6e6e939175df7e900`.
 

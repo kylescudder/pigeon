@@ -4,6 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { MailGate, useMail } from "../components/mail-provider";
 import { Modal } from "../components/modal";
 import { Icon } from "../components/icon";
+import {
+  handleActionKey,
+  MessageActionButtons,
+  useMessageActions,
+  type MessageActions,
+} from "../components/message-actions";
 import { validateMailRoute } from "../lib/mail-routing";
 import {
   deleteMailSearch,
@@ -64,7 +70,12 @@ function Mailbox({
   );
   const [junk, setJunk] = useState(initialQuery?.include_junk_trash ?? false);
   const [page, setPage] = useState(0);
+  // `selected` is the message open in the reader; `checked` is the bulk
+  // selection the toolbar and shortcuts act on.
   const [selected, setSelected] = useState<number | null>(null);
+  const [checked, setChecked] = useState(new Set<number>());
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const markedRead = useRef(new Set<number>());
   const [saveOpen, setSaveOpen] = useState(false);
   const [searchName, setSearchName] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
@@ -141,6 +152,42 @@ function Mailbox({
   );
   const total = results.data?.total ?? 0;
   const messages = results.data?.messages ?? [];
+  const checkedMessages = messages.filter((message) => checked.has(message.id));
+  const openSummary = detail.data?.summary;
+  const afterAction = (ids: number[]) => (hidden: boolean) => {
+    if (!hidden) return;
+    setChecked(new Set());
+    if (selected !== null && ids.includes(selected)) setSelected(null);
+  };
+  const bulk = useMessageActions(
+    checkedMessages,
+    afterAction(checkedMessages.map((message) => message.id)),
+  );
+  const reader = useMessageActions(
+    openSummary ? [openSummary] : [],
+    afterAction(openSummary ? [openSummary.id] : []),
+  );
+  // Opening a message marks it read once. A later explicit Mark unread sticks.
+  useEffect(() => {
+    if (openSummary?.unread && !markedRead.current.has(openSummary.id)) {
+      markedRead.current.add(openSummary.id);
+      void mail.act([openSummary.id], { type: "mark_read" });
+    }
+  }, [openSummary?.id, openSummary?.unread]);
+  const toggle = (id: number, range: boolean) => {
+    setChecked((previous) => {
+      const next = new Set(previous);
+      const ids = messages.map((message) => message.id);
+      if (range && anchor !== null && ids.includes(anchor)) {
+        const from = Math.min(ids.indexOf(anchor), ids.indexOf(id));
+        const to = Math.max(ids.indexOf(anchor), ids.indexOf(id));
+        for (const between of ids.slice(from, to + 1)) next.add(between);
+      } else if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setAnchor(id);
+  };
   useEffect(() => {
     const timeout = setTimeout(() => setDebounced(text), 200);
     return () => clearTimeout(timeout);
@@ -148,6 +195,7 @@ function Mailbox({
   useEffect(() => {
     setPage(0);
     setSelected(null);
+    setChecked(new Set());
   }, [debounced, accountId, folder, unread, attachments, junk]);
   useEffect(() => {
     searchInput.current?.focus();
@@ -174,13 +222,6 @@ function Mailbox({
           </p>
         </div>
         <div className="inline-actions">
-          <span
-            className="read-only-pill"
-            title="Opening a message does not change its server read status in this build."
-          >
-            <Icon name="lock" size={12} />
-            Read-only
-          </span>
           <button
             type="button"
             className="button button-secondary"
@@ -354,11 +395,33 @@ function Mailbox({
       <div className="mail-split">
         <div className="message-list-panel">
           <div className="message-list-heading">
-            <span>
-              {results.isFetching
-                ? "Searching…"
-                : `${total.toLocaleString()} ${total === 1 ? "message" : "messages"}`}
-            </span>
+            <label className="message-select-all">
+              <input
+                type="checkbox"
+                aria-label="Select all on this page"
+                disabled={!messages.length}
+                checked={!!messages.length && bulk.count === messages.length}
+                ref={(input) => {
+                  if (input)
+                    input.indeterminate =
+                      bulk.count > 0 && bulk.count < messages.length;
+                }}
+                onChange={(event) =>
+                  setChecked(
+                    event.target.checked
+                      ? new Set(messages.map((message) => message.id))
+                      : new Set(),
+                  )
+                }
+              />
+              <span>
+                {bulk.count
+                  ? `${bulk.count} selected`
+                  : results.isFetching
+                    ? "Searching…"
+                    : `${total.toLocaleString()} ${total === 1 ? "message" : "messages"}`}
+              </span>
+            </label>
             {savedName && (
               <button
                 type="button"
@@ -372,6 +435,11 @@ function Mailbox({
               </button>
             )}
           </div>
+          {bulk.count > 0 && (
+            <div className="bulk-actions">
+              <MessageActionButtons actions={bulk} />
+            </div>
+          )}
           {results.isError ? (
             <div className="list-empty" role="alert">
               <Icon name="alert" size={24} />
@@ -421,6 +489,13 @@ function Mailbox({
               role="group"
               aria-label="Messages"
               onKeyDown={(event) => {
+                if (handleActionKey(event, bulk.count ? bulk : reader))
+                  return;
+                if (event.key === "x" && selected !== null) {
+                  event.preventDefault();
+                  toggle(selected, false);
+                  return;
+                }
                 if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
                 event.preventDefault();
                 const current = messages.findIndex(
@@ -441,14 +516,29 @@ function Mailbox({
               }}
             >
               {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`message-row${selected === message.id ? " selected" : ""}${checked.has(message.id) ? " checked" : ""}${message.unread ? " unread" : ""}`}
+                >
+                <input
+                  type="checkbox"
+                  className="message-check"
+                  aria-label={`Select ${message.subject || "(No subject)"}`}
+                  checked={checked.has(message.id)}
+                  onChange={() => {}}
+                  onClick={(event) => toggle(message.id, event.shiftKey)}
+                />
                 <button
                   type="button"
                   id={`message-${message.id}`}
-                  key={message.id}
-                  className={`message-row${selected === message.id ? " selected" : ""}${message.unread ? " unread" : ""}`}
+                  className="message-row-open"
                   aria-label={`${message.subject} — ${message.sender}`}
                   aria-pressed={selected === message.id}
-                  onClick={() => {
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey) {
+                      toggle(message.id, event.shiftKey);
+                      return;
+                    }
                     setSelected(message.id);
                     formatted.reset();
                   }}
@@ -487,6 +577,7 @@ function Mailbox({
                     )}
                   </span>
                 </button>
+                </div>
               ))}
             </div>
           )}
@@ -498,6 +589,7 @@ function Mailbox({
               onClick={() => {
                 setPage(page - 1);
                 setSelected(null);
+                setChecked(new Set());
               }}
             >
               <Icon name="chevron" size={14} className="chevron-back" />
@@ -514,6 +606,7 @@ function Mailbox({
               onClick={() => {
                 setPage(page + 1);
                 setSelected(null);
+                setChecked(new Set());
               }}
             >
               <Icon name="chevron" size={14} />
@@ -548,6 +641,7 @@ function Mailbox({
           ) : detail.data ? (
             <MessageReader
               message={detail.data}
+              actions={reader}
               onBack={() => setSelected(null)}
               onFormatted={() => formatted.mutate()}
               formattedPending={formatted.isPending}
@@ -613,6 +707,7 @@ function Mailbox({
 
 function MessageReader({
   message,
+  actions,
   onBack,
   onFormatted,
   formattedPending,
@@ -620,6 +715,7 @@ function MessageReader({
   missingInline,
 }: {
   message: MailMessage;
+  actions: MessageActions;
   onBack: () => void;
   onFormatted: () => void;
   formattedPending: boolean;
@@ -647,6 +743,7 @@ function MessageReader({
             {formattedPending ? "Opening…" : "Open formatted view"}
           </button>
         )}
+        <MessageActionButtons actions={actions} compact />
         <span>Plain text</span>
       </div>
       <div className="reader-content">

@@ -158,6 +158,38 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (message, part)
     );
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    // 8: durable queue of mailbox changes to apply to the server (mail/actions.rs). Messages carry the local
+    // effect of outstanding changes so views and sync can respect them; the
+    // search and count indexes include it to stay covering.
+    "CREATE TABLE mail_actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account TEXT NOT NULL REFERENCES mail_accounts(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        folder TEXT NOT NULL,
+        uid_validity INTEGER NOT NULL,
+        target TEXT,
+        payload TEXT,
+        state TEXT NOT NULL CHECK (state IN ('queued','applying','failed','conflict')),
+        attempted INTEGER NOT NULL DEFAULT 0,
+        step TEXT,
+        error TEXT,
+        created INTEGER NOT NULL,
+        updated INTEGER NOT NULL
+    );
+    CREATE INDEX mail_actions_account_state ON mail_actions(account, state, id);
+    CREATE TABLE mail_action_items (
+        action INTEGER NOT NULL REFERENCES mail_actions(id) ON DELETE CASCADE,
+        uid INTEGER NOT NULL,
+        prior_unread INTEGER,
+        state TEXT NOT NULL CHECK (state IN ('pending','conflict')),
+        PRIMARY KEY (action, uid)
+    );
+    ALTER TABLE messages ADD COLUMN local_hidden INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE messages ADD COLUMN flags_pending INTEGER NOT NULL DEFAULT 0;
+    DROP INDEX messages_search_metadata;
+    CREATE INDEX messages_search_metadata ON messages(id,account,folder,uid_validity,local_hidden,date,unread,has_attachments,sender,recipients,subject);
+    DROP INDEX messages_folder_counts;
+    CREATE INDEX messages_folder_counts ON messages(account,folder,uid_validity,local_hidden,unread);",
 ];
 
 impl Store {
