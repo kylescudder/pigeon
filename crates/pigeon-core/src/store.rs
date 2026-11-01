@@ -215,6 +215,10 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE messages ADD COLUMN reply_refs TEXT NOT NULL DEFAULT '';
     ALTER TABLE messages ADD COLUMN to_list TEXT NOT NULL DEFAULT '';
     ALTER TABLE messages ADD COLUMN cc_list TEXT NOT NULL DEFAULT '';",
+    // 12: recipients learned from confirmed sends, shared across local accounts.
+    "CREATE TABLE recipient_history (
+        email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT, last_sent INTEGER NOT NULL
+    );",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.
