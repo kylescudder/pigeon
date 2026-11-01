@@ -1,6 +1,6 @@
 # Desktop integration (Milestone 4)
 
-Status: background lifecycle, configurable close behaviour, `--background`, and the Home Manager module are implemented and checked in Linux containers (aarch64). Behaviour on the supported x86_64 NixOS desktop has **not been observed yet**. New-mail notifications are implemented (see below) and checked only through unit and engine tests; the popup itself has **not been seen on a real desktop**. The optional tray comes in a later slice.
+Status: background lifecycle, configurable close behaviour, `--background`, and the Home Manager module are implemented and checked in Linux containers (aarch64). Behaviour on the supported x86_64 NixOS desktop has **not been observed yet**. New-mail notifications are implemented (see below) and checked only through unit and engine tests; the popup and its coo have **not been seen or heard on a real desktop**. The optional tray comes in a later slice.
 
 ## Behaviour
 
@@ -66,7 +66,8 @@ The background refresh (every minute, with the window hidden or open) announces 
 - `senderSubject` shows the sender's name and subject for one message, or a count with up to three "sender: subject" lines. `count` shows only "N new messages". `off` shows nothing. The text never includes message bodies or previews, and sender and subject are escaped and length-limited because notification servers render a small markup subset.
 - Nothing is shown while the main window is visible and focused, for an account's first sync (its backlog), for mail already read, or for mail outside the Inbox (Junk, Trash, Archive).
 - The setting is read on every refresh, so a Home Manager switch applies without a restart.
-- A missing or failing notification service is ignored.
+- Each notification plays a pigeon coo once, however many messages it announces, so `off` and the cases above stay silent. There is no separate sound setting.
+- A missing or failing notification service or sound device is ignored.
 - Clicking a notification does not open Pigeon yet.
 
-Checked: the wording rules (`crates/pigeon-core/src/notify.rs` tests) and which messages count as new (`tests/notify.rs`). Not checked: the popup on a real desktop, and behaviour with the keyring locked.
+Checked: the wording rules (`crates/pigeon-core/src/notify.rs` tests) and which messages count as new (`tests/notify.rs`). Not checked: the popup or the coo on a real desktop, and behaviour with the keyring locked.
