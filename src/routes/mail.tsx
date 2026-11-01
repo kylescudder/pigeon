@@ -30,6 +30,17 @@ export const Route = createFileRoute("/mail")({
   component: MailRoute,
 });
 
+function listTimestamp(ms: number) {
+  const date = new Date(ms);
+  const isToday = date.toDateString() === new Date().toDateString();
+  return new Intl.DateTimeFormat(
+    undefined,
+    isToday
+      ? { hour: "numeric", minute: "2-digit" }
+      : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" },
+  ).format(date);
+}
+
 function MailRoute() {
   const mail = useMail();
   const route = Route.useSearch();
@@ -553,10 +564,7 @@ function Mailbox({
                       <time
                         dateTime={new Date(message.date * 1000).toISOString()}
                       >
-                        {new Intl.DateTimeFormat(undefined, {
-                          month: "short",
-                          day: "numeric",
-                        }).format(message.date * 1000)}
+                        {listTimestamp(message.date * 1000)}
                       </time>
                     </span>
                     <span className="message-subject">
