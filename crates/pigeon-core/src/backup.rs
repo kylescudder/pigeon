@@ -100,6 +100,7 @@ pub const TABLES: &[(&str, TableRole)] = &[
     ("messages_fts_data", TableRole::Redownloaded),
     ("messages_fts_docsize", TableRole::Redownloaded),
     ("messages_fts_idx", TableRole::Redownloaded),
+    ("sender_images", TableRole::Redownloaded),
     ("store_meta", TableRole::Device),
 ];
 

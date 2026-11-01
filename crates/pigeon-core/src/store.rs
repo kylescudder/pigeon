@@ -219,6 +219,11 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE recipient_history (
         email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT, last_sent INTEGER NOT NULL
     );",
+    // 13: website icons by domain (mail/sender_images.rs). `data` is empty for
+    // a domain known to have none, so it is not asked about again for a while.
+    "CREATE TABLE sender_images (
+        domain TEXT PRIMARY KEY, data BLOB, checked INTEGER NOT NULL
+    );",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.

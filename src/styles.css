@@ -872,6 +872,12 @@ h1 {
   justify-content: space-between;
   gap: 20px;
 }
+.density-section + .density-section {
+  margin-top: 25px;
+}
+.density-section > .segmented-control {
+  flex-shrink: 0;
+}
 .segmented-control {
   display: flex;
   background: var(--control);

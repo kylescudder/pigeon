@@ -29,6 +29,9 @@ pub struct DesktopSettings {
     pub notifications: NotificationPolicy,
     /// Show a status-area icon when a tray host is present. Nothing depends on it.
     pub tray: bool,
+    /// Look up website icons for senders. This tells an outside service which
+    /// domains email the user, so it stays off until they choose it.
+    pub sender_images: bool,
 }
 
 impl Default for DesktopSettings {
@@ -37,6 +40,7 @@ impl Default for DesktopSettings {
             close_to_background: true,
             notifications: NotificationPolicy::default(),
             tray: false,
+            sender_images: false,
         }
     }
 }

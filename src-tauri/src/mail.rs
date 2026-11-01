@@ -217,6 +217,21 @@ pub async fn read_mail_message(
     task(app, move |engine| engine.message(id)).await
 }
 
+/// Checks the setting here as well as in the interface: only the user's choice
+/// may send a sender's domain off the device.
+#[tauri::command]
+pub async fn sender_image(
+    app: AppHandle,
+    webview: tauri::Webview,
+    domain: String,
+) -> Result<Option<String>, MailApiError> {
+    guard(&webview)?;
+    if !app.state::<crate::desktop::DesktopState>().sender_images() {
+        return Ok(None);
+    }
+    task(app, move |engine| engine.sender_image(&domain)).await
+}
+
 #[tauri::command]
 pub async fn save_mail_search(
     app: AppHandle,

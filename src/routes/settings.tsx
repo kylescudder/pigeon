@@ -1,16 +1,16 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 import { BackupSettings } from "../components/backup-settings";
+import {
+  useDesktopSettings,
+  useSaveDesktopSettings,
+} from "../components/desktop-settings";
 import { Icon } from "../components/icon";
 import { useRefreshSend, useSendState } from "../components/send-state";
 import { PageHeading, useWorkspace } from "../components/workspace";
 import {
-  desktopSettings,
+  type DesktopSettings,
   errorMessage,
-  isDesktop,
-  type LoadedDesktopSettings,
-  setDesktopSettings,
   setUndoSendSeconds,
 } from "../lib/native";
 
@@ -154,32 +154,16 @@ function UndoDelay() {
 }
 
 function DesktopSection() {
-  const [loaded, setLoaded] = useState<LoadedDesktopSettings | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!isDesktop()) return;
-    desktopSettings()
-      .then(setLoaded)
-      .catch((reason) => setError(errorMessage(reason)));
-  }, []);
+  const { data: loaded, error: loadError } = useDesktopSettings();
+  const save = useSaveDesktopSettings();
+  const error = loadError ?? save.error;
 
   if (!loaded && !error) return null;
   const settings = loaded?.settings;
-  const locked = !settings || loaded?.managed || saving;
+  const locked = !settings || loaded?.managed || save.isPending;
 
-  async function choose(closeToBackground: boolean) {
-    if (!settings) return;
-    setSaving(true);
-    setError(null);
-    try {
-      setLoaded(await setDesktopSettings({ ...settings, closeToBackground }));
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setSaving(false);
-    }
+  function choose(change: Partial<DesktopSettings>) {
+    if (settings) save.mutate({ ...settings, ...change });
   }
 
   return (
@@ -209,7 +193,40 @@ function DesktopSection() {
               type="button"
               aria-pressed={settings?.closeToBackground === option.value}
               disabled={locked}
-              onClick={() => void choose(option.value)}
+              onClick={() => choose({ closeToBackground: option.value })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="density-section">
+        <div>
+          <h2>Sender images</h2>
+          <p>
+            Show each sender’s initials, or look up their website’s icon. Lookups
+            tell DuckDuckGo which domains email you, never full addresses, and
+            icons stay in your encrypted mail store. An icon does not prove who
+            sent a message.
+          </p>
+        </div>
+        <div
+          className="segmented-control"
+          role="group"
+          aria-label="Sender images"
+        >
+          {(
+            [
+              { value: false, label: "Initials" },
+              { value: true, label: "Website icons" },
+            ] as const
+          ).map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              aria-pressed={settings?.senderImages === option.value}
+              disabled={locked}
+              onClick={() => choose({ senderImages: option.value })}
             >
               {option.label}
             </button>
@@ -227,7 +244,7 @@ function DesktopSection() {
       )}
       {error && (
         <div className="notice notice-error" role="alert">
-          Could not change desktop settings: {error}
+          Could not change desktop settings: {errorMessage(error)}
         </div>
       )}
     </section>

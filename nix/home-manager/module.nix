@@ -111,6 +111,11 @@ in
               default = false;
               description = "Show a status-area icon when a tray host is running. Pigeon works fully without one.";
             };
+            senderImages = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Look up website icons for senders. This tells DuckDuckGo which domains email you; off shows initials.";
+            };
           };
         }
       );

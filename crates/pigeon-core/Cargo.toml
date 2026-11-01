@@ -25,6 +25,8 @@ base64 = "0.22"
 mail-builder = { version = "0.4", default-features = false }
 data-encoding = "2"
 percent-encoding = "2"
+ureq = { version = "3.5", default-features = false, features = ["native-tls-no-default"] }
+psl = "2.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 secret-service.workspace = true

@@ -300,6 +300,7 @@ for (const managed of [false, true]) {
         closeToBackground: true,
         notifications: "senderSubject",
         tray: false,
+        senderImages: false,
       };
       (window as any).__savedSettings = [];
       Object.defineProperty(window, "__TAURI_INTERNALS__", {
@@ -328,6 +329,11 @@ for (const managed of [false, true]) {
     if (managed) {
       await expect(keep).toBeDisabled();
       await expect(quit).toBeDisabled();
+      await expect(
+        page
+          .getByRole("group", { name: "Sender images" })
+          .getByRole("button", { name: "Website icons" }),
+      ).toBeDisabled();
       await expect(page.getByText("Managed by Home Manager.")).toBeVisible();
       return;
     }
@@ -340,7 +346,12 @@ for (const managed of [false, true]) {
     await expect(page.getByRole("alert")).toHaveCount(0);
     await expect(quit).toHaveAttribute("aria-pressed", "true");
     expect(await page.evaluate(() => (window as any).__savedSettings)).toEqual([
-      { closeToBackground: false, notifications: "senderSubject", tray: false },
+      {
+        closeToBackground: false,
+        notifications: "senderSubject",
+        tray: false,
+        senderImages: false,
+      },
     ]);
   });
 }
