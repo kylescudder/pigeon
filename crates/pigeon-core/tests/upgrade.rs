@@ -205,7 +205,7 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
     };
     let saved = engine.save_draft(draft.clone()).unwrap();
     engine.set_undo_send_seconds(0).unwrap();
-    let queued = engine
+    engine
         .send_draft(DraftInput {
             id: Some(saved.id),
             ..draft
@@ -213,15 +213,7 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
         .unwrap();
     assert!(engine.send_state().unwrap().drafts.is_empty());
     while engine.run_next_operation().unwrap() {}
-    let item = engine
-        .send_state()
-        .unwrap()
-        .outbox
-        .into_iter()
-        .find(|item| item.id == queued.id)
-        .unwrap();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }), "{item:?}");
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    assert!(engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(*server.submitted.lock().unwrap(), 1);
     assert_eq!(*server.appended.lock().unwrap(), ["Sent"]);
     assert_eq!(engine.pending_actions().unwrap().len(), 1);

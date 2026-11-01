@@ -231,6 +231,7 @@ This is the first Milestone 3 slice. Replies and forwarding, rich text, attachme
   - A lost connection or missing reply after the marker is **unknown**. Unknown is never retried automatically, including after a restart. The Outbox explains it and offers "It was sent", "Send again…" (with a confirmation) and "Discard".
   - Server reply text is never shown; only reply codes are.
 - **Sent copy.** Once a message is accepted, a separate `sent_copy` operation appends it, marked as read and including Bcc, to the folder IMAP reports as `\Sent`. It retries with backoff and checks the Message-ID first, so a lost reply does not leave two copies. Its failure is shown and can be retried on its own; it never submits the message again.
+- **Leaving the outbox.** A message leaves the Outbox as soon as it is accepted and its Sent copy is saved or not wanted. It stays while the copy is being saved or has failed, so that failure stays visible.
 - **Account removal** is refused while the account has messages in the outbox that are not settled.
 
 ### Verification
