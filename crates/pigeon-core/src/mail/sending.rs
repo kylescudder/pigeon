@@ -20,6 +20,14 @@ const MAX_FIELD: usize = 64 * 1024;
 /// After this many tries a Sent copy stops retrying on its own.
 const SENT_COPY_ATTEMPTS: u32 = 6;
 
+/// A named plain-text signature saved with an account.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedSignature {
+    pub id: String,
+    pub name: String,
+    pub body: String,
+}
+
 /// How an account sends mail. Stored inside the account settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -29,6 +37,8 @@ pub struct SendingSettings {
     pub display_name: String,
     /// Plain text appended below a standard "-- " separator.
     pub signature: String,
+    /// Alternatives; `signature` remains the default for older accounts.
+    pub signatures: Vec<SavedSignature>,
     /// Off for providers that file sent mail themselves.
     pub save_sent_copy: bool,
 }
@@ -39,6 +49,7 @@ impl Default for SendingSettings {
             smtp: None,
             display_name: String::new(),
             signature: String::new(),
+            signatures: Vec::new(),
             save_sent_copy: true,
         }
     }
@@ -54,6 +65,8 @@ pub struct DraftInput {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    /// None uses the account default; Some("") omits the signature.
+    pub signature: Option<String>,
     /// Message-ID of the message this replies to, without angle brackets.
     pub in_reply_to: String,
     /// Message-IDs of the conversation so far, space separated.
@@ -69,6 +82,7 @@ pub struct Draft {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    pub signature: Option<String>,
     pub in_reply_to: String,
     pub references: String,
     pub updated: i64,
@@ -176,6 +190,13 @@ pub(super) fn invalid(message: &str) -> MailError {
 }
 
 fn check_draft(draft: &DraftInput) -> Result<(), MailError> {
+    if draft
+        .signature
+        .as_ref()
+        .is_some_and(|text| text.len() > 10_000)
+    {
+        return Err(invalid("the signature is too long"));
+    }
     if draft.body.len() > MAX_BODY {
         return Err(invalid("the message is too long"));
     }
@@ -260,12 +281,9 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
     let message_id = format!("{}@{domain}", random_id()?);
     let subject = single_line(&draft.subject);
     let mut body = draft.body.clone();
-    if !sending.signature.trim().is_empty() {
-        body = format!(
-            "{}\n\n-- \n{}",
-            body.trim_end(),
-            sending.signature.trim_end()
-        );
+    let signature = draft.signature.as_deref().unwrap_or(&sending.signature);
+    if !signature.trim().is_empty() {
+        body = format!("{}\n\n-- \n{}", body.trim_end(), signature.trim_end());
     }
     let body = crlf(&body);
     let display_name = single_line(&sending.display_name);
@@ -380,6 +398,7 @@ fn draft_from_payload(id: &str, payload: &str, updated: i64) -> Result<Draft, Ma
         bcc: input.bcc,
         subject: input.subject,
         body: input.body,
+        signature: input.signature,
         in_reply_to: input.in_reply_to,
         references: input.references,
         updated,
@@ -744,6 +763,7 @@ impl MailEngine {
             bcc: saved.bcc.clone(),
             subject: saved.subject.clone(),
             body: saved.body.clone(),
+            signature: saved.signature.clone(),
             in_reply_to: saved.in_reply_to.clone(),
             references: saved.references.clone(),
         };
@@ -1032,6 +1052,24 @@ pub(crate) fn validate_sending(settings: &SendingSettings) -> Result<(), MailErr
     }
     if settings.signature.len() > 10_000 {
         return Err(invalid("the signature is too long"));
+    }
+    if settings.signatures.len() > 20 {
+        return Err(invalid("save up to 20 signatures per account"));
+    }
+    let mut ids = std::collections::HashSet::new();
+    for signature in &settings.signatures {
+        if signature.id.is_empty()
+            || signature.id.len() > 64
+            || !ids.insert(&signature.id)
+            || signature.name.trim().is_empty()
+            || signature.name.len() > 100
+            || signature.name.contains(['\r', '\n', '\0'])
+            || signature.body.len() > 10_000
+        {
+            return Err(invalid(
+                "each signature needs a unique ID, a name up to 100 characters and text up to 10000 bytes",
+            ));
+        }
     }
     if let Some(smtp) = &settings.smtp {
         if smtp.host.trim().is_empty()

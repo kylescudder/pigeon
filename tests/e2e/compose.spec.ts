@@ -7,6 +7,8 @@ async function fixture(
   page: Page,
   options: {
     smtp?: boolean;
+    managed?: boolean;
+    failSendingSave?: boolean;
     undo?: number;
     outcome?: "accepted" | "unknown" | "failed" | "held";
     drafts?: Record<string, string>[];
@@ -26,6 +28,7 @@ async function fixture(
               id: "acc-1",
               config: {
                 name: "Personal",
+                managed: options.managed ?? false,
                 address: "mail@example.test",
                 host: "imap.example.test",
                 port: 993,
@@ -192,11 +195,12 @@ async function fixture(
             case "retry_sent_copy":
               return;
             case "update_mail_sending":
-              if (!args.settings.smtp?.host)
-                throw { code: "invalid_config", message: "account settings are invalid: enter an outgoing server hostname and valid port" };
-              state.accounts[0].config.sending = args.settings;
+              if (options.failSendingSave)
+                throw { code: "storage", message: "Could not write to the encrypted store" };
+              const account = state.accounts.find((item: any) => item.id === args.id);
+              account.config.sending = args.settings;
               write(state);
-              return state.accounts[0];
+              return account;
             case "set_undo_send_seconds":
               state.undo = args.seconds;
               write(state);
@@ -231,7 +235,7 @@ test("drafts autosave and survive reload, and undo returns a sent message to the
   await expect(form.getByRole("status")).toHaveText("Draft saved on this device");
   await expect(page).toHaveURL(/draft=draft-/);
   await expect(page.getByRole("link", { name: /Drafts/ })).toContainText("1");
-  await expect(form.getByLabel("Signature")).toContainText("Sent with care");
+  await expect(form.getByLabel("Signature preview")).toContainText("Sent with care");
   await page.screenshot({ path: testInfo.outputPath("composer.png") });
 
   await page.reload();
@@ -303,6 +307,7 @@ test("an account without outgoing mail settings can add them from the composer",
   await expect(dialog.getByLabel("Outgoing (SMTP) server")).toHaveValue(
     "smtp.example.test",
   );
+  await expect(dialog.getByLabel("Signature", { exact: true })).toHaveCount(0);
   await dialog
     .getByRole("button", { name: "Save sending settings" })
     .click();
@@ -493,3 +498,121 @@ for (const outcome of ["failed", "unknown"] as const) {
     await expect(page.getByRole("listbox")).toHaveCount(0);
   });
 }
+
+test("signatures have their own settings page and persist into the composer", async ({ page }, testInfo) => {
+  await fixture(page, {});
+  await page.goto("/settings");
+  await page.getByRole("link", { name: "Manage signatures" }).click();
+  await expect(page).toHaveURL(/settings\/signatures$/);
+  const form = page.getByRole("form", { name: "Personal" });
+  await expect(form.getByLabel("Signature", { exact: true })).toHaveValue("Sent with care");
+  await form.getByLabel("Signature", { exact: true }).fill("Kind regards,\nTest Person");
+  await form.getByRole("button", { name: "Save signature" }).click();
+  await expect(form.getByRole("status")).toHaveText("Signature saved.");
+  await page.reload();
+  await expect(form.getByLabel("Signature", { exact: true })).toHaveValue("Kind regards,\nTest Person");
+  await page.screenshot({ path: testInfo.outputPath("signatures.png"), fullPage: true });
+  await page.goto("/compose");
+  await expect(page.getByLabel("Signature preview", { exact: true })).toHaveText("-- \nKind regards,\nTest Person");
+  await expect(page.getByLabel("From")).toContainText("Test Person");
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled();
+  await page.goto("/settings/signatures");
+  await form.getByLabel("Signature", { exact: true }).fill("");
+  await form.getByRole("button", { name: "Save signature" }).click();
+  await expect(form.getByRole("status")).toHaveText("Signature saved.");
+  await page.reload();
+  await expect(form.getByLabel("Signature", { exact: true })).toHaveValue("");
+  await page.goto("/compose");
+  await expect(page.getByRole("heading", { name: "New message", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Signature preview", { exact: true })).toHaveCount(0);
+});
+
+test("a signature can be saved before outgoing mail is configured", async ({ page }) => {
+  await fixture(page, { smtp: false });
+  await page.goto("/settings/signatures");
+  await page.getByLabel("Signature", { exact: true }).fill("Thanks!");
+  await page.getByRole("button", { name: "Save signature" }).click();
+  await expect(page.getByRole("status")).toContainText("Signature saved.");
+  await page.reload();
+  await expect(page.getByLabel("Signature", { exact: true })).toHaveValue("Thanks!");
+  await page.goto("/compose");
+  await page.getByRole("button", { name: "Add outgoing mail" }).click();
+  const dialog = page.getByRole("dialog", { name: "Manage account" });
+  await dialog.getByRole("button", { name: "Save sending settings" }).click();
+  await expect(dialog.getByRole("status")).toContainText("Sending settings saved");
+  await dialog.getByRole("link", { name: "Signatures settings" }).click();
+  await expect(page).toHaveURL(/settings\/signatures$/);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Signature", exact: true })).toHaveValue("Thanks!");
+});
+
+test("signature save failures keep the edit without claiming it was saved", async ({ page }) => {
+  await fixture(page, { failSendingSave: true });
+  await page.goto("/settings/signatures");
+  await page.getByLabel("Signature", { exact: true }).fill("Unsaved edit");
+  await page.getByRole("button", { name: "Save signature" }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not save signature");
+  await expect(page.getByLabel("Signature", { exact: true })).toHaveValue("Unsaved edit");
+  await expect(page.getByText("Signature saved.", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel("Signature", { exact: true })).toHaveValue("Sent with care");
+});
+
+test("managed account signatures are read-only", async ({ page }) => {
+  await fixture(page, { managed: true });
+  await page.goto("/settings/signatures");
+  await expect(page.getByLabel("Signature", { exact: true })).toHaveValue("Sent with care");
+  await expect(page.getByLabel("Signature", { exact: true })).toBeDisabled();
+  await expect(page.getByText("Managed by Home Manager.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save signature" })).toHaveCount(0);
+});
+
+
+test("multiple signatures can be named, saved, selected per draft and removed", async ({ page }, testInfo) => {
+  await fixture(page, {});
+  await page.goto("/settings");
+  await expect(page.getByRole("link", { name: "Manage signatures" })).toBeVisible();
+  await page.getByRole("link", { name: "Manage signatures" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("01-settings-navigation.png"), fullPage: true });
+  await page.getByRole("link", { name: "Manage signatures" }).click();
+  const form = page.getByRole("form", { name: "Personal" });
+  await form.getByRole("button", { name: "Add signature" }).click();
+  await form.getByLabel("Signature name", { exact: true }).fill("Work");
+  await form.getByLabel("Signature", { exact: true }).fill("Test Person | Example Team");
+  await form.getByLabel("Default signature", { exact: true }).selectOption({ label: "Work" });
+  await form.getByRole("button", { name: "Save signature", exact: true }).click();
+  await expect(form.getByRole("status")).toHaveText("Signature saved.");
+  await page.reload();
+  await expect(form.getByLabel("Saved signature")).toContainText("Work");
+  await expect(form.getByLabel("Default signature").locator("option:checked")).toHaveText("Work");
+  await form.getByLabel("Saved signature").selectOption({ label: "Work" });
+  await expect(form.getByLabel("Signature", { exact: true })).toHaveValue("Test Person | Example Team");
+  await page.screenshot({ path: testInfo.outputPath("02-multiple-signatures.png"), fullPage: true });
+  await page.goto("/compose");
+  await expect(page.getByLabel("Signature preview")).toContainText("Test Person | Example Team");
+  await page.getByRole("combobox", { name: "Signature", exact: true }).selectOption({ label: "Work" });
+  await page.getByLabel("Message", { exact: true }).fill("Hello,\n\nHere is the update we discussed.");
+  await expect(page.getByRole("status")).toContainText("Draft saved on this device");
+  await expect(page.getByRole("combobox", { name: "Signature", exact: true }).locator("option:checked")).toHaveText("Work");
+  await expect(page.getByLabel("Signature preview")).toContainText("Test Person | Example Team");
+  await page.getByLabel("Signature preview").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("03-composer-signature-applied.png"), fullPage: true });
+  await page.getByRole("combobox", { name: "Signature", exact: true }).selectOption({ label: "Default" });
+  await page.getByLabel("Subject", { exact: true }).fill("Signature choice");
+  await expect(page.getByRole("status")).toContainText("Draft saved on this device");
+  await page.reload();
+  await expect(page.getByLabel("Signature preview")).toContainText("Sent with care");
+  await page.getByRole("combobox", { name: "Signature", exact: true }).selectOption({ label: "No signature" });
+  await expect(page.getByRole("status")).toContainText("Draft saved on this device");
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "Signature", exact: true })).toHaveValue("none");
+  await expect(page.getByLabel("Signature preview")).toHaveCount(0);
+  await page.goto("/settings/signatures");
+  await form.getByLabel("Saved signature").selectOption({ label: "Work" });
+  await form.getByRole("button", { name: "Remove signature" }).click();
+  await form.getByRole("button", { name: "Save signature", exact: true }).click();
+  await expect(form.getByRole("status")).toHaveText("Signature saved.");
+  await page.reload();
+  await expect(form.getByLabel("Saved signature").getByRole("option", { name: "Work", exact: true })).toHaveCount(0);
+  await expect(form.getByLabel("Default signature")).toHaveValue("");
+});

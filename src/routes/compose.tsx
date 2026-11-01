@@ -1,3 +1,4 @@
+import { savedSignatures } from "../lib/signatures";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
@@ -89,6 +90,7 @@ function Composer({
     bcc: initial?.bcc ?? "",
     subject: initial?.subject ?? "",
     body: initial?.body ?? "",
+    signature: initial?.signature ?? null,
     // Kept as they are so a reply stays threaded through every autosave.
     in_reply_to: initial?.in_reply_to ?? "",
     references: initial?.references ?? "",
@@ -192,8 +194,15 @@ function Composer({
   const update = (patch: Partial<DraftInput>) => {
     setForm((current) => ({ ...current, ...patch }));
     setDirty(true);
+    setSaveState("idle");
   };
   const account = accounts.find((candidate) => candidate.id === form.account_id);
+  const signatures = savedSignatures(account?.config.sending);
+  const signature = form.signature ?? account?.config.sending?.signature ?? "";
+  const selectedSignature = signatures.find((item) => item.body === form.signature);
+  const signatureChoice = form.signature == null ? "default"
+    : form.signature === "" ? "none"
+    : selectedSignature ? `saved:${selectedSignature.id}` : "custom";
   const canSend = !!account?.config.sending?.smtp;
   const busy = submit.isPending || discard.isPending;
 
@@ -251,7 +260,7 @@ function Composer({
             <select
               id={`${id}-from`}
               value={form.account_id ?? ""}
-              onChange={(event) => update({ account_id: event.target.value })}
+              onChange={(event) => update({ account_id: event.target.value, signature: null })}
             >
               {accounts.map((candidate) => (
                 <option key={candidate.id} value={candidate.id}>
@@ -321,9 +330,21 @@ function Composer({
             onChange={(event) => update({ body: event.target.value })}
             placeholder="Write your message"
           />
-          {account?.config.sending?.signature && (
-            <pre className="composer-signature" aria-label="Signature">
-              {`-- \n${account.config.sending.signature}`}
+          <div className="composer-row">
+            <label htmlFor={`${id}-signature`}>Signature</label>
+            <select id={`${id}-signature`} value={signatureChoice} onChange={(event) => {
+              const value = event.target.value;
+              update({ signature: value === "default" ? null : value === "none" ? "" : signatures.find((item) => `saved:${item.id}` === value)?.body ?? "" });
+            }}>
+              <option value="default">Account default</option>
+              <option value="none">No signature</option>
+              {signatures.map((item) => <option key={item.id} value={`saved:${item.id}`}>{item.name}</option>)}
+              {form.signature && !signatures.some((item) => item.body === form.signature) && <option value="custom">Saved with this draft</option>}
+            </select>
+          </div>
+          {signature.trim() && (
+            <pre className="composer-signature" aria-label="Signature preview">
+              {`-- \n${signature}`}
             </pre>
           )}
         </fieldset>

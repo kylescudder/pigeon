@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import {
@@ -186,6 +187,7 @@ export function ManageAccount({
                   account={account}
                   open={focusSending || !account.config.sending?.smtp}
                   disabled={pending}
+                  onOpenSignatures={onDismiss}
                 />
               )}
               {!managed && (
@@ -223,15 +225,17 @@ export function ManageAccount({
   );
 }
 
-/** Outgoing server, display name, signature and Sent-copy preference. */
+/** Outgoing server, display name and Sent-copy preference. */
 function SendingForm({
   account,
   open,
   disabled,
+  onOpenSignatures,
 }: {
   account: MailAccount;
   open: boolean;
   disabled: boolean;
+  onOpenSignatures: () => void;
 }) {
   const id = useId();
   const mail = useMail();
@@ -247,13 +251,13 @@ function SendingForm({
     current?.smtp?.username ?? account.config.username,
   );
   const [displayName, setDisplayName] = useState(current?.display_name ?? "");
-  const [signature, setSignature] = useState(current?.signature ?? "");
   const [saveSentCopy, setSaveSentCopy] = useState(
     current?.save_sent_copy ?? true,
   );
   const save = useMutation({
     mutationFn: () =>
       updateMailSending(account.id, {
+        ...current,
         smtp: host.trim()
           ? {
               host: host.trim(),
@@ -263,7 +267,7 @@ function SendingForm({
             }
           : null,
         display_name: displayName.trim(),
-        signature,
+        signature: current?.signature ?? "",
         save_sent_copy: saveSentCopy,
       }),
     onSuccess: mail.refresh,
@@ -288,16 +292,12 @@ function SendingForm({
               maxLength={200}
             />
           </label>
-          <label htmlFor={`${id}-signature`}>
-            Signature
-            <textarea
-              id={`${id}-signature`}
-              value={signature}
-              onChange={(event) => setSignature(event.target.value)}
-              rows={3}
-              maxLength={10000}
-            />
-          </label>
+          <p className="field-help">
+            Edit your signature in{" "}
+            <Link to="/settings/signatures" onClick={onOpenSignatures}>
+              Signatures settings
+            </Link>.
+          </p>
           <label htmlFor={`${id}-host`}>
             Outgoing (SMTP) server
             <input
