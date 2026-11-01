@@ -678,15 +678,15 @@ impl MailEngine {
                 .map_err(storage_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(storage_error)?;
-            let day_ago = operations::now_ms() - 24 * 60 * 60 * 1000;
             let mut outbox = Vec::new();
             for (id, account_id, subject, recipients, created, submit, copy, accepted) in rows {
                 let submit = operations::get(conn, &submit)?;
                 let copy = copy.map(|copy| operations::get(conn, &copy)).transpose()?;
                 let send = send_status(&submit, accepted);
                 let sent_copy = sent_copy_status(copy.as_ref());
-                // Finished sends drop out of the outbox after a day.
-                if matches!(send, SendStatus::Accepted { at } if at < day_ago)
+                // A finished send leaves the outbox; only a Sent copy still
+                // on its way or needing a retry keeps it here.
+                if matches!(send, SendStatus::Accepted { .. })
                     && matches!(sent_copy, SentCopyStatus::Saved | SentCopyStatus::NotRequested)
                 {
                     continue;
@@ -769,7 +769,7 @@ impl MailEngine {
         };
         let built = build(&account, &input, operations::now_ms() / 1000)?;
         let outbox_id = random_id()?;
-        self.with_store(|store| {
+        let item = self.with_store(|store| {
             let tx = store
                 .connection()
                 .unchecked_transaction()
@@ -785,6 +785,7 @@ impl MailEngine {
                 .map_err(|_| MailError::Storage("could not queue the message".into()))?;
             let envelope = serde_json::to_string(&(&built.envelope.from, &built.envelope.recipients))
                 .map_err(|_| MailError::Storage("could not queue the message".into()))?;
+            let created = operations::now_ms();
             tx.execute(
                 "INSERT INTO outbox(id,account,draft,envelope,message,sent_copy,message_id,subject,recipients,submit_op,created)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -799,25 +800,27 @@ impl MailEngine {
                     built.subject,
                     built.recipients,
                     op.id,
-                    operations::now_ms()
+                    created
                 ],
             )
             .map_err(storage_error)?;
             tx.execute("DELETE FROM drafts WHERE id=?1", [&saved.id])
                 .map_err(storage_error)?;
             tx.commit().map_err(storage_error)?;
-            Ok(())
+            // Built here, not read back: with no undo delay the message may
+            // be sent and out of the outbox before it could be read.
+            Ok(OutboxItem {
+                id: outbox_id,
+                account_id,
+                subject: built.subject,
+                recipients: built.recipients,
+                created,
+                send: send_status(&op, None),
+                sent_copy: sent_copy_status(None),
+            })
         })?;
         self.wake_operations();
-        self.outbox_item(&outbox_id)
-    }
-
-    fn outbox_item(&self, id: &str) -> Result<OutboxItem, MailError> {
-        self.send_state()?
-            .outbox
-            .into_iter()
-            .find(|item| item.id == id)
-            .ok_or(MailError::NotFound)
+        Ok(item)
     }
 
     /// Undo before sending starts, or edit a message that failed. Puts it

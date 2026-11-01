@@ -171,7 +171,7 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
         let conn = store.connection();
         assert_eq!(version(conn), pigeon_core::store::SCHEMA_VERSION as i64);
         conn.execute_batch(
-            "DROP TABLE sender_images; DROP TABLE recipient_history; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE store_meta; ALTER TABLE messages DROP COLUMN reply_to; ALTER TABLE messages DROP COLUMN reply_refs; ALTER TABLE messages DROP COLUMN to_list; ALTER TABLE messages DROP COLUMN cc_list; PRAGMA user_version = 8;",
+            "DROP TABLE sender_images; DROP TABLE folder_changes; DROP TABLE recipient_history; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE store_meta; ALTER TABLE messages DROP COLUMN reply_to; ALTER TABLE messages DROP COLUMN reply_refs; ALTER TABLE messages DROP COLUMN to_list; ALTER TABLE messages DROP COLUMN cc_list; PRAGMA user_version = 8;",
         )
         .unwrap();
         conn.execute(
@@ -205,7 +205,7 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
     };
     let saved = engine.save_draft(draft.clone()).unwrap();
     engine.set_undo_send_seconds(0).unwrap();
-    let queued = engine
+    engine
         .send_draft(DraftInput {
             id: Some(saved.id),
             ..draft
@@ -213,15 +213,7 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
         .unwrap();
     assert!(engine.send_state().unwrap().drafts.is_empty());
     while engine.run_next_operation().unwrap() {}
-    let item = engine
-        .send_state()
-        .unwrap()
-        .outbox
-        .into_iter()
-        .find(|item| item.id == queued.id)
-        .unwrap();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }), "{item:?}");
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    assert!(engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(*server.submitted.lock().unwrap(), 1);
     assert_eq!(*server.appended.lock().unwrap(), ["Sent"]);
     assert_eq!(engine.pending_actions().unwrap().len(), 1);

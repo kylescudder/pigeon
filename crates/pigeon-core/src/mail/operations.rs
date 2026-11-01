@@ -229,6 +229,9 @@ fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Operation> {
 /// Inserts a new operation using the caller's connection, so callers can
 /// queue work in the same transaction as their own rows.
 pub(crate) fn insert(conn: &Connection, new: &NewOperation) -> Result<Operation, MailError> {
+    if let Some(account) = &new.account {
+        super::folders::ensure_ready(conn, account)?;
+    }
     if new.kind.is_empty() || new.kind.len() > 64 {
         return Err(MailError::InvalidConfig("invalid operation kind".into()));
     }
@@ -517,6 +520,7 @@ impl MailEngine {
                 "UPDATE operations SET state='running',attempts=attempts+1,updated=?1
                  WHERE id=(SELECT o.id FROM operations o
                    WHERE o.state='pending' AND o.not_before<=?1 AND o.kind IN ({placeholders})
+                   AND NOT EXISTS (SELECT 1 FROM folder_changes f WHERE f.account=o.account)
                    AND (o.depends_on IS NULL OR EXISTS (SELECT 1 FROM operations p WHERE p.id=o.depends_on AND p.state='done'))
                    ORDER BY o.not_before,o.rowid LIMIT 1)
                  RETURNING {COLUMNS}"

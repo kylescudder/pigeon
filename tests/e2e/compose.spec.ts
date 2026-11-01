@@ -100,6 +100,10 @@ async function fixture(
             item.send.state === "accepted" ? { state: "saved" } : { state: "not_requested" };
         }
       }
+      // The engine stops listing a send once it needs nothing more.
+      state.outbox = state.outbox.filter(
+        (item: any) => !(item.send.state === "accepted" && item.sent_copy.state === "saved"),
+      );
     };
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       value: {
@@ -290,7 +294,7 @@ test("an unknown outcome is explained and only resent after confirmation", async
   await expect(item).toContainText("can’t tell whether this was sent");
 
   await item.getByRole("button", { name: "It was sent" }).click();
-  await expect(item).toContainText("Saved to Sent");
+  await expect(item).toHaveCount(0);
 });
 
 test("an account without outgoing mail settings can add them from the composer", async ({
@@ -443,7 +447,7 @@ test("restored outbox work stays paused until an explicit reviewed decision", as
   await expect(item).toContainText("Paused until you review it");
   await page.screenshot({ path: testInfo.outputPath("restored-outbox-held.png") });
   await item.getByRole("button", { name: "It was sent" }).click();
-  await expect(item).toContainText("Saved to Sent");
+  await expect(item).toHaveCount(0);
 });
 
 
@@ -456,7 +460,7 @@ test("confirmed recipients are suggested by name and email across reloads and co
   await page.getByLabel("Cc", { exact: true }).fill("Alex <alex@example.test>");
   await page.getByLabel("Bcc", { exact: true }).fill("archive@example.test");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.getByRole("listitem")).toContainText("Saved to Sent");
+  await expect(page.getByText("Nothing waiting to send.")).toBeVisible();
   await page.getByRole("link", { name: "New message", exact: true }).click();
   await page.reload();
   await to.fill("SCUD");

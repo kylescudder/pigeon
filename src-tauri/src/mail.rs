@@ -595,3 +595,14 @@ async fn choose_file(app: &AppHandle, save: bool) -> Result<Option<PathBuf>, Mai
         })
         .transpose()
 }
+
+#[tauri::command]
+pub async fn change_mail_folder(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+    change: pigeon_core::mail::FolderChange,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.change_folder(&id, change)).await
+}

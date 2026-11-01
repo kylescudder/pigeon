@@ -312,7 +312,6 @@ function Status({ item, now }: { item: OutboxItem; now: number }) {
         <p className="outgoing-status status-sent">
           <Icon name="checkCircle" size={13} />
           Sent {new Date(send.at).toLocaleTimeString()}
-          {copy.state === "saved" && " · Saved to Sent"}
           {copy.state === "saving" && " · Saving to Sent…"}
           {copy.state === "waiting" &&
             (copy.error

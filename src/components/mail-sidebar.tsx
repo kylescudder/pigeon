@@ -7,6 +7,7 @@ import {
   type FolderNode,
 } from "../lib/folder-tree";
 import type { MailFolder } from "../lib/native";
+import { ManageFolders } from "./manage-folders";
 import { Icon, type IconName } from "./icon";
 import { useMail } from "./mail-provider";
 
@@ -80,12 +81,21 @@ export function MailSidebar() {
                 ) : null}
               </Link>
               {accountId === account.id && (
-                <div className="sidebar-folders" role="tree">
-                  <FolderTree
-                    accountId={account.id}
-                    folders={folders}
-                    selected={folderId}
-                  />
+                <ManageFolders
+                  account={account}
+                  folders={folders}
+                  viewing={folderId}
+                />
+              )}
+              {accountId === account.id && (
+                <div className="sidebar-folders">
+                  <div role="tree">
+                    <FolderTree
+                      accountId={account.id}
+                      folders={folders}
+                      selected={folderId}
+                    />
+                  </div>
                 </div>
               )}
             </div>

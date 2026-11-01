@@ -38,7 +38,7 @@ Use **Manage account** on its overview card to verify a replacement password or 
 
 `MailEngine` is the service interface. It owns credentials, connection lifecycle, folder snapshots, cursors, transactions, index maintenance, saved searches, cancellation, and recovery. Tauri exposes narrowly scoped typed commands; the frontend has no SQL or IMAP access. `MailConnector`/`MailSession` are the external-server boundary used for deterministic recovery tests. Production uses verified native TLS and the IMAP adapter.
 
-Network operations run outside the encrypted-store mutex and off the interface thread. A sync snapshots each folder's UIDVALIDITY, UIDs, and flags using EXAMINE. It fetches only missing headers and text MIME sections using PEEK, committing/indexing batches of 100. Sync never sends STORE, MOVE, EXPUNGE, or message deletion commands; only the action queue writes, as described below. External seen/deleted changes are reflected after a successful snapshot. Folder renames are handled as a removed folder plus a new folder, so they require a re-download.
+Network operations run outside the encrypted-store mutex and off the interface thread. A sync snapshots each folder's UIDVALIDITY, UIDs, and flags using EXAMINE. It fetches only missing headers and text MIME sections using PEEK, committing/indexing batches of 100. Sync never sends STORE, MOVE, EXPUNGE, or message deletion commands; only the action queue writes, as described below. External seen/deleted changes are reflected after a successful snapshot. Folder renames made by other clients are handled as a removed folder plus a new folder, so they require a re-download; renames made in Pigeon keep the cache ([folder management](folder-management.md)).
 
 Remote deletions are pruned only after the full folder snapshot is fetched successfully. If UIDVALIDITY changes, the old epoch stays readable until its replacement completes; partially received replacement batches survive restart. Ordinary sync still scans UID/flag metadata; CONDSTORE/QRESYNC/IDLE are not implemented. Concurrent changes that invalidate a snapshot surface as a retryable sync error rather than guessed message identity.
 
@@ -183,7 +183,7 @@ A new kind needs a handler with a stable `kind()` name and a JSON payload. Queue
 
 Select messages with their checkboxes (Ctrl/Cmd-click toggles a row, Shift-click selects a range, and the list header selects the page), then use **Mark read**, **Mark unread**, **Archive**, **Delete**, **Move to…** or **Delete permanently**. The reader toolbar offers the same for the open message, and opening an unread message marks it read. Shortcuts in the message list: `E` archives, `Delete` or `#` moves to Trash, `Shift+Delete` deletes permanently, `Shift+I` and `Shift+U` mark read and unread, and `X` selects the open message.
 
-**Delete** moves mail to the account's Trash folder (special-use `\Trash`, or one named Trash or Deleted Items). If an account has no Trash, Delete is disabled and only **Delete permanently** is offered; Pigeon never creates server folders. Mail already in Trash is deleted permanently. Permanent deletion always asks for confirmation. Archive uses the account's `\Archive` folder (or one named Archive); `\All` is also treated as an archive, so Gmail-style labels are not yet modelled. Moves between accounts are not supported.
+**Delete** moves mail to the account's Trash folder (special-use `\Trash`, or one named Trash or Deleted Items). If an account has no Trash, Delete is disabled and only **Delete permanently** is offered; Pigeon never creates a Trash folder on its own. Mail already in Trash is deleted permanently. Permanent deletion always asks for confirmation. Archive uses the account's `\Archive` folder (or one named Archive); `\All` is also treated as an archive, so Gmail-style labels are not yet modelled. Moves between accounts are not supported.
 
 ### Durable action queue
 
@@ -231,6 +231,7 @@ This is the first Milestone 3 slice. Replies and forwarding, rich text, attachme
   - A lost connection or missing reply after the marker is **unknown**. Unknown is never retried automatically, including after a restart. The Outbox explains it and offers "It was sent", "Send again…" (with a confirmation) and "Discard".
   - Server reply text is never shown; only reply codes are.
 - **Sent copy.** Once a message is accepted, a separate `sent_copy` operation appends it, marked as read and including Bcc, to the folder IMAP reports as `\Sent`. It retries with backoff and checks the Message-ID first, so a lost reply does not leave two copies. Its failure is shown and can be retried on its own; it never submits the message again.
+- **Leaving the outbox.** A message leaves the Outbox as soon as it is accepted and its Sent copy is saved or not wanted. It stays while the copy is being saved or has failed, so that failure stays visible.
 - **Account removal** is refused while the account has messages in the outbox that are not settled.
 
 ### Verification

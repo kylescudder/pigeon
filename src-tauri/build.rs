@@ -13,6 +13,7 @@ fn main() {
             "mail_state",
             "add_mail_account",
             "sync_mail_account",
+            "change_mail_folder",
             "cancel_mail_sync",
             "search_mail",
             "cancel_mail_search",

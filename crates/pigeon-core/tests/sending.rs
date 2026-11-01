@@ -213,6 +213,10 @@ impl Fixture {
         assert_eq!(state.outbox.len(), 1);
         state.outbox[0].clone()
     }
+    fn assert_outbox_empty(&self) {
+        let outbox = self.engine.send_state().unwrap().outbox;
+        assert!(outbox.is_empty(), "{outbox:?}");
+    }
 }
 
 #[test]
@@ -220,6 +224,11 @@ fn sending_submits_once_then_saves_a_sent_copy_with_bcc() {
     let f = fixture();
     let queued = f.engine.send_draft(f.draft()).unwrap();
     assert!(matches!(queued.send, SendStatus::Queued { .. }));
+    assert_eq!(queued.sent_copy, SentCopyStatus::NotRequested);
+    assert_eq!(
+        queued.recipients,
+        "Alice, bob@pigeon.test, carol@pigeon.test"
+    );
     assert!(f.engine.send_state().unwrap().drafts.is_empty());
     f.drain();
 
@@ -248,10 +257,20 @@ fn sending_submits_once_then_saves_a_sent_copy_with_bcc() {
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].0, "Sent Items");
     assert!(appended[0].1.contains("dave@pigeon.test"));
-    let item = f.item();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }));
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
-    assert_eq!(item.recipients, "Alice, bob@pigeon.test, carol@pigeon.test");
+    f.assert_outbox_empty();
+}
+
+#[test]
+fn a_send_without_a_sent_copy_leaves_the_outbox_once_accepted() {
+    let f = fixture();
+    let mut settings = sending();
+    settings.save_sent_copy = false;
+    f.engine.update_sending(&f.account, settings).unwrap();
+    f.engine.send_draft(f.draft()).unwrap();
+    f.drain();
+    assert_eq!(f.smtp.submissions(), 1);
+    assert!(f.imap.appended.lock().unwrap().is_empty());
+    f.assert_outbox_empty();
 }
 
 #[test]
@@ -291,7 +310,8 @@ fn a_failed_sent_copy_never_submits_again() {
 
     f.engine.retry_sent_copy(&queued.id).unwrap();
     f.drain();
-    assert_eq!(f.item().sent_copy, SentCopyStatus::Saved);
+    assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
+    f.assert_outbox_empty();
     assert_eq!(f.smtp.submissions(), 1);
 }
 
@@ -330,9 +350,8 @@ fn an_unknown_outcome_waits_for_a_decision() {
         .resolve_send(&queued.id, SendDecision::MarkSent)
         .unwrap();
     f.drain();
-    let item = f.item();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }));
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
+    f.assert_outbox_empty();
     assert_eq!(f.smtp.submissions(), 1);
 }
 
@@ -347,7 +366,7 @@ fn send_again_after_unknown_is_explicit() {
         .unwrap();
     f.drain();
     assert_eq!(f.smtp.submissions(), 2);
-    assert!(matches!(f.item().send, SendStatus::Accepted { .. }));
+    f.assert_outbox_empty();
 }
 
 #[test]
@@ -489,10 +508,13 @@ fn an_account_with_unsent_mail_cannot_be_removed() {
 #[test]
 fn sent_items_can_be_dismissed_without_resending() {
     let f = fixture();
+    *f.imap.sent_folder.lock().unwrap() = false;
+    f.engine.sync_account(&f.account).unwrap();
     let queued = f.engine.send_draft(f.draft()).unwrap();
     f.drain();
+    assert!(matches!(f.item().sent_copy, SentCopyStatus::Failed { .. }));
     f.engine.dismiss_outbox(&queued.id).unwrap();
-    assert!(f.engine.send_state().unwrap().outbox.is_empty());
+    f.assert_outbox_empty();
     f.drain();
     assert_eq!(f.smtp.submissions(), 1);
 }
@@ -501,7 +523,7 @@ fn sent_items_can_be_dismissed_without_resending() {
 fn a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy() {
     let f = fixture();
     *f.smtp.lock_on_accept.lock().unwrap() = Some(f.secrets.clone());
-    let queued = f.engine.send_draft(f.draft()).unwrap();
+    f.engine.send_draft(f.draft()).unwrap();
     assert!(matches!(
         f.engine.run_next_operation(),
         Err(MailError::Locked)
@@ -511,16 +533,7 @@ fn a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy() {
 
     f.engine.unlock().unwrap();
     f.drain();
-    let item = f
-        .engine
-        .send_state()
-        .unwrap()
-        .outbox
-        .into_iter()
-        .find(|item| item.id == queued.id)
-        .unwrap();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }), "{item:?}");
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    f.assert_outbox_empty();
     assert_eq!(f.smtp.submissions(), 1);
     assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
 }
@@ -600,7 +613,7 @@ fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
         panic!("store should open");
     };
     store.connection().execute_batch(
-        "DROP TABLE sender_images; DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; PRAGMA user_version=11;",
+        "DROP TABLE sender_images; DROP TABLE folder_changes; DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; PRAGMA user_version=11;",
     ).unwrap();
     drop(store);
     let reopened = MailEngine::with_transports(

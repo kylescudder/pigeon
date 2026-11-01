@@ -219,7 +219,18 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE recipient_history (
         email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT, last_sent INTEGER NOT NULL
     );",
-    // 13: website icons by domain (mail/sender_images.rs). `data` is empty for
+    // 13: folder changes awaiting confirmation from the server (mail/folders.rs).
+    "CREATE TABLE folder_changes (account TEXT PRIMARY KEY REFERENCES mail_accounts(id) ON DELETE CASCADE, source TEXT, target TEXT);",
+    // 14: only indexed text needs the search index. Every flag change and
+    // folder rename used to rewrite the message's entry for nothing.
+    "DROP TRIGGER messages_au;
+    CREATE TRIGGER messages_au AFTER UPDATE OF sender, recipients, subject, body_text ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, sender, recipients, subject, body_text)
+        VALUES ('delete', old.id, old.sender, old.recipients, old.subject, old.body_text);
+        INSERT INTO messages_fts(rowid, sender, recipients, subject, body_text)
+        VALUES (new.id, new.sender, new.recipients, new.subject, new.body_text);
+    END;",
+    // 15: website icons by domain (mail/sender_images.rs). `data` is empty for
     // a domain known to have none, so it is not asked about again for a while.
     "CREATE TABLE sender_images (
         domain TEXT PRIMARY KEY, data BLOB, checked INTEGER NOT NULL
