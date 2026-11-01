@@ -2,6 +2,7 @@ import { savedSignatures } from "../lib/signatures";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
+import { RecipientInput } from "../components/recipient-input";
 import { Icon } from "../components/icon";
 import { MailGate, useMail } from "../components/mail-provider";
 import { ManageAccount } from "../components/manage-account";
@@ -71,6 +72,7 @@ function Composer({
   initial: Draft | undefined;
   onCreated: (id: string) => void;
 }) {
+  const recipients = useSendState().data?.recipients ?? [];
   const id = useId();
   const mail = useMail();
   const navigate = useNavigate();
@@ -272,12 +274,11 @@ function Composer({
           </div>
           <div className="composer-row">
             <label htmlFor={`${id}-to`}>To</label>
-            <input
+            <RecipientInput
               id={`${id}-to`}
               value={form.to}
-              onChange={(event) => update({ to: event.target.value })}
-              autoCapitalize="none"
-              spellCheck={false}
+              onChange={(value) => update({ to: value })}
+              recipients={recipients}
               autoFocus={!initial}
               placeholder="name@example.com, …"
             />
@@ -295,22 +296,20 @@ function Composer({
             <>
               <div className="composer-row">
                 <label htmlFor={`${id}-cc`}>Cc</label>
-                <input
+                <RecipientInput
                   id={`${id}-cc`}
                   value={form.cc}
-                  onChange={(event) => update({ cc: event.target.value })}
-                  autoCapitalize="none"
-                  spellCheck={false}
+                  onChange={(value) => update({ cc: value })}
+                  recipients={recipients}
                 />
               </div>
               <div className="composer-row">
                 <label htmlFor={`${id}-bcc`}>Bcc</label>
-                <input
+                <RecipientInput
                   id={`${id}-bcc`}
                   value={form.bcc}
-                  onChange={(event) => update({ bcc: event.target.value })}
-                  autoCapitalize="none"
-                  spellCheck={false}
+                  onChange={(value) => update({ bcc: value })}
+                  recipients={recipients}
                 />
               </div>
             </>

@@ -169,9 +169,9 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
             panic!("store should open");
         };
         let conn = store.connection();
-        assert_eq!(version(conn), 11);
+        assert_eq!(version(conn), pigeon_core::store::SCHEMA_VERSION as i64);
         conn.execute_batch(
-            "DROP TABLE outbox; DROP TABLE drafts; DROP TABLE store_meta; ALTER TABLE messages DROP COLUMN reply_to; ALTER TABLE messages DROP COLUMN reply_refs; ALTER TABLE messages DROP COLUMN to_list; ALTER TABLE messages DROP COLUMN cc_list; PRAGMA user_version = 8;",
+            "DROP TABLE recipient_history; DROP TABLE outbox; DROP TABLE drafts; DROP TABLE store_meta; ALTER TABLE messages DROP COLUMN reply_to; ALTER TABLE messages DROP COLUMN reply_refs; ALTER TABLE messages DROP COLUMN to_list; ALTER TABLE messages DROP COLUMN cc_list; PRAGMA user_version = 8;",
         )
         .unwrap();
         conn.execute(
@@ -234,7 +234,10 @@ fn schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail() {
     let UnlockOutcome::Opened { store, .. } = open_store(secrets.as_ref(), &path) else {
         panic!("store should open");
     };
-    assert_eq!(version(store.connection()), 11);
+    assert_eq!(
+        version(store.connection()),
+        pigeon_core::store::SCHEMA_VERSION as i64
+    );
 }
 
 #[test]

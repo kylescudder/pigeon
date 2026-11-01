@@ -280,7 +280,9 @@ export type OutboxItem = {
   send: SendStatus;
   sent_copy: SentCopyStatus;
 };
+export type SavedRecipient = { email: string; name: string | null };
 export type SendState = {
+  recipients: SavedRecipient[];
   drafts: Draft[];
   outbox: OutboxItem[];
   undo_send_seconds: number;

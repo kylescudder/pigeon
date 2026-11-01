@@ -32,8 +32,8 @@ pub mod smtp;
 pub mod source;
 pub use actions::{ActionCounts, ActionKind, PendingAction};
 pub use sending::{
-    Draft, DraftInput, OutboxItem, SavedSignature, SendDecision, SendState, SendStatus, SendingSettings,
-    SentCopyStatus,
+    Draft, DraftInput, OutboxItem, SavedRecipient, SavedSignature, SendDecision, SendState,
+    SendStatus, SendingSettings, SentCopyStatus,
 };
 static NEXT_ACCESS: AtomicU64 = AtomicU64::new(0);
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);

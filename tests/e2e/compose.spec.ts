@@ -64,6 +64,7 @@ async function fixture(
             ...draft,
           })),
           outbox: [],
+          recipients: [],
           undo: options.undo ?? 10,
           next: 1,
         }),
@@ -82,6 +83,19 @@ async function fixture(
               : options.outcome === "failed"
                 ? { state: "failed", error: "the server refused bob@example.test (550 5.1.1)" }
                 : { state: "accepted", at: Date.now() };
+          if (item.send.state === "accepted") {
+            for (const field of [item.draft.to, item.draft.cc, item.draft.bcc]) {
+              // Fixture mailbox parsing covers the test data; Rust owns RFC parsing.
+              for (const entry of field.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)) {
+                const match = entry.trim().match(/^(?:(.*?)\s*<)?([^<>\s]+@[^<>\s]+)>?$/);
+                if (!match) continue;
+                const email = match[2]!;
+                const previous = state.recipients.find((r: any) => r.email.toLowerCase() === email.toLowerCase());
+                if (previous) previous.name = match[1]?.replace(/^"|"$/g, "") || previous.name;
+                else state.recipients.push({ email, name: match[1]?.replace(/^"|"$/g, "") || null });
+              }
+            }
+          }
           item.sent_copy =
             item.send.state === "accepted" ? { state: "saved" } : { state: "not_requested" };
         }
@@ -103,7 +117,7 @@ async function fixture(
             case "send_state":
               settle(state);
               write(state);
-              return { drafts: state.drafts, outbox: state.outbox, undo_send_seconds: state.undo };
+              return { drafts: state.drafts, outbox: state.outbox, undo_send_seconds: state.undo, recipients: state.recipients };
             case "save_draft": {
               const draft = draftOf(args.draft);
               write(state);
@@ -151,7 +165,20 @@ async function fixture(
               const item = state.outbox.find((i: any) => i.id === args.id);
               if (args.decision === "mark_sent") {
                 item.send = { state: "accepted", at: Date.now() };
-                item.sent_copy = { state: "saved" };
+                if (item.send.state === "accepted") {
+            for (const field of [item.draft.to, item.draft.cc, item.draft.bcc]) {
+              // Fixture mailbox parsing covers the test data; Rust owns RFC parsing.
+              for (const entry of field.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)) {
+                const match = entry.trim().match(/^(?:(.*?)\s*<)?([^<>\s]+@[^<>\s]+)>?$/);
+                if (!match) continue;
+                const email = match[2]!;
+                const previous = state.recipients.find((r: any) => r.email.toLowerCase() === email.toLowerCase());
+                if (previous) previous.name = match[1]?.replace(/^"|"$/g, "") || previous.name;
+                else state.recipients.push({ email, name: match[1]?.replace(/^"|"$/g, "") || null });
+              }
+            }
+          }
+          item.sent_copy = { state: "saved" };
               } else if (args.decision === "discard") {
                 state.outbox = state.outbox.filter((i: any) => i.id !== args.id);
               } else {
@@ -419,6 +446,58 @@ test("restored outbox work stays paused until an explicit reviewed decision", as
   await expect(item).toContainText("Saved to Sent");
 });
 
+
+test("confirmed recipients are suggested by name and email across reloads and copy fields", async ({ page }, testInfo) => {
+  await fixture(page, { undo: 0 });
+  await page.goto("/compose");
+  const to = page.getByLabel("To", { exact: true });
+  await to.fill('"Scudder, Sam" <sam@example.test>');
+  await page.getByRole("button", { name: "Cc/Bcc" }).click();
+  await page.getByLabel("Cc", { exact: true }).fill("Alex <alex@example.test>");
+  await page.getByLabel("Bcc", { exact: true }).fill("archive@example.test");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("listitem")).toContainText("Saved to Sent");
+  await page.getByRole("link", { name: "New message", exact: true }).click();
+  await page.reload();
+  await to.fill("SCUD");
+  const sam = page.getByRole("option", { name: "Scudder, Sam sam@example.test" });
+  await expect(sam).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("recipient-suggestions.png") });
+  await to.press("Enter");
+  await expect(to).toHaveValue('"Scudder, Sam" <sam@example.test>, ');
+  await expect(page).toHaveURL(/compose/);
+  await to.fill('"Scudder, Sam" <sam@example.test>, SAM@');
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await to.fill('"Scudder, Sam" <sam@example.test>, alex@');
+  await page.getByRole("option", { name: "Alex alex@example.test" }).click();
+  await expect(to).toHaveValue('"Scudder, Sam" <sam@example.test>, "Alex" <alex@example.test>, ');
+  await page.getByRole("button", { name: "Cc/Bcc" }).click();
+  const cc = page.getByLabel("Cc", { exact: true });
+  await cc.fill("scud");
+  await cc.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await expect(cc).toHaveValue("scud");
+  await cc.fill("sam@");
+  await cc.press("ArrowDown");
+  await cc.press("Tab");
+  await expect(cc).toHaveValue('"Scudder, Sam" <sam@example.test>, ');
+  const bcc = page.getByLabel("Bcc", { exact: true });
+  await bcc.fill("ARCHIVE@");
+  await page.getByRole("option", { name: "archive@example.test" }).click();
+  await expect(bcc).toHaveValue("archive@example.test, ");
+  await to.fill("nobody-matches");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+});
+
+for (const outcome of ["failed", "unknown"] as const) {
+  test(`${outcome} sends do not teach recipient suggestions`, async ({ page }) => {
+    await fixture(page, { undo: 0, outcome });
+    await writeAndSend(page);
+    await page.getByRole("link", { name: "New message", exact: true }).click();
+    await page.getByLabel("To", { exact: true }).fill("bob");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+  });
+}
 
 test("signatures have their own settings page and persist into the composer", async ({ page }, testInfo) => {
   await fixture(page, {});

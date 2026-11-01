@@ -9,8 +9,8 @@ use pigeon_core::mail::source::{
     FolderSnapshot, MailConnector, MailSession, RemoteFolder, RemoteMessage,
 };
 use pigeon_core::mail::{
-    AccountConfig, DraftInput, MailEngine, MailError, SavedSignature, SendDecision, SendStatus, SendingSettings,
-    SentCopyStatus, TransportSecurity,
+    AccountConfig, DraftInput, MailEngine, MailError, SavedSignature, SendDecision, SendStatus,
+    SendingSettings, SentCopyStatus, TransportSecurity,
 };
 use pigeon_core::secrets::{KeyringState, MemoryStore, Secret};
 use zeroize::Zeroizing;
@@ -374,6 +374,7 @@ fn offline_sends_wait_and_permanent_refusals_go_back_to_drafts() {
         panic!("expected failed");
     };
     assert!(error.contains("550 5.1.1"));
+    assert!(f.engine.send_state().unwrap().recipients.is_empty());
     let draft = f.engine.return_to_drafts(&queued.id).unwrap();
     assert_eq!(draft.to, f.draft().to);
     assert_eq!(f.smtp.submissions(), 2);
@@ -524,6 +525,104 @@ fn a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy() {
     assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
 }
 
+#[test]
+fn confirmed_recipients_keep_names_and_survive_dismissal_and_restart() {
+    let f = fixture();
+    let queued = f.engine.send_draft(f.draft()).unwrap();
+    assert!(f.engine.send_state().unwrap().recipients.is_empty());
+    f.drain();
+    let recipients = f.engine.send_state().unwrap().recipients;
+    assert_eq!(recipients.len(), 4);
+    let alice = recipients
+        .iter()
+        .find(|r| r.email == "alice@pigeon.test")
+        .unwrap();
+    assert_eq!(alice.name.as_deref(), Some("Alice"));
+    assert!(recipients.iter().any(|r| r.email == "dave@pigeon.test"));
+    f.engine.dismiss_outbox(&queued.id).unwrap();
+    f.engine
+        .send_draft(DraftInput {
+            to: "ALICE@pigeon.test".into(),
+            cc: String::new(),
+            bcc: String::new(),
+            ..f.draft()
+        })
+        .unwrap();
+    f.drain();
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let recipients = reopened.send_state().unwrap().recipients;
+    assert_eq!(recipients.len(), 4);
+    assert_eq!(
+        recipients
+            .iter()
+            .find(|r| r.email.eq_ignore_ascii_case("alice@pigeon.test"))
+            .unwrap()
+            .name
+            .as_deref(),
+        Some("Alice")
+    );
+}
+
+#[test]
+fn unsent_and_unknown_recipients_are_not_remembered() {
+    let f = fixture();
+    f.engine.set_undo_send_seconds(30).unwrap();
+    let queued = f.engine.send_draft(f.draft()).unwrap();
+    f.engine.return_to_drafts(&queued.id).unwrap();
+    assert!(f.engine.send_state().unwrap().recipients.is_empty());
+    f.engine.set_undo_send_seconds(0).unwrap();
+    f.smtp.then(Submission::Unknown("lost confirmation".into()));
+    let queued = f.engine.send_draft(f.draft()).unwrap();
+    f.drain();
+    assert!(f.engine.send_state().unwrap().recipients.is_empty());
+    f.engine
+        .resolve_send(&queued.id, SendDecision::MarkSent)
+        .unwrap();
+    assert_eq!(f.engine.send_state().unwrap().recipients.len(), 4);
+}
+
+#[test]
+fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
+    let f = fixture();
+    let queued = f.engine.send_draft(f.draft()).unwrap();
+    f.drain();
+    f.engine.dismiss_outbox(&queued.id).unwrap();
+    let path = f._dir.path().join("mail.db");
+    // Reconstruct the previous schema with its existing confirmed outbox row.
+    let pigeon_core::unlock::UnlockOutcome::Opened { store, .. } =
+        pigeon_core::unlock::open_store(f.secrets.as_ref(), &path)
+    else {
+        panic!("store should open");
+    };
+    store.connection().execute_batch(
+        "DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; PRAGMA user_version=11;",
+    ).unwrap();
+    drop(store);
+    let reopened = MailEngine::with_transports(
+        path,
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let state = reopened.send_state().unwrap();
+    assert!(state.outbox.is_empty());
+    assert_eq!(state.recipients.len(), 4);
+    assert_eq!(
+        state
+            .recipients
+            .iter()
+            .find(|r| r.email == "alice@pigeon.test")
+            .unwrap()
+            .name
+            .as_deref(),
+        Some("Alice")
+    );
+}
 
 #[test]
 fn named_signatures_survive_restart_and_draft_choice_controls_sent_text() {
@@ -543,9 +642,17 @@ fn named_signatures_survive_restart_and_draft_choice_controls_sent_text() {
     );
     let accounts = reopened.accounts().unwrap();
     assert_eq!(accounts[0].config.sending.signatures[0].name, "Work");
-    assert_eq!(accounts[0].config.sending.signatures[0].body, "Work sign-off");
+    assert_eq!(
+        accounts[0].config.sending.signatures[0].body,
+        "Work sign-off"
+    );
     for signature in [Some("Work sign-off".to_owned()), Some(String::new())] {
-        reopened.send_draft(DraftInput { signature, ..f.draft() }).unwrap();
+        reopened
+            .send_draft(DraftInput {
+                signature,
+                ..f.draft()
+            })
+            .unwrap();
         while reopened.run_next_operation().unwrap() {}
     }
     let sent = f.smtp.sent.lock().unwrap();

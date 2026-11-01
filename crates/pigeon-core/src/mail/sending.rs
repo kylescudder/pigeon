@@ -138,10 +138,17 @@ pub struct OutboxItem {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SavedRecipient {
+    pub email: String,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct SendState {
     pub drafts: Vec<Draft>,
     pub outbox: Vec<OutboxItem>,
     pub undo_send_seconds: u32,
+    pub recipients: Vec<SavedRecipient>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -183,7 +190,11 @@ pub(super) fn invalid(message: &str) -> MailError {
 }
 
 fn check_draft(draft: &DraftInput) -> Result<(), MailError> {
-    if draft.signature.as_ref().is_some_and(|text| text.len() > 10_000) {
+    if draft
+        .signature
+        .as_ref()
+        .is_some_and(|text| text.len() > 10_000)
+    {
         return Err(invalid("the signature is too long"));
     }
     if draft.body.len() > MAX_BODY {
@@ -272,11 +283,7 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
     let mut body = draft.body.clone();
     let signature = draft.signature.as_deref().unwrap_or(&sending.signature);
     if !signature.trim().is_empty() {
-        body = format!(
-            "{}\n\n-- \n{}",
-            body.trim_end(),
-            signature.trim_end()
-        );
+        body = format!("{}\n\n-- \n{}", body.trim_end(), signature.trim_end());
     }
     let body = crlf(&body);
     let display_name = single_line(&sending.display_name);
@@ -462,10 +469,79 @@ fn undo_seconds(conn: &Connection) -> Result<u32, MailError> {
         .min(MAX_UNDO_SECONDS))
 }
 
+// Keep the latest known name when a subsequent send uses only the address.
+fn remember_recipients(conn: &Connection, payload: &str, at: i64) -> Result<(), MailError> {
+    let draft: DraftInput = serde_json::from_str(payload)
+        .map_err(|_| MailError::Storage("the queued message could not be read".into()))?;
+    for field in [&draft.to, &draft.cc, &draft.bcc] {
+        for (name, email) in parse_recipients(field, "recipient")? {
+            conn.execute(
+                "INSERT INTO recipient_history(email,name,last_sent) VALUES (?1,?2,?3)
+                 ON CONFLICT(email) DO UPDATE SET
+                 name=CASE WHEN excluded.last_sent >= last_sent THEN coalesce(excluded.name,name) ELSE coalesce(name,excluded.name) END,
+                 last_sent=max(last_sent,excluded.last_sent)",
+                params![email, name, at],
+            ).map_err(storage_error)?;
+        }
+    }
+    Ok(())
+}
+
+fn saved_recipients(conn: &Connection) -> Result<Vec<SavedRecipient>, MailError> {
+    // Import earlier confirmed sends once, including dismissed outbox entries.
+    let imported: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM settings WHERE key='recipient_history_imported')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage_error)?;
+    if !imported {
+        let tx = conn.unchecked_transaction().map_err(storage_error)?;
+        let mut statement = tx
+            .prepare(
+                "SELECT draft,accepted FROM outbox WHERE accepted IS NOT NULL ORDER BY accepted",
+            )
+            .map_err(storage_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(storage_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(storage_error)?;
+        drop(statement);
+        for (payload, at) in rows {
+            remember_recipients(&tx, &payload, at)?;
+        }
+        tx.execute(
+            "INSERT INTO settings(key,value) VALUES ('recipient_history_imported','true')",
+            [],
+        )
+        .map_err(storage_error)?;
+        tx.commit().map_err(storage_error)?;
+    }
+    let mut statement = conn
+        .prepare("SELECT email,name FROM recipient_history ORDER BY last_sent DESC,email")
+        .map_err(storage_error)?;
+    statement
+        .query_map([], |row| {
+            Ok(SavedRecipient {
+                email: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })
+        .map_err(storage_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(storage_error)
+}
+
 /// Marks a message accepted and queues its Sent copy if the account wants
 /// one. Reads the account from `conn`, so it can run inside the transaction
 /// that records the accepted send.
 fn queue_sent_copy(conn: &Connection, outbox: &str, account: &str) -> Result<(), MailError> {
+    let row = load_outbox(conn, outbox)?;
+    remember_recipients(conn, &row.draft, operations::now_ms())?;
     conn.execute(
         "UPDATE outbox SET accepted=coalesce(accepted,?2) WHERE id=?1",
         params![outbox, operations::now_ms()],
@@ -629,6 +705,7 @@ impl MailEngine {
                 drafts,
                 outbox,
                 undo_send_seconds: undo_seconds(conn)?,
+                recipients: saved_recipients(conn)?,
             })
         })
     }
@@ -981,11 +1058,17 @@ pub(crate) fn validate_sending(settings: &SendingSettings) -> Result<(), MailErr
     }
     let mut ids = std::collections::HashSet::new();
     for signature in &settings.signatures {
-        if signature.id.is_empty() || signature.id.len() > 64 || !ids.insert(&signature.id)
-            || signature.name.trim().is_empty() || signature.name.len() > 100
-            || signature.name.contains(['\r', '\n', '\0']) || signature.body.len() > 10_000
+        if signature.id.is_empty()
+            || signature.id.len() > 64
+            || !ids.insert(&signature.id)
+            || signature.name.trim().is_empty()
+            || signature.name.len() > 100
+            || signature.name.contains(['\r', '\n', '\0'])
+            || signature.body.len() > 10_000
         {
-            return Err(invalid("each signature needs a unique ID, a name up to 100 characters and text up to 10000 bytes"));
+            return Err(invalid(
+                "each signature needs a unique ID, a name up to 100 characters and text up to 10000 bytes",
+            ));
         }
     }
     if let Some(smtp) = &settings.smtp {
