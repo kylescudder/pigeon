@@ -19,6 +19,7 @@ serde_json.workspace = true
 zeroize.workspace = true
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 notify-rust = { version = "4", default-features = false, features = ["z"] }
+rodio = { version = "0.23", default-features = false, features = ["playback", "wav"] }
 tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2.7"
 tauri-plugin-single-instance = "2.5"
