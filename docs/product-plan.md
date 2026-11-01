@@ -71,6 +71,7 @@ Tauri remains provisional until Linux rendering, hostile-content isolation, pack
 - Explain the loss model: server mail can be downloaded again; losing the database key and recovery material loses local-only data. Full-disk protection remains complementary. Encryption does not promise confidentiality against malware or root accessing an unlocked session.
 - Display sanitised HTML email inside a proven unprivileged viewer, with scripts disabled, restrictive network behaviour, and no native command access. Provide a plain-text view.
 - Block remote content by default. Offer per-message image loading, optional trusted-sender exceptions, and a global preference. Embedded images can display without fetching an external image resource. Explicit remote loading can still disclose activity to that resource's operator.
+- Sender images are initials by default. Website icons are opt-in and come from one fixed icon service, never the sender's own servers; see [sender images](desktop.md#sender-images).
 - Open links in the user's normal browser. Attachments are never executed automatically; export or external opening creates an explicit boundary outside the encrypted store.
 - Keep credentials, keys, personal mail, and sensitive content out of logs, test evidence, Nix expressions, and the Nix store.
 

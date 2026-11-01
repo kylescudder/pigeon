@@ -18,6 +18,7 @@ fn main() {
             "search_mail",
             "cancel_mail_search",
             "read_mail_message",
+            "sender_image",
             "save_mail_search",
             "delete_mail_search",
             "remove_mail_account",

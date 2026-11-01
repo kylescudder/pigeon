@@ -51,7 +51,7 @@ assert lib.assertMsg (
 runCommand "pigeon-home-manager-check" { nativeBuildInputs = [ jq ]; } ''
   set -eu
   echo "settings.json:"; cat ${settings}
-  jq -e '. == {"closeToBackground": false, "notifications": "count", "tray": false}' ${settings}
+  jq -e '. == {"closeToBackground": false, "notifications": "count", "senderImages": false, "tray": false}' ${settings}
 
   echo "pigeon.service:"; cat ${unit}
   grep -qx 'ExecStart=${lib.getExe package} --background' ${unit}

@@ -5,6 +5,7 @@ import { MailGate, useMail } from "../components/mail-provider";
 import { Modal } from "../components/modal";
 import { Icon } from "../components/icon";
 import { useRefreshSend } from "../components/send-state";
+import { SenderAvatar } from "../components/sender-avatar";
 import {
   handleActionKey,
   MessageActionButtons,
@@ -558,6 +559,7 @@ function Mailbox({
                   }}
                 >
                   <span className="message-dot" />
+                  <SenderAvatar sender={message.sender} />
                   <span className="message-row-content">
                     <span className="message-row-top">
                       <strong>{message.sender || "Unknown sender"}</strong>
@@ -761,9 +763,7 @@ function MessageReader({
       <div className="reader-content">
         <h2>{message.summary.subject || "(No subject)"}</h2>
         <div className="reader-identity">
-          <span className="sender-avatar">
-            {(message.summary.sender || "?").slice(0, 1).toUpperCase()}
-          </span>
+          <SenderAvatar sender={message.summary.sender} />
           <div>
             <strong>{message.summary.sender || "Unknown sender"}</strong>
             <p>To: {message.summary.recipients}</p>

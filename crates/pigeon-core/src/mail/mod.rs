@@ -29,6 +29,7 @@ pub mod operations;
 mod query;
 mod recovery;
 pub mod reply;
+pub mod sender_images;
 mod sending;
 pub mod smtp;
 pub mod source;
@@ -268,6 +269,7 @@ pub struct MailEngine {
     secrets: Arc<dyn SecretStore>,
     connector: Arc<dyn source::MailConnector>,
     smtp: Arc<dyn smtp::SmtpTransport>,
+    icons: Arc<dyn sender_images::IconSource>,
     store: Mutex<Option<Store>>,
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// Serialises backups and restores with one another.
@@ -441,6 +443,7 @@ impl MailEngine {
             secrets,
             connector,
             smtp,
+            icons: Arc::new(sender_images::IconService::default()),
             store: Mutex::new(None),
             syncing: Mutex::new(HashMap::new()),
             recovery: Mutex::new(()),
@@ -451,6 +454,12 @@ impl MailEngine {
             operations_signal: (Mutex::new(false), Condvar::new()),
             arrivals: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// A chosen source of sender icons, in place of the fixed service.
+    pub fn with_icon_source(mut self, icons: Arc<dyn sender_images::IconSource>) -> Self {
+        self.icons = icons;
+        self
     }
 
     pub fn add_account(

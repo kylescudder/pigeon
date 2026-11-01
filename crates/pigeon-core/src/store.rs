@@ -230,6 +230,11 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO messages_fts(rowid, sender, recipients, subject, body_text)
         VALUES (new.id, new.sender, new.recipients, new.subject, new.body_text);
     END;",
+    // 15: website icons by domain (mail/sender_images.rs). `data` is empty for
+    // a domain known to have none, so it is not asked about again for a while.
+    "CREATE TABLE sender_images (
+        domain TEXT PRIMARY KEY, data BLOB, checked INTEGER NOT NULL
+    );",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.

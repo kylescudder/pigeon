@@ -682,6 +682,7 @@ pub fn run() {
             mail::search_mail,
             mail::cancel_mail_search,
             mail::read_mail_message,
+            mail::sender_image,
             mail::save_mail_search,
             mail::delete_mail_search,
             mail::remove_mail_account,

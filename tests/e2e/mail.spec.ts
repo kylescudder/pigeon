@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 // Deliberate native IPC boundary fixture. Real TLS, IMAP, SQLCipher and keyring
 // behaviour are exercised separately by the Rust integration/native suites.
@@ -62,6 +62,26 @@ test.beforeEach(async ({ page }) => {
                   conflict: count(["conflict"]),
                 },
               };
+            }
+            case "desktop_settings":
+              return {
+                settings: {
+                  closeToBackground: true,
+                  notifications: "senderSubject",
+                  tray: false,
+                  senderImages: !!localStorage.getItem("pigeon-test-sender-images"),
+                },
+                managed: false,
+                warning: null,
+              };
+            case "set_desktop_settings":
+              if (args.settings.senderImages) localStorage.setItem("pigeon-test-sender-images", "on");
+              else localStorage.removeItem("pigeon-test-sender-images");
+              return { settings: args.settings, managed: false, warning: null };
+            case "sender_image": {
+              const looked = JSON.parse(localStorage.getItem("pigeon-test-looked-up") ?? "[]");
+              localStorage.setItem("pigeon-test-looked-up", JSON.stringify([...looked, args.domain]));
+              return localStorage.getItem("pigeon-test-sender-image");
             }
             case "change_mail_folder": {
               if (localStorage.getItem("pigeon-test-offline")) throw { code: "connection", message: "The mail server could not be reached. Folder changes require a connection." };
@@ -571,6 +591,101 @@ test("a Home Manager account is read-only apart from its password", async ({ pag
   await expect(dialog.getByLabel("Password or app password", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Remove from this device", exact: true })).toHaveCount(0);
   await expect(dialog.getByText("Sending", { exact: true })).toHaveCount(0);
+});
+
+test.describe("sender avatars", () => {
+  const PIXEL =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const account = {
+    id: "acc-1",
+    config: { name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993, username: "mail@example.test", security: "tls" },
+    status: "idle", error: null, last_synced: 1793008800, sync_folder: null, sync_cached: 2, sync_total: 2,
+  };
+  const seed = (page: Page, state: Record<string, unknown>, storage: Record<string, string> = {}) =>
+    page.addInitScript(
+      ([state, storage]) => {
+        if (localStorage.getItem("pigeon-fixture-state")) return;
+        localStorage.setItem("pigeon-fixture-state", JSON.stringify(state));
+        for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value);
+      },
+      [{ accounts: [account], folders: [], saved_searches: [], ...state }, storage] as const,
+    );
+  const openInbox = async (page: Page) => {
+    await page.goto("/");
+    await page.getByRole("link", { name: "Open Personal inbox", exact: true }).click();
+  };
+  const avatar = (page: Page, subject: string) =>
+    page.locator(".message-row", { hasText: subject }).locator(".sender-avatar");
+  const lookedUp = (page: Page) =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-test-looked-up") ?? "[]"));
+
+  test("show initials and look nothing up until website icons are chosen", async ({ page }) => {
+    await seed(page, {}, { "pigeon-test-sender-image": PIXEL });
+    await openInbox(page);
+    await expect(avatar(page, "Invoice 4471")).toHaveText("A");
+    await expect(avatar(page, "Release planning")).toHaveText("B");
+    await page.getByRole("button", { name: /Invoice 4471/ }).click();
+    await expect(page.locator(".reader-identity .sender-avatar")).toHaveText("A");
+    expect(await lookedUp(page)).toEqual([]);
+
+    await page.goto("/settings");
+    const choice = page.getByRole("group", { name: "Sender images" });
+    await expect(choice.getByRole("button", { name: "Initials" })).toHaveAttribute("aria-pressed", "true");
+    await choice.getByRole("button", { name: "Website icons" }).click();
+    await expect(choice.getByRole("button", { name: "Website icons" })).toHaveAttribute("aria-pressed", "true");
+
+    await openInbox(page);
+    await expect(avatar(page, "Invoice 4471").locator("img")).toHaveAttribute("src", PIXEL);
+    await page.getByRole("button", { name: /Invoice 4471/ }).click();
+    await expect(page.locator(".reader-identity .sender-avatar img")).toHaveAttribute("src", PIXEL);
+    // Both senders share a domain, and only the domain leaves the interface.
+    expect(await lookedUp(page)).toEqual(["example.test"]);
+
+    await page.goto("/settings");
+    await page.getByRole("group", { name: "Sender images" }).getByRole("button", { name: "Initials" }).click();
+    await openInbox(page);
+    await expect(avatar(page, "Invoice 4471")).toHaveText("A");
+    await expect(avatar(page, "Invoice 4471").locator("img")).toHaveCount(0);
+  });
+
+  test("keep initials when a sender has no icon or it cannot be shown", async ({ page }) => {
+    await seed(page, {}, { "pigeon-test-sender-images": "on" });
+    await openInbox(page);
+    await expect(avatar(page, "Invoice 4471")).toHaveText("A");
+    await expect.poll(() => lookedUp(page)).toEqual(["example.test"]);
+    await expect(avatar(page, "Invoice 4471").locator("img")).toHaveCount(0);
+
+    await page.evaluate(() => {
+      localStorage.setItem("pigeon-test-sender-image", "data:image/png;base64,AAAA");
+    });
+    await page.reload();
+    await expect(avatar(page, "Invoice 4471")).toHaveText("A");
+    await expect(avatar(page, "Invoice 4471").locator("img")).toHaveCount(0);
+  });
+
+  test("read names, bare addresses and missing senders", async ({ page }) => {
+    const message = (id: number, sender: string, subject: string) => ({
+      id, account_id: "acc-1", folder: "INBOX", sender, recipients: "mail@example.test", subject,
+      preview: "", date: 1793005200 + id, unread: false, has_attachments: false,
+    });
+    await seed(page, {
+      messages: [
+        message(1, '"Ada Lovelace" <ada@example.test>', "Quoted name"),
+        message(2, "<first.last@example.test>", "Address alone"),
+        message(3, "support@example.test", "Bare address"),
+        message(4, "Émile Zola <emile@example.test>", "Accented name"),
+        message(5, "Newsletter", "No address"),
+        message(6, "", "No sender"),
+      ],
+    });
+    await openInbox(page);
+    await expect(avatar(page, "Quoted name")).toHaveText("AL");
+    await expect(avatar(page, "Address alone")).toHaveText("FL");
+    await expect(avatar(page, "Bare address")).toHaveText("S");
+    await expect(avatar(page, "Accented name")).toHaveText("ÉZ");
+    await expect(avatar(page, "No address")).toHaveText("N");
+    await expect(avatar(page, "No sender")).toHaveText("?");
+  });
 });
 
 test("reply opens the composer with the quoted message and keeps it threaded", async ({ page }) => {

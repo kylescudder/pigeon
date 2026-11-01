@@ -15,15 +15,28 @@ Status: background lifecycle, configurable close behaviour, `--background`, and 
 `$XDG_CONFIG_HOME/pigeon/settings.json` holds only non-secret preferences:
 
 ```json
-{ "closeToBackground": true, "notifications": "senderSubject", "tray": false }
+{ "closeToBackground": true, "notifications": "senderSubject", "tray": false, "senderImages": false }
 ```
 
 - Missing keys use the defaults above, and unknown keys are ignored.
 - An invalid file logs a warning, applies the defaults, and is never overwritten.
 - A symlink (the Home Manager case) or a read-only file is treated as managed. The Settings page shows it read-only and saving is refused.
 - `notifications` is acted on (see Notifications). `tray` is stored and acted on in a later slice.
+- `senderImages` is acted on (see Sender images).
 
 The two IPC commands `desktop_settings` and `set_desktop_settings` are main-window only. The viewer isolation probe also tries both and must be denied.
+
+## Sender images
+
+Every sender shows initials on a colour taken from their address, with no network involved. Settings → *Sender images* → **Website icons** (`senderImages`) also looks up the icon of the sender's website. It is off by default, because of what it reveals.
+
+- **What leaves the device:** the domains of the senders in the message list you are viewing, sent to DuckDuckGo (`icons.duckduckgo.com`) along with your IP address. Addresses, names, subjects and message text are not sent. Nothing is looked up during sync.
+- **What senders learn:** nothing from Pigeon, which never connects to their servers, so a `From` header cannot be used for open tracking or to reach a private address. Subdomains are reduced to the registrable domain (`em.example.co.uk` becomes `example.co.uk`), because a sender can mint one per recipient.
+- **What is skipped:** personal mail providers such as `gmail.com`, whose icon would only name the provider, and names that are not public domains (IP addresses, `localhost`, `.local`, `.test`).
+- **What is kept:** icons stay in the encrypted store for 30 days, and a domain with no icon is asked about again after 7 days. A failed lookup is not remembered, and an expired icon keeps showing until a new one arrives. Backups leave them out. Choosing **Initials** stops lookups at once but keeps icons already stored; they are removed with the store.
+- **What an icon means:** nothing about authenticity. `From` is not verified, so forged mail shows the forged domain's icon.
+
+Icons are at most 256 KiB and must be PNG, JPEG, GIF, WebP or ICO by their contents. Rust fetches them over TLS 1.2 or later, follows no redirects, and hands the interface `data:` URLs, so the main window's content security policy keeps it off the network. `sender_image` is main-window only and returns nothing unless the setting is on.
 
 ## Home Manager module
 

@@ -31,6 +31,8 @@ export type DesktopSettings = {
   closeToBackground: boolean;
   notifications: NotificationPolicy;
   tray: boolean;
+  /** Tells an outside service which domains email the user, so it is opt-in. */
+  senderImages: boolean;
 };
 export type LoadedDesktopSettings = {
   settings: DesktopSettings;
@@ -205,6 +207,9 @@ export async function searchMail(
 }
 export const readMailMessage = (id: number) =>
   invoke<MailMessage>("read_mail_message", { id });
+/** A `data:` URL, or null when the sender's initials should show instead. */
+export const senderImage = (domain: string) =>
+  invoke<string | null>("sender_image", { domain });
 /** Embedded images that could not be downloaded, for example while offline. */
 export type OpenedMessage = { missing_inline: number };
 export const openMailMessage = (id: number) =>

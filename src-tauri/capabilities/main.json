@@ -19,6 +19,7 @@
     "allow-search-mail",
     "allow-cancel-mail-search",
     "allow-read-mail-message",
+    "allow-sender-image",
     "allow-save-mail-search",
     "allow-delete-mail-search",
     "allow-remove-mail-account",

@@ -17,6 +17,7 @@ fn missing_file_uses_defaults_that_keep_running_in_the_background() {
         NotificationPolicy::SenderSubject
     );
     assert!(!loaded.settings.tray);
+    assert!(!loaded.settings.sender_images);
     assert!(!loaded.managed);
     assert_eq!(loaded.warning, None);
 }
@@ -35,6 +36,8 @@ fn partial_file_fills_defaults_and_ignores_unknown_keys() {
     assert!(!loaded.settings.close_to_background);
     assert_eq!(loaded.settings.notifications, NotificationPolicy::Count);
     assert!(!loaded.settings.tray);
+    // Files written before this setting existed must not start lookups.
+    assert!(!loaded.settings.sender_images);
     assert_eq!(loaded.warning, None);
 }
 
@@ -65,12 +68,14 @@ fn save_round_trips_and_creates_the_directory() {
         close_to_background: false,
         notifications: NotificationPolicy::Off,
         tray: true,
+        sender_images: true,
     };
     let saved = desktop::save(&file, &wanted).unwrap();
     assert_eq!(saved.settings, wanted);
     assert_eq!(desktop::load(&file).settings, wanted);
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.contains(r#""closeToBackground": false"#), "{text}");
+    assert!(text.contains(r#""senderImages": true"#), "{text}");
     assert!(!file.with_file_name(".settings.json.tmp").exists());
 }
 
