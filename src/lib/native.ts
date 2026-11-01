@@ -51,10 +51,12 @@ export type SmtpConfig = {
   security: TransportSecurity;
   username: string;
 };
+export type SavedSignature = { id: string; name: string; body: string };
 export type SendingSettings = {
   smtp: SmtpConfig | null;
   display_name: string;
   signature: string;
+  signatures?: SavedSignature[];
   save_sent_copy: boolean;
 };
 export type AccountConfig = {
@@ -241,6 +243,8 @@ export const discardMailAction = (id: number) =>
 // Composing and sending. Drafts and queued messages stay in the encrypted
 // store; outcomes are reported without server reply text.
 export type DraftInput = {
+  /** Null uses the account default; an empty string omits the signature. */
+  signature?: string | null;
   id: string | null;
   account_id: string | null;
   to: string;

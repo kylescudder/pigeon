@@ -9,7 +9,7 @@ use pigeon_core::mail::source::{
     FolderSnapshot, MailConnector, MailSession, RemoteFolder, RemoteMessage,
 };
 use pigeon_core::mail::{
-    AccountConfig, DraftInput, MailEngine, MailError, SendDecision, SendStatus, SendingSettings,
+    AccountConfig, DraftInput, MailEngine, MailError, SavedSignature, SendDecision, SendStatus, SendingSettings,
     SentCopyStatus, TransportSecurity,
 };
 use pigeon_core::secrets::{KeyringState, MemoryStore, Secret};
@@ -148,6 +148,7 @@ fn sending() -> SendingSettings {
         display_name: "Pigeon Tester".into(),
         signature: "Sent from a test".into(),
         save_sent_copy: true,
+        signatures: Vec::new(),
     }
 }
 
@@ -402,6 +403,7 @@ fn drafts_autosave_and_survive_a_restart() {
         .save_draft(DraftInput {
             id: Some(saved.id.clone()),
             body: "Second thoughts".into(),
+            signature: Some("Personal sign-off".into()),
             ..f.draft()
         })
         .unwrap();
@@ -416,6 +418,7 @@ fn drafts_autosave_and_survive_a_restart() {
     let drafts = reopened.send_state().unwrap().drafts;
     assert_eq!(drafts.len(), 1);
     assert_eq!(drafts[0].body, "Second thoughts");
+    assert_eq!(drafts[0].signature.as_deref(), Some("Personal sign-off"));
     reopened.delete_draft(&saved.id).unwrap();
     assert!(reopened.send_state().unwrap().drafts.is_empty());
 }
@@ -519,4 +522,36 @@ fn a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy() {
     assert_eq!(item.sent_copy, SentCopyStatus::Saved);
     assert_eq!(f.smtp.submissions(), 1);
     assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
+}
+
+
+#[test]
+fn named_signatures_survive_restart_and_draft_choice_controls_sent_text() {
+    let f = fixture();
+    let mut settings = sending();
+    settings.signatures = vec![SavedSignature {
+        id: "work".into(),
+        name: "Work".into(),
+        body: "Work sign-off".into(),
+    }];
+    f.engine.update_sending(&f.account, settings).unwrap();
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let accounts = reopened.accounts().unwrap();
+    assert_eq!(accounts[0].config.sending.signatures[0].name, "Work");
+    assert_eq!(accounts[0].config.sending.signatures[0].body, "Work sign-off");
+    for signature in [Some("Work sign-off".to_owned()), Some(String::new())] {
+        reopened.send_draft(DraftInput { signature, ..f.draft() }).unwrap();
+        while reopened.run_next_operation().unwrap() {}
+    }
+    let sent = f.smtp.sent.lock().unwrap();
+    assert_eq!(sent.len(), 2);
+    assert!(sent[0].1.contains("Work sign-off"));
+    assert!(!sent[0].1.contains("Sent from a test"));
+    assert!(!sent[1].1.contains("Work sign-off"));
+    assert!(!sent[1].1.contains("Sent from a test"));
 }

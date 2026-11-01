@@ -117,6 +117,7 @@ export function Workspace({ children }: { children: ReactNode }) {
     {
       "/foundation": "Diagnostics",
       "/settings": "Settings",
+      "/settings/signatures": "Signatures",
       "/mail": "Mail",
       "/pending": "Pending changes",
       "/compose": "New message",

@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { BackupSettings } from "../components/backup-settings";
 import { Icon } from "../components/icon";
@@ -86,6 +86,15 @@ function Settings() {
             </button>
           ))}
         </div>
+      </section>
+      <section className="settings-section density-section">
+        <div>
+          <h2>Signatures</h2>
+          <p>Choose the text added to messages from each account.</p>
+        </div>
+        <Link to="/settings/signatures" className="button button-secondary">
+          Manage signatures
+        </Link>
       </section>
       <BackupSettings />
       <UndoDelay />
