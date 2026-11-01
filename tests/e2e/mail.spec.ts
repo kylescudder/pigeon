@@ -63,6 +63,20 @@ test.beforeEach(async ({ page }) => {
                 },
               };
             }
+            case "change_mail_folder": {
+              if (localStorage.getItem("pigeon-test-offline")) throw { code: "connection", message: "The mail server could not be reached. Folder changes require a connection." };
+              const change = args.change;
+              if (change.type === "create") {
+                if (state.folders.some((f: any) => f.account_id === args.id && f.name === change.name)) throw { code: "invalid_action", message: "That folder already exists or is reserved." };
+                state.folders.push({ id: `folder-${change.name}`, account_id: args.id, name: change.name, kind: "other", delimiter: "/", total: 0, cached: 0, unread: 0 });
+              } else {
+                const folder = state.folders.find((f: any) => f.id === change.folder_id && f.account_id === args.id);
+                if (!folder) throw { code: "not_found", message: "Folder no longer available." };
+                if (change.type === "rename") folder.name = change.name;
+                else if (change.confirmed) state.folders = state.folders.filter((f: any) => f.id !== folder.id);
+              }
+              write(state); return;
+            }
             case "queue_mail_actions": {
               const kind = args.kind.type;
               const targets = args.ids.map(messageById).filter(Boolean);
@@ -597,4 +611,82 @@ test("reply opens the composer with the quoted message and keeps it threaded", a
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).drafts[0]);
   expect(saved.in_reply_to).toBe("orig-2@example.test");
   expect(saved.references).toBe("orig-2@example.test");
+});
+
+test("server folders validate, create, rename, confirm deletion and retain state on connection failure", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("pigeon-fixture-state")) localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{ id: "acc-1", config: { name: "Personal", address: "mail@example.test" }, status: "idle", error: null }],
+      folders: [{ id: "inbox", account_id: "acc-1", name: "INBOX", kind: "inbox", delimiter: "/", total: 0, cached: 0, unread: 0 }], saved_searches: [],
+    }));
+  });
+  await page.goto("/mail?account=acc-1");
+  const open = async () => {
+    const button = page.getByRole("button", { name: "Manage folders", exact: true });
+    await button.click();
+  };
+  await open();
+  const dialog = page.getByRole("dialog", { name: "Manage server folders" });
+  for (const invalid of [" Bad ", "a*b", "a%b", "a&b"]) {
+    await dialog.getByLabel("Folder path", { exact: true }).fill(invalid);
+    await expect(dialog.getByRole("button", { name: "Create folder", exact: true })).toBeDisabled();
+  }
+  await dialog.getByLabel("Folder path", { exact: true }).fill("Projects");
+  await dialog.getByRole("button", { name: "Create folder", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.goto("/mail?account=acc-1&folder=folder-Projects");
+  await open();
+  await dialog.getByLabel("Action", { exact: true }).selectOption("rename");
+  await dialog.getByLabel("Folder", { exact: true }).selectOption({ label: "Projects" });
+  await dialog.getByLabel("New folder path", { exact: true }).fill("Research");
+  await dialog.getByRole("button", { name: "Rename folder", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  // The opaque route identifier survives, so the open folder stays selected.
+  await expect(page).toHaveURL(/folder=folder-Projects/);
+  await expect(page.getByLabel("Filter by folder")).toHaveValue("folder-Projects");
+  await expect(page.getByLabel("Filter by folder").locator("option:checked")).toHaveText(/Research/);
+  await open();
+  await dialog.getByLabel("Action", { exact: true }).selectOption("delete");
+  await dialog.getByLabel("Folder", { exact: true }).selectOption({ label: "INBOX" });
+  await expect(dialog.getByRole("alert")).toContainText("Special folders");
+  await dialog.getByLabel("Folder", { exact: true }).selectOption({ label: "Research" });
+  const remove = dialog.getByRole("button", { name: "Delete permanently", exact: true });
+  await expect(remove).toBeDisabled();
+  await page.screenshot({ path: testInfo.outputPath("folder-delete-confirmation.png") });
+  await dialog.getByLabel("I confirm permanent deletion").check();
+  await page.evaluate(() => localStorage.setItem("pigeon-test-offline", "1"));
+  await remove.click();
+  await expect(dialog.getByRole("alert").last()).toContainText("could not be reached");
+  await expect(dialog.getByLabel("Folder", { exact: true }).locator("option", { hasText: "Research" })).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath("folder-offline-error.png") });
+  await page.evaluate(() => localStorage.removeItem("pigeon-test-offline"));
+  await remove.click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page).toHaveURL(/view=inbox/);
+  await page.reload(); await open();
+  await dialog.getByLabel("Action", { exact: true }).selectOption("delete");
+  await expect(dialog.getByLabel("Folder", { exact: true }).locator("option", { hasText: "Research" })).toHaveCount(0);
+});
+
+test("deleting another folder leaves the open one selected", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{ id: "acc-1", config: { name: "Personal", address: "mail@example.test" }, status: "idle", error: null }],
+      folders: [
+        { id: "inbox", account_id: "acc-1", name: "INBOX", kind: "inbox", delimiter: "/", total: 0, cached: 0, unread: 0 },
+        { id: "folder-keep", account_id: "acc-1", name: "Keep", kind: "other", delimiter: "/", total: 0, cached: 0, unread: 0 },
+        { id: "folder-old", account_id: "acc-1", name: "Old", kind: "other", delimiter: "/", total: 0, cached: 0, unread: 0 },
+      ], saved_searches: [],
+    }));
+  });
+  await page.goto("/mail?account=acc-1&folder=folder-keep");
+  await page.getByRole("button", { name: "Manage folders", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Manage server folders" });
+  await dialog.getByLabel("Action", { exact: true }).selectOption("delete");
+  await dialog.getByLabel("Folder", { exact: true }).selectOption({ label: "Old" });
+  await dialog.getByLabel("I confirm permanent deletion").check();
+  await dialog.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page).toHaveURL(/folder=folder-keep/);
+  await expect(page.getByLabel("Filter by folder").locator("option", { hasText: /^Old$/ })).toHaveCount(0);
 });

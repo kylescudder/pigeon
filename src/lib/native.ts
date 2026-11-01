@@ -310,3 +310,10 @@ export const updateMailSending = (id: string, settings: SendingSettings) =>
   invoke<MailAccount>("update_mail_sending", { id, settings });
 export const setUndoSendSeconds = (seconds: number) =>
   invoke<void>("set_undo_send_seconds", { seconds });
+
+export type FolderChange =
+  | { type: "create"; name: string }
+  | { type: "rename"; folder_id: string; name: string }
+  | { type: "delete"; folder_id: string; confirmed: boolean };
+export const changeMailFolder = (id: string, change: FolderChange) =>
+  invoke<void>("change_mail_folder", { id, change });

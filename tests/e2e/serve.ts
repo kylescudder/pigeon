@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dir, "../../dist/client");
 Bun.serve({
   hostname: "127.0.0.1",
-  port: 1422,
+  port: Number(process.env.PIGEON_E2E_PORT ?? 1422),
   async fetch(request) {
     const pathname = decodeURIComponent(new URL(request.url).pathname);
     const path = resolve(root, `.${pathname}`);

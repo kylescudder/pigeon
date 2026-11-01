@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
+const port = Number(process.env.PIGEON_E2E_PORT ?? 1422);
 const artifacts = process.env.PIGEON_E2E_ARTIFACTS ?? "evidence/playwright";
 
 export default defineConfig({
@@ -13,7 +14,7 @@ export default defineConfig({
     ["html", { outputFolder: `${artifacts}/report`, open: "never" }],
   ],
   use: {
-    baseURL: "http://127.0.0.1:1422",
+    baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -45,7 +46,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "bun run build && bun tests/e2e/serve.ts",
-    url: "http://127.0.0.1:1422",
+    url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
   },
 });

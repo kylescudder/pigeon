@@ -613,7 +613,7 @@ fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
         panic!("store should open");
     };
     store.connection().execute_batch(
-        "DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; PRAGMA user_version=11;",
+        "DROP TABLE folder_changes; DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; PRAGMA user_version=11;",
     ).unwrap();
     drop(store);
     let reopened = MailEngine::with_transports(
