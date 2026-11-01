@@ -20,7 +20,9 @@ mod actions;
 mod attachments;
 mod cache;
 mod diagnostics;
+mod folders;
 mod imap;
+pub use folders::FolderChange;
 pub mod managed;
 mod net;
 pub mod operations;
@@ -350,25 +352,9 @@ impl MailEngine {
         let _lease = self.lease(id)?;
         self.refuse_if_managed(id)?;
         self.check_no_unsent(id)?;
-        // Mail goes first, in batches: each row also rewrites the search index,
-        // so one transaction would hold the store and freeze every other view.
-        // The account and password outlast it, so any failure can be retried.
-        loop {
-            let removed = self.with_store(|store| {
-                store
-                    .connection()
-                    .execute(
-                        "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE account=?1 LIMIT ?2)",
-                        rusqlite::params![id, REMOVAL_BATCH],
-                    )
-                    .map_err(storage_error)
-            })?;
-            if removed == 0 {
-                break;
-            }
-            // The store mutex is not fair; give waiting readers a turn.
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        // Mail goes first. The account and password outlast it, so any failure
+        // can be retried.
+        self.remove_mail_in_batches(id, None)?;
         self.forget_session_parts(Some(id));
         self.secrets
             .delete(&password_name(id))
@@ -386,6 +372,34 @@ impl MailEngine {
             Ok(())
         })
     }
+
+    /// Removes an account's cached mail, or one folder's. Each row also
+    /// rewrites the search index, so one transaction would hold the store and
+    /// freeze every other view.
+    fn remove_mail_in_batches(&self, id: &str, folder: Option<&str>) -> Result<(), MailError> {
+        let scope = if folder.is_some() {
+            "account=?1 AND folder=?2"
+        } else {
+            "account=?1"
+        };
+        let delete = format!(
+            "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE {scope} LIMIT ?3)"
+        );
+        loop {
+            let removed = self.with_store(|store| {
+                store
+                    .connection()
+                    .execute(&delete, rusqlite::params![id, folder, REMOVAL_BATCH])
+                    .map_err(storage_error)
+            })?;
+            if removed == 0 {
+                return Ok(());
+            }
+            // The store mutex is not fair; give waiting readers a turn.
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     pub fn new(path: PathBuf, secrets: Arc<dyn SecretStore>) -> Self {
         Self::with_connector(path, secrets, Arc::new(imap::ImapConnector))
     }
@@ -561,6 +575,7 @@ impl MailEngine {
             } else {
                 MailError::Authentication
             })?;
+        self.reconcile_folder_change(id)?;
         // Queued changes go first, so the snapshots below already reflect them.
         self.apply_queue(&account, &password)?;
         let mut session = self.connector.connect(&account.config, &password)?;

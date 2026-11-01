@@ -15,7 +15,20 @@ pub trait MailConnector: Send + Sync {
 }
 
 pub trait MailSession: Send {
+    fn create_folder(&mut self, _name: &str) -> Result<(), MailError> {
+        Err(MailError::Unsupported("creating folders"))
+    }
+    fn rename_folder(&mut self, _from: &str, _to: &str) -> Result<(), MailError> {
+        Err(MailError::Unsupported("renaming folders"))
+    }
+    fn delete_folder(&mut self, _name: &str) -> Result<(), MailError> {
+        Err(MailError::Unsupported("deleting folders"))
+    }
     fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError>;
+    /// Includes unselectable hierarchy containers for safe folder management.
+    fn folder_hierarchy(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
+        self.folders()
+    }
     fn snapshot(&mut self, folder: &str) -> Result<FolderSnapshot, MailError>;
     /// Restore selection on a new connection without trusting old sequence state.
     fn reselect(&mut self, folder: &str, expected_validity: u32) -> Result<(), MailError> {

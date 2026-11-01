@@ -427,6 +427,7 @@ async function attempt(name, cmd, args) {
   await attempt("search mail", "search_mail", { query: { text: "" }, requestId: "probe" });
   await attempt("cancel search", "cancel_mail_search", { requestId: "probe" });
   await attempt("read mail", "read_mail_message", { id: 1 });
+  await attempt("folder management", "change_mail_folder", { id: "probe", change: { type: "create", name: "probe" } });
   await attempt("sync mail", "sync_mail_account", { id: "probe" });
   await attempt("cancel sync", "cancel_mail_sync", { id: "probe" });
   await attempt("unlock mail", "unlock_mail");
@@ -676,6 +677,7 @@ pub fn run() {
             mail::mail_state,
             mail::add_mail_account,
             mail::sync_mail_account,
+            mail::change_mail_folder,
             mail::cancel_mail_sync,
             mail::search_mail,
             mail::cancel_mail_search,

@@ -101,6 +101,8 @@ pub const TABLES: &[(&str, TableRole)] = &[
     ("messages_fts_docsize", TableRole::Redownloaded),
     ("messages_fts_idx", TableRole::Redownloaded),
     ("store_meta", TableRole::Device),
+    // Reconciliation intent belongs to this cache; restore redownloads folders.
+    ("folder_changes", TableRole::Device),
 ];
 
 /// Set in `store_meta` by every restore. Outgoing work created before this

@@ -648,3 +648,73 @@ fn real_queue_survives_restart_and_never_resurrects_remotely_deleted_mail() {
     admin.delete("Offline").unwrap();
     drop(admin);
 }
+
+#[test]
+#[ignore = "requires the disposable Dovecot TLS server"]
+fn real_folder_management_is_visible_to_a_second_client() {
+    use pigeon_core::mail::FolderChange;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = MailEngine::new(
+        dir.path().join("folders.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+    );
+    let a = engine
+        .add_account(config(), Zeroizing::new(b"pigeon-test-only".to_vec()))
+        .unwrap();
+    engine.sync_account(&a.id).unwrap();
+    engine
+        .change_folder(
+            &a.id,
+            FolderChange::Create {
+                name: "PigeonFolderTest".into(),
+            },
+        )
+        .unwrap();
+    let folder = engine
+        .folders()
+        .unwrap()
+        .into_iter()
+        .find(|f| f.name == "PigeonFolderTest")
+        .unwrap();
+    engine
+        .change_folder(
+            &a.id,
+            FolderChange::Rename {
+                folder_id: folder.id.clone(),
+                name: "PigeonRenamedTest".into(),
+            },
+        )
+        .unwrap();
+    let second = MailEngine::new(
+        dir.path().join("second.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+    );
+    let b = second
+        .add_account(config(), Zeroizing::new(b"pigeon-test-only".to_vec()))
+        .unwrap();
+    second.sync_account(&b.id).unwrap();
+    assert!(
+        second
+            .folders()
+            .unwrap()
+            .iter()
+            .any(|f| f.name == "PigeonRenamedTest")
+    );
+    engine
+        .change_folder(
+            &a.id,
+            FolderChange::Delete {
+                folder_id: folder.id,
+                confirmed: true,
+            },
+        )
+        .unwrap();
+    second.sync_account(&b.id).unwrap();
+    assert!(
+        !second
+            .folders()
+            .unwrap()
+            .iter()
+            .any(|f| f.name == "PigeonRenamedTest" || f.name == "PigeonFolderTest")
+    );
+}
