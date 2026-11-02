@@ -176,6 +176,75 @@ a.outgoing-item-main:hover strong { text-decoration: underline; }
 .recipient-suggestions li[aria-selected="true"], .recipient-suggestions li:hover { background: var(--hover); }
 .recipient-suggestions strong { font-weight: 500; }
 .recipient-suggestions span { color: var(--muted); font-size: 11px; }
+
+/* Conversation reading: compact message envelopes around the open body. */
+.conversation-count { flex-shrink: 0; margin-left: auto; display: inline-grid; place-items: center; min-width: 21px; height: 19px; padding: 0 5px; border-radius: 5px; background: var(--control); color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.conversation-reader { min-height: 100%; background: var(--surface-subtle); }
+.thread-heading { display: flex; gap: 12px; align-items: center; padding: 23px 28px 19px; border-bottom: 1px solid var(--line); }
+.thread-heading > div { min-width: 0; }
+.thread-heading h2 { margin: 0; font-size: 21px; font-weight: 600; line-height: 1.35; letter-spacing: -.45px; overflow-wrap: anywhere; }
+.thread-heading p { margin: 7px 0 0; color: var(--faint); font-size: 11px; }
+.thread-back { flex-shrink: 0; color: var(--muted); }
+.thread-timeline { padding: 12px 20px 30px; }
+.thread-message { border-bottom: 1px solid var(--line); }
+.thread-message:last-child { border-bottom: 0; }
+.thread-message-heading { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; padding: 15px 8px; color: var(--text); background: transparent; text-align: left; cursor: pointer; border-radius: 5px; }
+.thread-message-heading:hover { background: var(--highlight); }
+.thread-message-heading:focus-visible { outline-offset: -2px; }
+.thread-avatar { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--control); border: 1px solid var(--line-strong); font-size: 11px; color: var(--muted); }
+.thread-person { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.thread-sender { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
+.thread-unread { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.thread-snippet { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--faint); font-size: 11px; font-weight: 400; }
+.thread-stamp { display: grid; flex-shrink: 0; gap: 5px; text-align: right; color: var(--faint); font-size: 10px; }
+.thread-stamp > span { font-size: 9px; }
+.thread-message-heading > svg { color: var(--faint); flex-shrink: 0; }
+.thread-chevron-open { transform: rotate(90deg); }
+.thread-message-active { background: var(--surface-subtle); }
+.thread-message-active .thread-avatar { border-color: var(--accent-line); background: var(--accent-subtle); color: var(--accent); }
+.thread-body { min-width: 0; }
+.thread-message-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 8px 10px 49px; color: var(--faint); font-size: 10px; }
+.thread-message-tools > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.thread-message-tools .button { min-height: 25px; font-size: 10px; padding: 4px 6px; }
+.thread-action-menu { position: relative; margin-left: auto; color: var(--muted); }
+.thread-action-menu > summary { padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; list-style: none; cursor: pointer; background: var(--surface); white-space: nowrap; }
+.thread-action-menu > summary::-webkit-details-marker { display: none; }
+.thread-action-menu > summary::after { content: "⌄"; padding-left: 7px; }
+.thread-action-popover { position: absolute; top: calc(100% + 5px); right: 0; z-index: 4; padding: 5px; width: 190px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--raised); box-shadow: 0 8px 24px #0002; }
+.thread-action-popover .message-actions { display: grid; gap: 2px; }
+.thread-action-popover .button { justify-content: flex-start; width: 100%; padding: 8px 9px; font-size: 11px; }
+.thread-action-popover select { width: 100%; max-width: none; }
+.thread-body .reader-content { padding: 10px 12px 23px 49px; }
+.thread-body .message-text { font-family: inherit; font-size: 13px; line-height: 1.85; max-width: 72ch; }
+.thread-reply { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 26px; }
+.thread-reply .button { min-height: 30px; padding: 6px 12px; font-size: 11px; }
+.thread-reply .button:first-child { background: var(--accent-subtle); border-color: var(--accent-line); color: var(--accent); }
+.thread-cache-note { padding: 8px; margin-bottom: 3px; color: var(--faint); font-size: 10px; line-height: 1.6; }
+.thread-cache-note summary { cursor: pointer; }
+.thread-cache-note p { padding: 7px 0 0 12px; }
+.thread-notice { padding: 10px 8px; font-size: 11px; color: var(--muted); }
+.thread-notice button { background: transparent; color: var(--accent); text-decoration: underline; padding: 4px; }
+.thread-history > summary { padding: 11px 8px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.reader-toolbar { flex-wrap: wrap; }
+@media (max-width: 840px) {
+  .message-selected .mail-filters, .message-selected .mail-search-tips { display: none; }
+  .message-selected .mail-heading { padding-top: 12px; padding-bottom: 12px; }
+  .message-selected .mail-heading h1 { font-size: 17px; }
+  .message-selected .mail-heading p { display: none; }
+  .thread-heading { padding: 17px 17px 15px 12px; gap: 9px; }
+  .thread-heading h2 { font-size: 19px; }
+  .thread-timeline { padding: 6px 12px 22px; }
+  .thread-message-heading { gap: 8px; padding: 13px 3px; }
+  .thread-avatar { width: 26px; height: 26px; }
+  .thread-message-heading > svg { display: none; }
+  .thread-stamp time { font-size: 9px; }
+  .thread-stamp { max-width: 90px; }
+  .thread-body .reader-content { padding: 10px 5px 22px; }
+  .thread-message-tools { padding-left: 3px; padding-right: 3px; }
+  .thread-message-tools > span { display: none; }
+  .thread-action-menu { margin-left: auto; }
+  .thread-body .message-text { font-size: 13px; line-height: 1.8; }
+}
 .remote-images-note p { margin: 0; }
 .remote-images-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .mail-inline-note a { color: var(--accent); text-decoration: underline; }

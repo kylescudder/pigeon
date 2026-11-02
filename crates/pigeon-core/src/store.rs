@@ -244,6 +244,9 @@ const MIGRATIONS: &[&str] = &[
         email TEXT NOT NULL COLLATE NOCASE, host TEXT NOT NULL COLLATE NOCASE,
         added INTEGER NOT NULL, PRIMARY KEY (email, host)
     );",
+    // 18: conversation header facts and resumable backfill of existing rows.
+    "ALTER TABLE messages ADD COLUMN in_reply_to TEXT NOT NULL DEFAULT '';
+    ALTER TABLE messages ADD COLUMN threading_version INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.

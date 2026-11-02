@@ -854,3 +854,322 @@ fn parser_recovery_is_bounded_and_refuses_changed_folder_epochs() {
         }
     }
 }
+
+#[test]
+fn conversations_keep_identical_subjects_separate_without_header_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = MailEngine::with_connector(
+        dir.path().join("mail.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+        Arc::new(TestServer),
+    );
+    let account = engine
+        .add_account(config(), Zeroizing::new(b"test-password".to_vec()))
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    let grouped = engine
+        .search(&SearchQuery {
+            conversations: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(grouped.total, 1);
+    let thread = engine.conversation(grouped.messages[0].id, false).unwrap();
+    assert_eq!(thread.messages.len(), 1);
+}
+
+#[derive(Clone)]
+struct ThreadServer;
+impl MailConnector for ThreadServer {
+    fn connect(&self, _: &AccountConfig, _: &Secret) -> Result<Box<dyn MailSession>, MailError> {
+        Ok(Box::new(ThreadServer))
+    }
+}
+impl MailSession for ThreadServer {
+    fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
+        Ok([("INBOX", "inbox"), ("Sent", "sent"), ("Trash", "trash")]
+            .into_iter()
+            .map(|(name, kind)| RemoteFolder {
+                name: name.into(),
+                kind: kind.into(),
+                delimiter: Some("/".into()),
+            })
+            .collect())
+    }
+    fn snapshot(&mut self, folder: &str) -> Result<FolderSnapshot, MailError> {
+        let uids = match folder {
+            "INBOX" => vec![1, 2, 3, 4, 5, 6, 7],
+            "Sent" => vec![8],
+            _ => vec![9],
+        };
+        Ok(FolderSnapshot {
+            uid_validity: 1,
+            messages: uids
+                .into_iter()
+                .map(|uid| RemoteFlag {
+                    uid,
+                    unread: uid != 8,
+                })
+                .collect(),
+        })
+    }
+    fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError> {
+        Ok(uids
+            .iter()
+            .map(|uid| {
+                let (id, refs, reply) = match uid {
+                    1 => ("<a@EXAMPLE.test>", "<missing@example.test>", ""),
+                    2 => ("<b@example.test>", "", "<missing@example.test>"),
+                    3 => ("", "", ""),
+                    4 => ("garbage", "not a message id", ""),
+                    5 => ("<cycle1@example.test>", "<cycle2@example.test>", ""),
+                    6 => ("<cycle2@example.test>", "<cycle1@example.test>", ""),
+                    7 => ("<a@example.test>", "", ""),
+                    8 => (
+                        "<sent@example.test>",
+                        "<missing@example.test> <a@example.test>",
+                        "<b@example.test>",
+                    ),
+                    _ => ("<trash@example.test>", "", "<a@example.test>"),
+                };
+                RemoteMessage {
+                    uid: *uid,
+                    content: MessageContent {
+                        subject: "Same subject".into(),
+                        body_text: format!("body {uid}"),
+                        message_id: id.into(),
+                        references: refs.into(),
+                        in_reply_to: reply.into(),
+                        date: i64::from(*uid),
+                        ..Default::default()
+                    },
+                }
+            })
+            .collect())
+    }
+}
+
+#[test]
+fn header_threads_span_folders_missing_ancestors_duplicates_and_cycles_but_never_accounts() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mail.db");
+    let secrets = Arc::new(MemoryStore::new(KeyringState::Unlocked));
+    let engine = MailEngine::with_connector(path.clone(), secrets.clone(), Arc::new(ThreadServer));
+    let a = engine
+        .add_account(config(), Zeroizing::new(b"test-password".to_vec()))
+        .unwrap();
+    let mut other = config();
+    other.address = "other@pigeon.test".into();
+    other.username = other.address.clone();
+    let b = engine
+        .add_account(other, Zeroizing::new(b"test-password".to_vec()))
+        .unwrap();
+    engine.sync_account(&a.id).unwrap();
+    engine.sync_account(&b.id).unwrap();
+    let query = SearchQuery {
+        conversations: true,
+        ..Default::default()
+    };
+    let grouped = engine.search(&query).unwrap();
+    assert_eq!(grouped.total, 8); // four components in each account, excluding Trash
+    let item = grouped
+        .messages
+        .iter()
+        .find(|m| m.account_id == a.id && m.date == 8)
+        .unwrap();
+    let id = item.id;
+    assert_eq!(grouped.groups[&id].len(), 4);
+    let thread = engine.conversation(id, false).unwrap();
+    assert_eq!(
+        thread.messages.iter().map(|m| m.date).collect::<Vec<_>>(),
+        vec![1, 2, 7, 8]
+    );
+    assert!(thread.incomplete);
+    assert!(thread.messages.iter().all(|m| m.account_id == a.id));
+    assert_eq!(engine.conversation(id, true).unwrap().messages.len(), 5);
+    let filtered = engine
+        .search(&SearchQuery {
+            text: "\"body 2\"".into(),
+            account_id: Some(a.id.clone()),
+            conversations: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(filtered.total, 1);
+    assert_eq!(filtered.groups[&filtered.messages[0].id].len(), 1);
+    // Context follows the effective Junk/Trash scope, including folder: text.
+    assert!(!grouped.context_include_junk_trash);
+    assert!(!filtered.context_include_junk_trash);
+    for scoped in [
+        SearchQuery {
+            text: "folder:Trash".into(),
+            ..query.clone()
+        },
+        SearchQuery {
+            folder: Some("INBOX".into()),
+            ..query.clone()
+        },
+        SearchQuery {
+            include_junk_trash: true,
+            ..query.clone()
+        },
+        SearchQuery {
+            text: "folder:Trash".into(),
+            ..Default::default()
+        },
+    ] {
+        assert!(engine.search(&scoped).unwrap().context_include_junk_trash);
+    }
+    let trash = engine
+        .search(&SearchQuery {
+            text: "folder:Trash".into(),
+            account_id: Some(a.id.clone()),
+            ..query.clone()
+        })
+        .unwrap();
+    assert_eq!(trash.total, 1);
+    let trash_thread = engine.conversation(trash.messages[0].id, true).unwrap();
+    assert_eq!(trash_thread.messages.len(), 5);
+    assert_eq!(
+        engine
+            .conversation(filtered.messages[0].id, false)
+            .unwrap()
+            .messages
+            .len(),
+        4
+    );
+    let page = engine
+        .search(&SearchQuery {
+            limit: Some(1),
+            offset: Some(1),
+            ..query.clone()
+        })
+        .unwrap();
+    assert_eq!(page.total, 8);
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(engine.search(&SearchQuery::default()).unwrap().total, 16);
+    drop(engine);
+    let engine = MailEngine::with_connector(path, secrets, Arc::new(ThreadServer));
+    assert_eq!(engine.conversation(id, false).unwrap().messages.len(), 4);
+    assert_eq!(engine.search(&query).unwrap().total, 8);
+}
+
+#[test]
+fn legacy_header_backfill_preserves_ids_bodies_without_new_arrivals() {
+    use pigeon_core::unlock::{UnlockOutcome, open_store};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mail.db");
+    let secrets = Arc::new(MemoryStore::new(KeyringState::Unlocked));
+    let engine = MailEngine::with_connector(path.clone(), secrets.clone(), Arc::new(ThreadServer));
+    let account = engine
+        .add_account(config(), Zeroizing::new(b"test-password".to_vec()))
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    let original = engine.search(&SearchQuery::default()).unwrap().messages;
+    let id = original.iter().find(|m| m.date == 2).unwrap().id;
+    engine
+        .queue_actions(&[id], pigeon_core::mail::ActionKind::MarkRead)
+        .unwrap();
+    engine.take_arrivals(&account.id).unwrap();
+    drop(engine);
+    // Model the actual schema-12 upgrade, where In-Reply-To was discarded.
+    {
+        let UnlockOutcome::Opened { store, .. } = open_store(secrets.as_ref(), &path) else {
+            panic!("open")
+        };
+        store.connection().execute_batch("ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; DROP TABLE image_trust_hosts; DROP TABLE image_trust; DROP TABLE sender_images; DROP TABLE folder_changes; PRAGMA user_version=12;").unwrap();
+    }
+    let engine = MailEngine::with_connector(path, secrets, Arc::new(ThreadServer));
+    assert_eq!(engine.conversation(id, false).unwrap().messages.len(), 1);
+    assert!(!engine.message(id).unwrap().summary.unread); // migration retains queued state
+    engine.sync_account(&account.id).unwrap();
+    assert_eq!(engine.conversation(id, false).unwrap().messages.len(), 4);
+    let message = engine.message(id).unwrap();
+    assert_eq!(message.body_text, "body 2");
+    assert_eq!(
+        engine.search(&SearchQuery::default()).unwrap().total,
+        original.len() as u64
+    );
+    assert_eq!(engine.take_arrivals(&account.id).unwrap().total, 0);
+}
+
+#[derive(Clone)]
+struct CompletingThread(Arc<std::sync::atomic::AtomicBool>);
+impl MailConnector for CompletingThread {
+    fn connect(&self, _: &AccountConfig, _: &Secret) -> Result<Box<dyn MailSession>, MailError> {
+        Ok(Box::new(self.clone()))
+    }
+}
+impl MailSession for CompletingThread {
+    fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
+        ThreadServer.folders()
+    }
+    fn snapshot(&mut self, folder: &str) -> Result<FolderSnapshot, MailError> {
+        let mut snapshot = ThreadServer.snapshot(folder)?;
+        if folder == "INBOX" && self.0.load(Ordering::SeqCst) {
+            snapshot.messages.push(RemoteFlag {
+                uid: 10,
+                unread: false,
+            });
+        }
+        Ok(snapshot)
+    }
+    fn fetch_messages(&mut self, uids: &[u32]) -> Result<Vec<RemoteMessage>, MailError> {
+        let mut messages = ThreadServer.fetch_messages(
+            &uids
+                .iter()
+                .copied()
+                .filter(|id| *id != 10)
+                .collect::<Vec<_>>(),
+        )?;
+        if uids.contains(&10) {
+            messages.push(RemoteMessage {
+                uid: 10,
+                content: MessageContent {
+                    message_id: "<missing@example.test>".into(),
+                    body_text: "Recovered ancestor".into(),
+                    ..Default::default()
+                },
+            });
+        }
+        Ok(messages)
+    }
+}
+
+#[test]
+fn incomplete_conversation_recovers_when_ancestor_arrives_and_survives_its_remote_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let present = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let engine = MailEngine::with_connector(
+        dir.path().join("mail.db"),
+        Arc::new(MemoryStore::new(KeyringState::Unlocked)),
+        Arc::new(CompletingThread(present.clone())),
+    );
+    let account = engine
+        .add_account(config(), Zeroizing::new(b"test-password".to_vec()))
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    let id = engine
+        .search(&SearchQuery::default())
+        .unwrap()
+        .messages
+        .iter()
+        .find(|m| m.date == 2)
+        .unwrap()
+        .id;
+    assert!(engine.conversation(id, false).unwrap().incomplete);
+    present.store(true, Ordering::SeqCst);
+    engine.sync_account(&account.id).unwrap();
+    let full = engine.conversation(id, false).unwrap();
+    assert!(!full.incomplete);
+    assert_eq!(full.messages.len(), 5);
+    assert_eq!(
+        engine.message(full.messages[0].id).unwrap().body_text,
+        "Recovered ancestor"
+    );
+    present.store(false, Ordering::SeqCst);
+    engine.sync_account(&account.id).unwrap();
+    let partial = engine.conversation(id, false).unwrap();
+    assert!(partial.incomplete);
+    assert_eq!(partial.messages.len(), 4);
+}

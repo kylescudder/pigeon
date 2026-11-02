@@ -18,6 +18,7 @@ fn main() {
             "search_mail",
             "cancel_mail_search",
             "read_mail_message",
+            "read_mail_conversation",
             "sender_image",
             "trusted_senders",
             "trust_sender",

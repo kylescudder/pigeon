@@ -19,6 +19,7 @@
     "allow-search-mail",
     "allow-cancel-mail-search",
     "allow-read-mail-message",
+    "allow-read-mail-conversation",
     "allow-sender-image",
     "allow-trusted-senders",
     "allow-trust-sender",

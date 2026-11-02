@@ -96,6 +96,7 @@ export type MailFolder = {
   unread: number;
 };
 export type SearchQuery = {
+  conversations?: boolean;
   text: string;
   account_id?: string | null;
   folder?: string | null;
@@ -162,7 +163,7 @@ export type MailMessage = {
   has_html: boolean;
   attachments: Attachment[];
 };
-export type SearchResults = { messages: MessageSummary[]; total: number };
+export type SearchResults = { messages: MessageSummary[]; total: number; groups?: Record<number, number[]>; group_messages?: Record<number, MessageSummary[]>; context_include_junk_trash?: boolean };
 
 export function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;
@@ -357,6 +358,8 @@ export const updateMailSending = (id: string, settings: SendingSettings) =>
 export const setUndoSendSeconds = (seconds: number) =>
   invoke<void>("set_undo_send_seconds", { seconds });
 
+export const readMailConversation = (id: number, includeJunkTrash: boolean) =>
+  invoke<{messages: MessageSummary[]; incomplete: boolean}>("read_mail_conversation", { id, includeJunkTrash });
 export type FolderChange =
   | { type: "create"; name: string }
   | { type: "rename"; folder_id: string; name: string }

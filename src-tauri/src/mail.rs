@@ -269,6 +269,20 @@ pub async fn distrust_sender(
 }
 
 #[tauri::command]
+pub async fn read_mail_conversation(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: i64,
+    include_junk_trash: bool,
+) -> Result<pigeon_core::mail::Conversation, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| {
+        engine.conversation(id, include_junk_trash)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn save_mail_search(
     app: AppHandle,
     webview: tauri::Webview,
