@@ -18,6 +18,7 @@ fn missing_file_uses_defaults_that_keep_running_in_the_background() {
     );
     assert!(!loaded.settings.tray);
     assert!(!loaded.settings.sender_images);
+    assert!(!loaded.settings.remote_images);
     assert!(!loaded.managed);
     assert_eq!(loaded.warning, None);
 }
@@ -38,6 +39,7 @@ fn partial_file_fills_defaults_and_ignores_unknown_keys() {
     assert!(!loaded.settings.tray);
     // Files written before this setting existed must not start lookups.
     assert!(!loaded.settings.sender_images);
+    assert!(!loaded.settings.remote_images);
     assert_eq!(loaded.warning, None);
 }
 
@@ -69,6 +71,7 @@ fn save_round_trips_and_creates_the_directory() {
         notifications: NotificationPolicy::Off,
         tray: true,
         sender_images: true,
+        remote_images: true,
     };
     let saved = desktop::save(&file, &wanted).unwrap();
     assert_eq!(saved.settings, wanted);
@@ -76,6 +79,7 @@ fn save_round_trips_and_creates_the_directory() {
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.contains(r#""closeToBackground": false"#), "{text}");
     assert!(text.contains(r#""senderImages": true"#), "{text}");
+    assert!(text.contains(r#""remoteImages": true"#), "{text}");
     assert!(!file.with_file_name(".settings.json.tmp").exists());
 }
 

@@ -42,6 +42,15 @@ pub struct ViewerDocument {
     pub html: String,
     /// Embedded images the message refers to that could not be downloaded.
     pub missing_inline: u32,
+    /// Whether the document may load remote images. The viewer's CSP header
+    /// must match the one inside the document.
+    pub remote: RemoteContent,
+    /// Remote images left out because remote content is blocked.
+    pub blocked_remote: u32,
+    /// The sender's address, if the message names one that could be trusted.
+    pub sender: Option<String>,
+    /// Remote images load because the sender is trusted.
+    pub trusted: bool,
 }
 
 /// Where a cached message lives on the server, as last synchronised.
@@ -154,10 +163,17 @@ impl MailEngine {
     }
 
     /// Builds the sanitised formatted view of a message. Embedded images it
-    /// refers to are downloaded over the mail connection and inlined; the
-    /// document itself never loads anything from the network.
-    pub fn viewer_document(&self, id: i64) -> Result<ViewerDocument, MailError> {
+    /// refers to are downloaded over the mail connection and inlined. Remote
+    /// images load only with `load_remote` or from a trusted sender, and then
+    /// only over https; otherwise the document loads nothing from the network.
+    pub fn viewer_document(&self, id: i64, load_remote: bool) -> Result<ViewerDocument, MailError> {
         let message = self.message(id)?;
+        let sender = super::remote_images::sender_address(&message.summary.sender);
+        let trusted = self.is_trusted_sender(&message.summary.sender)?;
+        let remote = match load_remote || trusted {
+            true => RemoteContent::Allowed,
+            false => RemoteContent::Blocked,
+        };
         let html = message.body_html.unwrap_or_else(|| {
             format!(
                 "<pre>{}</pre>",
@@ -259,12 +275,17 @@ impl MailEngine {
                 inline.insert(cid, inline_image(attachment, &data));
             }
         }
+        let blocked_remote = match remote {
+            RemoteContent::Blocked => viewer::remote_images(&html) as u32,
+            RemoteContent::Allowed => 0,
+        };
         Ok(ViewerDocument {
-            html: viewer::document(
-                &viewer::sanitise_inline(&html, RemoteContent::Blocked, &inline),
-                RemoteContent::Blocked,
-            ),
+            html: viewer::document(&viewer::sanitise_inline(&html, remote, &inline), remote),
             missing_inline: missing,
+            remote,
+            blocked_remote,
+            sender,
+            trusted,
         })
     }
 

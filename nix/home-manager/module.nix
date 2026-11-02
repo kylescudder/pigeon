@@ -116,6 +116,11 @@ in
               default = false;
               description = "Look up website icons for senders. This tells DuckDuckGo which domains email you; off shows initials.";
             };
+            remoteImages = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Load remote images in every message. Each load tells the image's server you opened the message; off loads them only when asked or from trusted senders.";
+            };
           };
         }
       );

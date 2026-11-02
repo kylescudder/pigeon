@@ -32,6 +32,9 @@ pub struct DesktopSettings {
     /// Look up website icons for senders. This tells an outside service which
     /// domains email the user, so it stays off until they choose it.
     pub sender_images: bool,
+    /// Load remote images in every message. Each load tells that image's
+    /// server the message was opened, so it stays off until they choose it.
+    pub remote_images: bool,
 }
 
 impl Default for DesktopSettings {
@@ -41,6 +44,7 @@ impl Default for DesktopSettings {
             notifications: NotificationPolicy::default(),
             tray: false,
             sender_images: false,
+            remote_images: false,
         }
     }
 }

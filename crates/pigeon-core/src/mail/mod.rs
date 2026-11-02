@@ -28,6 +28,7 @@ mod net;
 pub mod operations;
 mod query;
 mod recovery;
+pub mod remote_images;
 pub mod reply;
 pub mod sender_images;
 mod sending;

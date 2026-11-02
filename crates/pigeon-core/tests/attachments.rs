@@ -11,7 +11,7 @@ use pigeon_core::mail::{
     TransportSecurity,
 };
 use pigeon_core::secrets::{KeyringState, MemoryStore, Secret};
-use pigeon_core::viewer::MAX_INLINE_DOCUMENT_BYTES;
+use pigeon_core::viewer::{MAX_INLINE_DOCUMENT_BYTES, RemoteContent};
 use zeroize::Zeroizing;
 
 const CANARY: &[u8] = b"ATTACHMENT-RETENTION-CANARY-7f3a";
@@ -361,7 +361,7 @@ fn locking_the_keyring_discards_session_downloads() {
 fn viewer_document_embeds_referenced_images_with_one_connection() {
     let f = fixture();
     let connects = f.state.lock().unwrap().connects;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f.engine.viewer_document(f.message, false).unwrap();
     assert_eq!(document.missing_inline, 1, "the broken part");
     assert!(document.html.contains("data:image/png;base64,"));
     assert!(!document.html.contains("cid:"));
@@ -376,10 +376,61 @@ fn viewer_document_embeds_referenced_images_with_one_connection() {
 }
 
 #[test]
+fn remote_images_stay_blocked_unless_asked_for() {
+    let f = fixture();
+    let document = f.engine.viewer_document(f.message, false).unwrap();
+    assert_eq!(document.remote, RemoteContent::Blocked);
+    assert_eq!(document.blocked_remote, 1);
+    assert_eq!(document.sender.as_deref(), Some("alice@pigeon.test"));
+    assert!(!document.trusted);
+    assert!(document.html.contains("img-src data:;"));
+
+    let document = f.engine.viewer_document(f.message, true).unwrap();
+    assert_eq!(document.remote, RemoteContent::Allowed);
+    assert_eq!(document.blocked_remote, 0);
+    assert!(!document.trusted);
+    assert!(document.html.contains("https://tracker.example/pixel.gif"));
+    assert!(document.html.contains("img-src data: https:;"));
+    // Embedded images are still inlined, never left as `cid:`.
+    assert!(document.html.contains("data:image/png;base64,"));
+    assert!(!document.html.contains("cid:"));
+}
+
+#[test]
+fn trusted_senders_load_remote_images_and_survive_a_restart() {
+    let mut f = fixture();
+    assert!(f.engine.trusted_senders().unwrap().is_empty());
+    let trusted = f.engine.trust_sender_of(f.message).unwrap();
+    assert_eq!(trusted.email, "alice@pigeon.test");
+    // Trusting twice keeps one entry.
+    f.engine.trust_sender_of(f.message).unwrap();
+    f.reopen();
+    let list = f.engine.trusted_senders().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].email, "alice@pigeon.test");
+    assert!(
+        f.engine
+            .is_trusted_sender("ALICE <Alice@Pigeon.Test>")
+            .unwrap()
+    );
+
+    let document = f.engine.viewer_document(f.message, false).unwrap();
+    assert!(document.trusted);
+    assert_eq!(document.remote, RemoteContent::Allowed);
+    assert!(document.html.contains("https://tracker.example/pixel.gif"));
+
+    f.engine.distrust_sender("Alice@pigeon.test").unwrap();
+    assert!(f.engine.trusted_senders().unwrap().is_empty());
+    let document = f.engine.viewer_document(f.message, false).unwrap();
+    assert!(!document.trusted);
+    assert!(!document.html.contains("tracker.example"));
+}
+
+#[test]
 fn viewer_document_opens_offline_without_embedded_images() {
     let f = fixture();
     f.state.lock().unwrap().offline = true;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f.engine.viewer_document(f.message, false).unwrap();
     assert_eq!(document.missing_inline, 2);
     assert!(document.html.contains("Hello"));
     assert!(!document.html.contains("cid:"));
@@ -390,11 +441,11 @@ fn keep_setting_applies_to_embedded_images() {
     let mut f = fixture();
     assert!(!f.engine.keep_attachments().unwrap());
     f.engine.set_keep_attachments(true).unwrap();
-    f.engine.viewer_document(f.message).unwrap();
+    f.engine.viewer_document(f.message, false).unwrap();
     f.reopen();
     assert!(f.engine.keep_attachments().unwrap());
     f.state.lock().unwrap().offline = true;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f.engine.viewer_document(f.message, false).unwrap();
     assert_eq!(document.missing_inline, 1);
     assert!(document.html.contains("data:image/png;base64,"));
 }
@@ -407,7 +458,7 @@ fn embedded_images_stop_downloading_at_the_document_budget() {
         many_images: Some((12, size)),
         ..Default::default()
     });
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f.engine.viewer_document(f.message, false).unwrap();
     let state = f.state.lock().unwrap();
     let many: Vec<_> = state
         .fetches
@@ -445,7 +496,7 @@ fn kept_and_session_images_count_toward_the_document_budget() {
     }
     f.reopen();
     f.state.lock().unwrap().offline = true;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f.engine.viewer_document(f.message, false).unwrap();
     // The logo was never kept, so offline only the kept images can show.
     assert_eq!(
         document.html.matches("data:image/png").count(),

@@ -1464,3 +1464,21 @@ h1 {
     scroll-behavior: auto !important;
   }
 }
+.trusted-senders {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  max-width: 650px;
+}
+.trusted-senders li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.trusted-senders li:last-child {
+  border-bottom: 1px solid var(--line);
+}

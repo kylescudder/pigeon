@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { BackupSettings } from "../components/backup-settings";
 import {
@@ -10,8 +10,11 @@ import { useRefreshSend, useSendState } from "../components/send-state";
 import { PageHeading, useWorkspace } from "../components/workspace";
 import {
   type DesktopSettings,
+  distrustSender,
   errorMessage,
+  isDesktop,
   setUndoSendSeconds,
+  trustedSenders,
 } from "../lib/native";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
@@ -99,6 +102,7 @@ function Settings() {
       <BackupSettings />
       <UndoDelay />
       <DesktopSection />
+      <TrustedSenders />
       <div className="settings-note">
         <Icon name="monitor" size={16} />
         <p>
@@ -233,6 +237,38 @@ function DesktopSection() {
           ))}
         </div>
       </div>
+      <div className="density-section" id="remote-images">
+        <div>
+          <h2>Remote images</h2>
+          <p>
+            Images a message loads from the web are blocked until you ask for
+            them, because loading one tells the sender’s server that you opened
+            the message, when, and your IP address. Embedded images always show.
+          </p>
+        </div>
+        <div
+          className="segmented-control"
+          role="group"
+          aria-label="Remote images"
+        >
+          {(
+            [
+              { value: false, label: "Ask first" },
+              { value: true, label: "Always load" },
+            ] as const
+          ).map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              aria-pressed={settings?.remoteImages === option.value}
+              disabled={locked}
+              onClick={() => choose({ remoteImages: option.value })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
       {loaded?.managed && (
         <p>
           Managed by Home Manager. Change <code>programs.pigeon.settings</code>{" "}
@@ -246,6 +282,58 @@ function DesktopSection() {
         <div className="notice notice-error" role="alert">
           Could not change desktop settings: {errorMessage(error)}
         </div>
+      )}
+    </section>
+  );
+}
+
+const TRUSTED_SENDERS_KEY = ["mail", "trusted-senders"] as const;
+
+function TrustedSenders() {
+  const client = useQueryClient();
+  const list = useQuery({
+    queryKey: TRUSTED_SENDERS_KEY,
+    queryFn: trustedSenders,
+    enabled: isDesktop(),
+  });
+  const remove = useMutation({
+    mutationFn: distrustSender,
+    onSuccess: () => client.invalidateQueries({ queryKey: TRUSTED_SENDERS_KEY }),
+  });
+  // Like the other mail settings, hidden while the mail store is unavailable.
+  if (!list.data) return null;
+  return (
+    <section className="settings-section" aria-labelledby="trusted-heading">
+      <h2 id="trusted-heading">Trusted senders</h2>
+      <p>
+        Remote images from these addresses load without asking. Add one with{" "}
+        <em>Always load from…</em> on a message. A sender’s address can be
+        forged, so only trust senders whose images you would load anyway.
+      </p>
+      {list.data.length ? (
+        <ul className="trusted-senders">
+          {list.data.map((sender) => (
+            <li key={sender.email}>
+              <span>{sender.email}</span>
+              <button
+                type="button"
+                className="button button-quiet"
+                disabled={remove.isPending}
+                onClick={() => remove.mutate(sender.email)}
+                aria-label={`Stop loading images from ${sender.email}`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>No trusted senders yet.</p>
+      )}
+      {remove.isError && (
+        <p role="alert" className="mail-inline-error">
+          {errorMessage(remove.error)}
+        </p>
       )}
     </section>
   );

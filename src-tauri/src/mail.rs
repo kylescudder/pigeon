@@ -1,6 +1,7 @@
 //! Main-window adapters for the mail engine. No SQL or protocol logic here.
 use pigeon_core::backup::{self, BackupError, Summary};
 use pigeon_core::mail::managed;
+use pigeon_core::mail::remote_images::TrustedSender;
 use pigeon_core::mail::reply::ReplyKind;
 use pigeon_core::mail::{
     Account, AccountConfig, ActionCounts, ActionKind, Draft, DraftInput, Folder, MailEngine,
@@ -100,12 +101,9 @@ async fn task<T: Send + 'static>(
                     let _ = window.close();
                 }
             }
-            handle
-                .state::<crate::ShellState>()
-                .viewer_documents
-                .lock()
-                .unwrap()
-                .clear();
+            let state = handle.state::<crate::ShellState>();
+            state.viewer_documents.lock().unwrap().clear();
+            state.message_viewers.lock().unwrap().clear();
         });
     }
     result.map_err(Into::into)
@@ -233,6 +231,36 @@ pub async fn sender_image(
 }
 
 #[tauri::command]
+pub async fn trusted_senders(
+    app: AppHandle,
+    webview: tauri::Webview,
+) -> Result<Vec<TrustedSender>, MailApiError> {
+    guard(&webview)?;
+    task(app, |engine| engine.trusted_senders()).await
+}
+
+/// Always load remote images from the sender of this message.
+#[tauri::command]
+pub async fn trust_sender(
+    app: AppHandle,
+    webview: tauri::Webview,
+    message: i64,
+) -> Result<TrustedSender, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.trust_sender_of(message)).await
+}
+
+#[tauri::command]
+pub async fn distrust_sender(
+    app: AppHandle,
+    webview: tauri::Webview,
+    email: String,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.distrust_sender(&email)).await
+}
+
+#[tauri::command]
 pub async fn save_mail_search(
     app: AppHandle,
     webview: tauri::Webview,
@@ -285,22 +313,38 @@ pub async fn unlock_mail(app: AppHandle, webview: tauri::Webview) -> Result<(), 
 pub struct OpenedMessage {
     /// Embedded images that could not be downloaded, such as while offline.
     missing_inline: u32,
+    /// Remote images that were not loaded.
+    blocked_remote: u32,
+    /// The sender's address, when there is one that images could be allowed for.
+    sender: Option<String>,
+    /// Remote images loaded because the sender is trusted.
+    trusted: bool,
 }
 
+/// Opens a message's formatted view. Remote images load when asked for, when
+/// the user's setting loads them everywhere, or when the sender is trusted.
+/// Reopening a message replaces its viewer window.
 #[tauri::command]
 pub async fn open_mail_message(
     app: AppHandle,
     webview: tauri::Webview,
     id: i64,
+    load_images: Option<bool>,
 ) -> Result<OpenedMessage, MailApiError> {
     guard(&webview)?;
-    // Embedded images are fetched over the mail connection and inlined; the
-    // viewer document itself can load nothing from the network.
-    let document = task(app.clone(), move |engine| engine.viewer_document(id)).await?;
+    let load_remote =
+        load_images.unwrap_or(false) || app.state::<crate::desktop::DesktopState>().remote_images();
+    // Embedded images are fetched over the mail connection and inlined.
+    let document = task(app.clone(), move |engine| {
+        engine.viewer_document(id, load_remote)
+    })
+    .await?;
     let opened = OpenedMessage {
         missing_inline: document.missing_inline,
+        blocked_remote: document.blocked_remote,
+        sender: document.sender,
+        trusted: document.trusted,
     };
-    let document = document.html;
     let token = app
         .state::<crate::ShellState>()
         .viewer_count
@@ -310,12 +354,25 @@ pub async fn open_mail_message(
         .viewer_documents
         .lock()
         .unwrap()
-        .insert(page.clone(), document);
+        .insert(page.clone(), (document.html, document.remote));
     tauri::async_runtime::spawn_blocking(move || {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = app.clone();
         app.run_on_main_thread(move || {
-            let _ = tx.send(crate::open_viewer(&handle, &page, "Message · Pigeon"));
+            let state = handle.state::<crate::ShellState>();
+            let previous = state.message_viewers.lock().unwrap().remove(&id);
+            if let Some(window) = previous.and_then(|label| handle.get_webview_window(&label)) {
+                let _ = window.close();
+            }
+            let opened = crate::open_viewer(&handle, &page, "Message · Pigeon");
+            if let Ok(label) = &opened {
+                state
+                    .message_viewers
+                    .lock()
+                    .unwrap()
+                    .insert(id, label.clone());
+            }
+            let _ = tx.send(opened);
         })
         .map_err(|error| MailApiError {
             code: "viewer",

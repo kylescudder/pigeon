@@ -381,7 +381,7 @@ fn parts_download_on_request_byte_exact_without_marking_mail_read() {
     assert_eq!(logo.content_type, "image/png");
     assert_eq!(logo.part, "1.2.2");
     let before = relay_bytes();
-    let document = engine.viewer_document(newsletter).unwrap();
+    let document = engine.viewer_document(newsletter, false).unwrap();
     let used = relay_bytes() - before;
     eprintln!("Encrypted IMAP bytes for the embedded logo: {used}");
     assert!(used < 65_536, "embedded image fetch pulled {used} bytes");

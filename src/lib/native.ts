@@ -33,6 +33,8 @@ export type DesktopSettings = {
   tray: boolean;
   /** Tells an outside service which domains email the user, so it is opt-in. */
   senderImages: boolean;
+  /** Loads remote images in every message, which tells senders you opened it. */
+  remoteImages: boolean;
 };
 export type LoadedDesktopSettings = {
   settings: DesktopSettings;
@@ -210,10 +212,27 @@ export const readMailMessage = (id: number) =>
 /** A `data:` URL, or null when the sender's initials should show instead. */
 export const senderImage = (domain: string) =>
   invoke<string | null>("sender_image", { domain });
-/** Embedded images that could not be downloaded, for example while offline. */
-export type OpenedMessage = { missing_inline: number };
-export const openMailMessage = (id: number) =>
-  invoke<OpenedMessage>("open_mail_message", { id });
+export type OpenedMessage = {
+  /** Embedded images that could not be downloaded, for example while offline. */
+  missing_inline: number;
+  /** Remote images that were not loaded. */
+  blocked_remote: number;
+  /** The sender's address, when images could be allowed for it. */
+  sender: string | null;
+  /** Remote images loaded because the sender is trusted. */
+  trusted: boolean;
+};
+/** Opens the formatted view, replacing any already open for this message. */
+export const openMailMessage = (id: number, loadImages = false) =>
+  invoke<OpenedMessage>("open_mail_message", { id, loadImages });
+/** Senders whose remote images always load. */
+export type TrustedSender = { email: string; added: number };
+export const trustedSenders = () => invoke<TrustedSender[]>("trusted_senders");
+/** Always loads remote images from this message's sender. */
+export const trustSender = (message: number) =>
+  invoke<TrustedSender>("trust_sender", { message });
+export const distrustSender = (email: string) =>
+  invoke<void>("distrust_sender", { email });
 export const saveMailSearch = (name: string, query: SearchQuery) =>
   invoke<SavedSearch>("save_mail_search", { name, query });
 export const deleteMailSearch = (id: string) =>

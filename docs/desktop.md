@@ -15,14 +15,14 @@ Status: background lifecycle, configurable close behaviour, `--background`, and 
 `$XDG_CONFIG_HOME/pigeon/settings.json` holds only non-secret preferences:
 
 ```json
-{ "closeToBackground": true, "notifications": "senderSubject", "tray": false, "senderImages": false }
+{ "closeToBackground": true, "notifications": "senderSubject", "tray": false, "senderImages": false, "remoteImages": false }
 ```
 
 - Missing keys use the defaults above, and unknown keys are ignored.
 - An invalid file logs a warning, applies the defaults, and is never overwritten.
 - A symlink (the Home Manager case) or a read-only file is treated as managed. The Settings page shows it read-only and saving is refused.
 - `notifications` is acted on (see Notifications). `tray` is stored and acted on in a later slice.
-- `senderImages` is acted on (see Sender images).
+- `senderImages` is acted on (see Sender images). `remoteImages` is acted on (see Remote images).
 
 The two IPC commands `desktop_settings` and `set_desktop_settings` are main-window only. The viewer isolation probe also tries both and must be denied.
 
@@ -37,6 +37,20 @@ Every sender shows initials on a colour taken from their address, with no networ
 - **What an icon means:** nothing about authenticity. `From` is not verified, so forged mail shows the forged domain's icon.
 
 Icons are at most 256 KiB and must be PNG, JPEG, GIF, WebP or ICO by their contents. Rust fetches them over TLS 1.2 or later, follows no redirects, and hands the interface `data:` URLs, so the main window's content security policy keeps it off the network. `sender_image` is main-window only and returns nothing unless the setting is on.
+
+## Remote images
+
+Remote images are images a message loads from the web, as opposed to embedded (`cid:`) images sent inside it. They are blocked by default, because loading one tells the image's server that the message was opened, when, and from which IP address. Opening the formatted view of a message with blocked images shows a note in the main window with two choices:
+
+- **Load images** reopens the formatted view with remote images, for that opening only.
+- **Always load from *address*** trusts the sender and reopens it. Trusted senders are kept in the encrypted store (`image_trust`, migration 16) and included in backups. Settings → *Trusted senders* lists them and removes them.
+
+Settings → *Remote images* → **Always load** (`remoteImages`) loads them in every message.
+
+- **Trust is by `From` address**, which is not verified. Forged mail from a trusted address loads its images too.
+- **Only https images load.** The sanitiser drops other image URLs, and the viewer's CSP (`img-src data: https:`, sent as a header and in the document) is widened only for a document built with remote images allowed. Scripts, connections, frames and forms stay blocked, and the viewer sends no referrer.
+- **The decision is made in Rust.** `open_mail_message` reads `remoteImages` itself, and `trust_sender` takes a message id, not an address, so only the sender of a cached message can be trusted. The viewer webview can call none of these commands; the isolation probe checks.
+- Reopening a message closes its earlier viewer window, so loading images replaces the blocked view rather than stacking windows.
 
 ## Home Manager module
 

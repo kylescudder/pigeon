@@ -42,6 +42,11 @@ impl DesktopState {
         desktop::load(&self.path).settings.sender_images
     }
 
+    /// Read fresh each time a message opens, so the choice applies at once.
+    pub fn remote_images(&self) -> bool {
+        desktop::load(&self.path).settings.remote_images
+    }
+
     /// Reads the file at close time, so a Home Manager switch applies at once.
     pub fn close_to_background(&self) -> bool {
         let fresh = desktop::load(&self.path);

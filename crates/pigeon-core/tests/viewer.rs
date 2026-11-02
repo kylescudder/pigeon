@@ -1,6 +1,6 @@
 use pigeon_core::viewer::{
     InlineImage, InlineImages, MAX_INLINE_IMAGE_BYTES, RemoteContent, content_security_policy,
-    document, referenced_cids, sanitise, sanitise_inline,
+    document, referenced_cids, remote_images, sanitise, sanitise_inline,
 };
 
 const HOSTILE: &str = include_str!("fixtures/hostile.html");
@@ -154,6 +154,29 @@ fn allowed_policy_loads_https_images_only() {
     assert!(clean.contains("https://tracker.example/pixel.gif"));
     assert!(!clean.contains("http://tracker.example/plain.gif"));
     assert!(!clean.contains("<script"));
+}
+
+#[test]
+fn remote_images_counts_only_what_allowing_would_load() {
+    let html = "<img src=\"https://a.example/1.gif\"><img src=\"HTTPS://b.example/2.gif\">\
+                <img src=\"http://c.example/3.gif\"><img src=\"cid:logo\">\
+                <img src=\"data:image/png;base64,AA==\"><a href=\"https://d.example\">x</a>";
+    assert_eq!(remote_images(html), 2);
+    assert_eq!(remote_images("<p>No images</p>"), 0);
+}
+
+#[test]
+fn allowed_csp_permits_https_images_and_nothing_else() {
+    let csp = content_security_policy(RemoteContent::Allowed);
+    assert!(csp.contains("img-src data: https:;"), "{csp}");
+    for directive in [
+        "default-src 'none'",
+        "script-src 'none'",
+        "connect-src 'none'",
+    ] {
+        assert!(csp.contains(directive), "{directive} missing from {csp}");
+    }
+    assert!(document("<p>x</p>", RemoteContent::Allowed).contains(&csp));
 }
 
 #[test]

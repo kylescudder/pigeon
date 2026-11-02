@@ -235,6 +235,10 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE sender_images (
         domain TEXT PRIMARY KEY, data BLOB, checked INTEGER NOT NULL
     );",
+    // 16: senders whose remote images load without asking (mail/remote_images.rs).
+    "CREATE TABLE image_trust (
+        email TEXT PRIMARY KEY COLLATE NOCASE, added INTEGER NOT NULL
+    );",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.

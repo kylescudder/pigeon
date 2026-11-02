@@ -6,6 +6,7 @@
     settings = {
       closeToBackground = false;
       notifications = "count";
+      remoteImages = true;
       senderImages = true;
       tray = true;
     };
@@ -16,6 +17,7 @@
       {
         "closeToBackground": false,
         "notifications": "count",
+        "remoteImages": true,
         "senderImages": true,
         "tray": true
       }

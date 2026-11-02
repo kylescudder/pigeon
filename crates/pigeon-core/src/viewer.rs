@@ -80,6 +80,24 @@ pub fn referenced_cids(html: &str) -> Vec<String> {
     std::mem::take(&mut *found.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// How many images would load only with remote content allowed.
+pub fn remote_images(html: &str) -> usize {
+    let found = Arc::new(Mutex::new(0));
+    let sink = found.clone();
+    clean(html, move |element, attribute, value| {
+        let kept = filter_attribute(RemoteContent::Allowed, element, attribute, value);
+        if (element, attribute) == ("img", "src")
+            && kept.is_some()
+            && filter_attribute(RemoteContent::Blocked, element, attribute, value).is_none()
+            && let Ok(mut found) = sink.lock()
+        {
+            *found += 1;
+        }
+        kept
+    });
+    *found.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Like [`sanitise`], but resolves `cid:` images to `data:` URLs from parts
 /// already downloaded. Unresolved, non-raster, or over-budget images lose
 /// their source and show only their alt text; no `cid:` reference remains.

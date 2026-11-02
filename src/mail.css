@@ -176,3 +176,6 @@ a.outgoing-item-main:hover strong { text-decoration: underline; }
 .recipient-suggestions li[aria-selected="true"], .recipient-suggestions li:hover { background: var(--hover); }
 .recipient-suggestions strong { font-weight: 500; }
 .recipient-suggestions span { color: var(--muted); font-size: 11px; }
+.remote-images-note p { margin: 0; }
+.remote-images-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.mail-inline-note a { color: var(--accent); text-decoration: underline; }
