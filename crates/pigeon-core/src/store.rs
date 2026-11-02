@@ -239,6 +239,11 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE image_trust (
         email TEXT PRIMARY KEY COLLATE NOCASE, added INTEGER NOT NULL
     );",
+    // 17: image hosts trusted for one sender only; `image_trust` is all hosts.
+    "CREATE TABLE image_trust_hosts (
+        email TEXT NOT NULL COLLATE NOCASE, host TEXT NOT NULL COLLATE NOCASE,
+        added INTEGER NOT NULL, PRIMARY KEY (email, host)
+    );",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.

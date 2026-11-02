@@ -40,16 +40,20 @@ Icons are at most 256 KiB and must be PNG, JPEG, GIF, WebP or ICO by their conte
 
 ## Remote images
 
-Remote images are images a message loads from the web, as opposed to embedded (`cid:`) images sent inside it. They are blocked by default, because loading one tells the image's server that the message was opened, when, and from which IP address. Opening the formatted view of a message with blocked images shows a note in the main window with two choices:
+Remote images are images a message loads from the web, as opposed to embedded (`cid:`) images sent inside it. They are blocked by default, because loading one tells the image's server that the message was opened, when, and from which IP address. Opening the formatted view of a message with blocked images shows a note in the main window saying how many images, from how many sources (hosts), were not loaded:
 
-- **Load images** reopens the formatted view with remote images, for that opening only.
-- **Always load from *address*** trusts the sender and reopens it. Trusted senders are kept in the encrypted store (`image_trust`, migration 16) and included in backups. Settings → *Trusted senders* lists them and removes them.
+- **Load all images** reopens the formatted view with every remote image, for that opening only.
+- **Always load all from *address*** trusts the sender for every source and reopens it.
+- **Choose sources…** lists each blocked host with its image count. Tick some, then **Load selected** (this opening only) or **Always load selected from *address*** (trusts the sender for those hosts alone). Sources already loaded once stay loaded when the view reopens.
+
+Trust is kept in the encrypted store, for every source (`image_trust`, migration 16) or per host (`image_trust_hosts`, migration 17), and included in backups. Trusting every source replaces a sender's host list. Settings → *Trusted senders* shows each sender with *All sources* or their hosts; remove a single host with its ×, or the whole sender with **Remove**.
 
 Settings → *Remote images* → **Always load** (`remoteImages`) loads them in every message.
 
-- **Trust is by `From` address**, which is not verified. Forged mail from a trusted address loads its images too.
-- **Only https images load.** The sanitiser drops other image URLs, and the viewer's CSP (`img-src data: https:`, sent as a header and in the document) is widened only for a document built with remote images allowed. Scripts, connections, frames and forms stay blocked, and the viewer sends no referrer.
-- **The decision is made in Rust.** `open_mail_message` reads `remoteImages` itself, and `trust_sender` takes a message id, not an address, so only the sender of a cached message can be trusted. The viewer webview can call none of these commands; the isolation probe checks.
+- **Trust is by `From` address**, which is not verified. Forged mail from a trusted address loads the same images.
+- **Only https images load.** The sanitiser drops other image URLs. The viewer's CSP, sent as a header and in the document, is `img-src data:` when blocked, `img-src data: https:` when everything is allowed, and lists exactly the allowed hosts (`img-src data: https://cdn.example.com`) otherwise, so a partly allowed document cannot load from anywhere else, redirects included. Scripts, connections, frames and forms stay blocked, and the viewer sends no referrer.
+- **Hosts are parsed strictly.** A source is the lowercased host and optional port of an `https://` URL, made only of ASCII letters, digits, dots and hyphens. Anything else (user info, backslashes, percent-encoding, single-label names) is never loaded, so the host shown, the host compared and the host in the CSP always agree, and nothing else can reach the policy.
+- **The decision is made in Rust.** `open_mail_message` reads `remoteImages` itself and re-parses requested hosts. `trust_sender` takes a message id, not an address, and only accepts hosts that message loads from. The viewer webview can call none of these commands; the isolation probe checks.
 - Reopening a message closes its earlier viewer window, so loading images replaces the blocked view rather than stacking windows.
 
 ## Home Manager module

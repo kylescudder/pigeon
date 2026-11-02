@@ -17,6 +17,7 @@ import {
   deleteMailSearch,
   errorMessage,
   openMailMessage,
+  type LoadImages,
   type OpenedMessage,
   replyToMessage,
   type ReplyKind,
@@ -142,16 +143,23 @@ function Mailbox({
   // Results carry the message they are for, so a note about remote images
   // never shows against a different message.
   const formatted = useMutation({
-    mutationFn: async (loadImages: boolean) => ({
-      ...(await openMailMessage(selected!, loadImages)),
+    mutationFn: async (load: LoadImages) => ({
+      ...(await openMailMessage(selected!, load)),
       id: selected!,
     }),
   });
+  /** Sources loaded this once and not trusted, kept when the view reopens. */
+  const onceLoaded = () =>
+    formatted.data?.id === selected
+      ? formatted.data.sources
+          .filter((source) => source.loaded && !source.trusted)
+          .map((source) => source.host)
+      : [];
   const trust = useMutation({
-    mutationFn: () => trustSender(selected!),
+    mutationFn: (sources?: string[]) => trustSender(selected!, sources),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["mail", "trusted-senders"] });
-      formatted.mutate(false);
+      formatted.mutate({ sources: onceLoaded() });
     },
   });
   const save = useMutation({
@@ -672,7 +680,8 @@ function Mailbox({
               message={detail.data}
               actions={reader}
               onBack={() => setSelected(null)}
-              onFormatted={() => formatted.mutate(false)}
+              key={detail.data.summary.id}
+              onFormatted={() => formatted.mutate({})}
               formattedPending={formatted.isPending || trust.isPending}
               formattedError={formatted.error ?? trust.error}
               opened={
@@ -680,8 +689,14 @@ function Mailbox({
                   ? formatted.data
                   : undefined
               }
-              onLoadImages={() => formatted.mutate(true)}
-              onTrust={() => trust.mutate()}
+              onLoadImages={(sources) =>
+                formatted.mutate(
+                  sources
+                    ? { sources: [...onceLoaded(), ...sources] }
+                    : { all: true },
+                )
+              }
+              onTrust={(sources) => trust.mutate(sources)}
             />
           ) : null}
         </article>
@@ -758,11 +773,23 @@ function MessageReader({
   formattedPending: boolean;
   formattedError: unknown;
   opened: OpenedMessage | undefined;
-  onLoadImages: () => void;
-  onTrust: () => void;
+  /** All remote images, or only these sources, for this opening. */
+  onLoadImages: (sources?: string[]) => void;
+  /** Always load the sender's images: all, or only these sources. */
+  onTrust: (sources?: string[]) => void;
 }) {
+  const [choosing, setChoosing] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const missingInline = opened?.missing_inline ?? 0;
   const blocked = opened?.blocked_remote ?? 0;
+  const blockedSources = opened?.sources.filter((source) => !source.loaded) ?? [];
+  const trustedHosts =
+    opened?.sources.filter((source) => source.trusted).map((source) => source.host) ?? [];
+  const finish = (act: () => void) => {
+    act();
+    setChoosing(false);
+    setPicked(new Set());
+  };
   return (
     <>
       <div className="reader-toolbar">
@@ -821,37 +848,93 @@ function MessageReader({
         {blocked > 0 && (
           <div role="status" className="mail-inline-note remote-images-note">
             <p>
-              {blocked === 1
-                ? "1 remote image was"
-                : `${blocked} remote images were`}{" "}
-              not loaded. Loading images tells the sender’s server that you
-              opened this message.
+              {blocked === 1 ? "1 remote image" : `${blocked} remote images`}{" "}
+              from{" "}
+              {blockedSources.length === 1
+                ? "1 source"
+                : `${blockedSources.length} sources`}{" "}
+              {blocked === 1 ? "was" : "were"} not loaded. Loading images tells
+              those servers that you opened this message.
             </p>
             <div className="remote-images-actions">
               <button
                 type="button"
                 className="button button-secondary"
-                onClick={onLoadImages}
+                onClick={() => finish(() => onLoadImages())}
                 disabled={formattedPending}
               >
-                Load images
+                Load all images
               </button>
               {opened?.sender && (
                 <button
                   type="button"
                   className="button button-quiet"
-                  onClick={onTrust}
+                  onClick={() => finish(() => onTrust())}
                   disabled={formattedPending}
                 >
-                  Always load from {opened.sender}
+                  Always load all from {opened.sender}
                 </button>
               )}
+              <button
+                type="button"
+                className="button button-quiet"
+                aria-expanded={choosing}
+                aria-controls="image-sources"
+                onClick={() => setChoosing(!choosing)}
+              >
+                Choose sources…
+              </button>
             </div>
+            {choosing && (
+              <fieldset id="image-sources" className="image-sources">
+                <legend>Image sources</legend>
+                {blockedSources.map((source) => (
+                  <label key={source.host}>
+                    <input
+                      type="checkbox"
+                      checked={picked.has(source.host)}
+                      onChange={(event) => {
+                        const next = new Set(picked);
+                        if (event.target.checked) next.add(source.host);
+                        else next.delete(source.host);
+                        setPicked(next);
+                      }}
+                    />
+                    <span>{source.host}</span>
+                    <small>
+                      {source.images === 1 ? "1 image" : `${source.images} images`}
+                    </small>
+                  </label>
+                ))}
+                <div className="remote-images-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={formattedPending || picked.size === 0}
+                    onClick={() => finish(() => onLoadImages([...picked]))}
+                  >
+                    Load selected
+                  </button>
+                  {opened?.sender && (
+                    <button
+                      type="button"
+                      className="button button-quiet"
+                      disabled={formattedPending || picked.size === 0}
+                      onClick={() => finish(() => onTrust([...picked]))}
+                    >
+                      Always load selected from {opened.sender}
+                    </button>
+                  )}
+                </div>
+              </fieldset>
+            )}
           </div>
         )}
-        {opened?.trusted && (
+        {opened && (opened.trusted || trustedHosts.length > 0) && (
           <p role="status" className="mail-inline-note">
-            Images from {opened.sender} always load.{" "}
+            {opened.trusted
+              ? `Images from ${opened.sender} always load.`
+              : `From ${opened.sender}, images from ${trustedHosts.join(", ")} always load.`}{" "}
             <Link to="/settings" hash="remote-images">
               Change in Settings
             </Link>

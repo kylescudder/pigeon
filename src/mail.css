@@ -179,3 +179,7 @@ a.outgoing-item-main:hover strong { text-decoration: underline; }
 .remote-images-note p { margin: 0; }
 .remote-images-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .mail-inline-note a { color: var(--accent); text-decoration: underline; }
+.image-sources { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0 0; padding: 8px 12px 10px; max-width: 520px; }
+.image-sources legend { padding: 0 4px; font-weight: 550; color: var(--text); }
+.image-sources label { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--text); font-size: 12px; }
+.image-sources label small { color: var(--muted); font-size: 11px; margin-left: auto; }

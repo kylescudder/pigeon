@@ -45,11 +45,24 @@ pub struct ViewerDocument {
     /// Whether the document may load remote images. The viewer's CSP header
     /// must match the one inside the document.
     pub remote: RemoteContent,
-    /// Remote images left out because remote content is blocked.
+    /// Remote images left out, from every source not allowed.
     pub blocked_remote: u32,
+    /// Every host the message's remote images come from, in order of use.
+    pub sources: Vec<ImageSource>,
     /// The sender's address, if the message names one that could be trusted.
     pub sender: Option<String>,
-    /// Remote images load because the sender is trusted.
+    /// The sender is trusted for every host.
+    pub trusted: bool,
+}
+
+/// One host a message loads remote images from.
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ImageSource {
+    pub host: String,
+    pub images: u32,
+    /// Allowed in this document.
+    pub loaded: bool,
+    /// Trusted for this sender, alone or as one of every host.
     pub trusted: bool,
 }
 
@@ -164,16 +177,18 @@ impl MailEngine {
 
     /// Builds the sanitised formatted view of a message. Embedded images it
     /// refers to are downloaded over the mail connection and inlined. Remote
-    /// images load only with `load_remote` or from a trusted sender, and then
-    /// only over https; otherwise the document loads nothing from the network.
-    pub fn viewer_document(&self, id: i64, load_remote: bool) -> Result<ViewerDocument, MailError> {
+    /// images load only as `load` asks or as the sender is trusted for, and
+    /// then only over https; otherwise the document loads nothing from the
+    /// network.
+    pub fn viewer_document(
+        &self,
+        id: i64,
+        load: RemoteContent,
+    ) -> Result<ViewerDocument, MailError> {
         let message = self.message(id)?;
         let sender = super::remote_images::sender_address(&message.summary.sender);
-        let trusted = self.is_trusted_sender(&message.summary.sender)?;
-        let remote = match load_remote || trusted {
-            true => RemoteContent::Allowed,
-            false => RemoteContent::Blocked,
-        };
+        let trust = self.sender_trust(&message.summary.sender)?;
+        let remote = load.union(trust.clone());
         let html = message.body_html.unwrap_or_else(|| {
             format!(
                 "<pre>{}</pre>",
@@ -275,17 +290,35 @@ impl MailEngine {
                 inline.insert(cid, inline_image(attachment, &data));
             }
         }
-        let blocked_remote = match remote {
-            RemoteContent::Blocked => viewer::remote_images(&html) as u32,
-            RemoteContent::Allowed => 0,
+        let allows = |content: &RemoteContent, host: &str| match content {
+            RemoteContent::Blocked => false,
+            RemoteContent::Allowed => true,
+            RemoteContent::Hosts(hosts) => hosts.contains(host),
         };
+        let sources: Vec<ImageSource> = viewer::remote_image_hosts(&html)
+            .into_iter()
+            .map(|(host, images)| ImageSource {
+                loaded: allows(&remote, &host),
+                trusted: allows(&trust, &host),
+                host,
+                images,
+            })
+            .collect();
         Ok(ViewerDocument {
-            html: viewer::document(&viewer::sanitise_inline(&html, remote, &inline), remote),
+            html: viewer::document(
+                &viewer::sanitise_inline(&html, remote.clone(), &inline),
+                remote.clone(),
+            ),
             missing_inline: missing,
+            blocked_remote: sources
+                .iter()
+                .filter(|source| !source.loaded)
+                .map(|source| source.images)
+                .sum(),
             remote,
-            blocked_remote,
+            sources,
             sender,
-            trusted,
+            trusted: trust == RemoteContent::Allowed,
         })
     }
 

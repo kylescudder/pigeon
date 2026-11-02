@@ -4,11 +4,12 @@ use pigeon_core::mail::managed;
 use pigeon_core::mail::remote_images::TrustedSender;
 use pigeon_core::mail::reply::ReplyKind;
 use pigeon_core::mail::{
-    Account, AccountConfig, ActionCounts, ActionKind, Draft, DraftInput, Folder, MailEngine,
-    MailError, Message, OutboxItem, PendingAction, SavedSearch, SearchQuery, SearchResults,
-    SendDecision, SendState, SendingSettings,
+    Account, AccountConfig, ActionCounts, ActionKind, Draft, DraftInput, Folder, ImageSource,
+    MailEngine, MailError, Message, OutboxItem, PendingAction, SavedSearch, SearchQuery,
+    SearchResults, SendDecision, SendState, SendingSettings,
 };
 use pigeon_core::secrets::Secret;
+use pigeon_core::viewer::{self, RemoteContent};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -239,25 +240,32 @@ pub async fn trusted_senders(
     task(app, |engine| engine.trusted_senders()).await
 }
 
-/// Always load remote images from the sender of this message.
+/// Always load remote images from the sender of this message: from every
+/// source, or only from `sources` the message loads from.
 #[tauri::command]
 pub async fn trust_sender(
     app: AppHandle,
     webview: tauri::Webview,
     message: i64,
+    sources: Option<Vec<String>>,
 ) -> Result<TrustedSender, MailApiError> {
     guard(&webview)?;
-    task(app, move |engine| engine.trust_sender_of(message)).await
+    task(app, move |engine| engine.trust_sender_of(message, sources)).await
 }
 
+/// Stops trusting a sender, or only one of their trusted sources.
 #[tauri::command]
 pub async fn distrust_sender(
     app: AppHandle,
     webview: tauri::Webview,
     email: String,
+    source: Option<String>,
 ) -> Result<(), MailApiError> {
     guard(&webview)?;
-    task(app, move |engine| engine.distrust_sender(&email)).await
+    task(app, move |engine| {
+        engine.distrust_sender(&email, source.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -315,25 +323,42 @@ pub struct OpenedMessage {
     missing_inline: u32,
     /// Remote images that were not loaded.
     blocked_remote: u32,
+    /// Where the message's remote images come from, loaded or not.
+    sources: Vec<ImageSource>,
     /// The sender's address, when there is one that images could be allowed for.
     sender: Option<String>,
-    /// Remote images loaded because the sender is trusted.
+    /// The sender is trusted for every source.
     trusted: bool,
 }
 
-/// Opens a message's formatted view. Remote images load when asked for, when
-/// the user's setting loads them everywhere, or when the sender is trusted.
-/// Reopening a message replaces its viewer window.
+/// Opens a message's formatted view. Remote images load when asked for (all
+/// of them, or from `load_sources`), when the user's setting loads them
+/// everywhere, or as far as the sender is trusted. Reopening a message
+/// replaces its viewer window.
 #[tauri::command]
 pub async fn open_mail_message(
     app: AppHandle,
     webview: tauri::Webview,
     id: i64,
     load_images: Option<bool>,
+    load_sources: Option<Vec<String>>,
 ) -> Result<OpenedMessage, MailApiError> {
     guard(&webview)?;
-    let load_remote =
-        load_images.unwrap_or(false) || app.state::<crate::desktop::DesktopState>().remote_images();
+    let everywhere = app.state::<crate::desktop::DesktopState>().remote_images();
+    // Only well-formed hosts reach the sanitiser and CSP.
+    let sources = load_sources
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|host| viewer::image_host(&format!("https://{}/", host.trim())))
+        .collect::<std::collections::BTreeSet<_>>();
+    let load_remote = match (
+        load_images.unwrap_or(false) || everywhere,
+        sources.is_empty(),
+    ) {
+        (true, _) => RemoteContent::Allowed,
+        (false, true) => RemoteContent::Blocked,
+        (false, false) => RemoteContent::Hosts(sources),
+    };
     // Embedded images are fetched over the mail connection and inlined.
     let document = task(app.clone(), move |engine| {
         engine.viewer_document(id, load_remote)
@@ -342,6 +367,7 @@ pub async fn open_mail_message(
     let opened = OpenedMessage {
         missing_inline: document.missing_inline,
         blocked_remote: document.blocked_remote,
+        sources: document.sources,
         sender: document.sender,
         trusted: document.trusted,
     };

@@ -443,6 +443,8 @@ async function attempt(name, cmd, args) {
   await attempt("trusted senders", "trusted_senders");
   await attempt("trust sender", "trust_sender", { message: 1 });
   await attempt("distrust sender", "distrust_sender", { email: "probe@pigeon.test" });
+  await attempt("load chosen sources", "open_mail_message", { id: 1, loadSources: ["probe.example"] });
+  await attempt("trust chosen sources", "trust_sender", { message: 1, sources: ["probe.example"] });
   await attempt("save search", "save_mail_search", { name: "Probe", query: { text: "" } });
   await attempt("delete search", "delete_mail_search", { id: "probe" });
   await attempt("remove account", "remove_mail_account", { id: "probe" });

@@ -297,7 +297,8 @@ function TrustedSenders() {
     enabled: isDesktop(),
   });
   const remove = useMutation({
-    mutationFn: distrustSender,
+    mutationFn: ({ email, host }: { email: string; host?: string }) =>
+      distrustSender(email, host),
     onSuccess: () => client.invalidateQueries({ queryKey: TRUSTED_SENDERS_KEY }),
   });
   // Like the other mail settings, hidden while the mail store is unavailable.
@@ -306,20 +307,42 @@ function TrustedSenders() {
     <section className="settings-section" aria-labelledby="trusted-heading">
       <h2 id="trusted-heading">Trusted senders</h2>
       <p>
-        Remote images from these addresses load without asking. Add one with{" "}
-        <em>Always load from…</em> on a message. A sender’s address can be
-        forged, so only trust senders whose images you would load anyway.
+        Remote images from these addresses load without asking, from every
+        source or only the ones you chose. Add one from a message’s formatted
+        view. A sender’s address can be forged, so only trust senders whose
+        images you would load anyway.
       </p>
       {list.data.length ? (
         <ul className="trusted-senders">
           {list.data.map((sender) => (
             <li key={sender.email}>
-              <span>{sender.email}</span>
+              <div>
+                <span>{sender.email}</span>
+                {sender.all ? (
+                  <small>All sources</small>
+                ) : (
+                  <ul className="trusted-hosts" aria-label={`Sources trusted for ${sender.email}`}>
+                    {sender.hosts.map((host) => (
+                      <li key={host}>
+                        {host}
+                        <button
+                          type="button"
+                          disabled={remove.isPending}
+                          onClick={() => remove.mutate({ email: sender.email, host })}
+                          aria-label={`Stop loading images from ${host} for ${sender.email}`}
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <button
                 type="button"
                 className="button button-quiet"
                 disabled={remove.isPending}
-                onClick={() => remove.mutate(sender.email)}
+                onClick={() => remove.mutate({ email: sender.email })}
                 aria-label={`Stop loading images from ${sender.email}`}
               >
                 Remove
