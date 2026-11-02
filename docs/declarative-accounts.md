@@ -70,7 +70,8 @@ Rules the module enforces (as assertions):
 On every mail refresh the app reads the file and reconciles it with its store:
 
 1. **Stable identity.** A declared account's id is `managed-<name>`, so its
-   keyring password and cached mail survive a rebuild.
+   keyring password and cached mail survive a rebuild. The account label uses
+   `realName`, falling back to the attribute key when it is empty or whitespace.
 2. **Created without a password.** The account appears with "enter this
    account's password to start syncing". The password is verified when entered,
    as for any account, and kept in the keyring.

@@ -147,7 +147,11 @@ fn convert(name: &str, declared: Declared) -> Result<ManagedAccount, String> {
         username: declared.user_name.clone(),
     });
     let config = AccountConfig {
-        name: name.to_owned(),
+        name: if declared.real_name.trim().is_empty() {
+            name.to_owned()
+        } else {
+            declared.real_name.clone()
+        },
         address: declared.address,
         host: declared.imap.host,
         port: declared.imap.port,
