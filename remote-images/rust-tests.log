@@ -1728,9 +1728,10 @@ help: use `'_` for type paths
    |                                                     ++++
 
 warning: `imap-proto` (lib) generated 206 warnings (102 duplicates) (run `cargo fix --lib -p imap-proto` to apply 6 suggestions)
+   Compiling imap v2.4.1
    Compiling pigeon-core v0.1.0 (/Users/kyle/.t3/worktrees/pigeon/t3-866d3e98/crates/pigeon-core)
    Compiling pigeon v0.1.0 (/Users/kyle/.t3/worktrees/pigeon/t3-866d3e98/src-tauri)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.18s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.82s
      Running unittests src/lib.rs (target/debug/deps/pigeon_app-9fa0254c97ad7b0d)
 
 running 0 tests
@@ -1751,68 +1752,68 @@ test mail::diagnostics::tests::unexpected_responses_keep_only_variant_status_and
 test mail::imap::tests::only_dotted_part_numbers_reach_a_fetch_command ... ok
 test mail::diagnostics::tests::private_fields_and_literals_are_omitted_but_protocol_shape_remains ... ok
 test mail::diagnostics::tests::long_structures_after_large_literals_keep_their_failure_point ... ok
-test mail::diagnostics::tests::malformed_strings_and_literals_do_not_leak_remainders ... ok
-test mail::reply::tests::reply_all_adds_the_others_but_not_me_or_the_sender ... ok
-test mail::reply::tests::a_missing_message_id_means_no_threading_headers ... ok
 test mail::reply::tests::forward_has_no_recipient_or_threading_and_carries_the_headers ... ok
+test mail::diagnostics::tests::malformed_strings_and_literals_do_not_leak_remainders ... ok
+test mail::reply::tests::a_missing_message_id_means_no_threading_headers ... ok
+test mail::reply::tests::reply_all_adds_the_others_but_not_me_or_the_sender ... ok
 test mail::reply::tests::an_existing_prefix_is_not_doubled ... ok
 test mail::reply::tests::reply_all_never_copies_a_blind_recipient ... ok
+test mail::reply::tests::reply_goes_to_the_sender_quotes_and_threads ... ok
 test mail::reply::tests::mail_stored_before_the_lists_never_exposes_bcc_from_sent ... ok
 test mail::reply::tests::reply_to_is_preferred_over_from ... ok
 test mail::reply::tests::replying_to_my_own_message_goes_to_who_i_wrote_to ... ok
-test mail::reply::tests::reply_goes_to_the_sender_quotes_and_threads ... ok
 test mail::reply::tests::newlines_in_headers_are_flattened_and_long_bodies_are_cut ... ok
 test mail::reply::tests::the_references_chain_is_kept_and_extended ... ok
 test mail::sender_images::tests::a_missing_icons_placeholder_is_not_taken_for_an_icon ... ok
 test mail::sender_images::tests::only_a_clear_answer_counts_as_having_no_icon ... ok
 test mail::sender_images::tests::an_oversized_icon_is_treated_as_none ... ok
+test mail::sender_images::tests::subdomains_collapse_so_a_sender_cannot_mint_one_per_recipient ... ok
 test mail::sender_images::tests::personal_mail_domains_are_skipped_but_their_companies_are_not ... ok
 test mail::sender_images::tests::private_reserved_and_malformed_names_are_never_looked_up ... ok
-test mail::sender_images::tests::subdomains_collapse_so_a_sender_cannot_mint_one_per_recipient ... ok
 test mail::sender_images::tests::only_raster_images_become_data_urls ... ok
 test mail::sending::tests::new_messages_have_no_threading_headers ... ok
-test mail::sending::tests::threading_values_cannot_inject_headers ... ok
 test mail::sending::tests::replies_carry_threading_headers ... ok
+test mail::sending::tests::threading_values_cannot_inject_headers ... ok
 test mail::smtp::tests::rejected_credentials_are_an_authentication_error ... ok
 test notify::tests::a_bare_address_is_used_when_there_is_no_name ... ok
-test mail::smtp::tests::a_failed_commit_never_sends_the_end_of_data_marker ... ok
 test notify::tests::a_flood_is_counted_beyond_the_few_that_are_described ... ok
 test notify::tests::count_reveals_only_how_many ... ok
-test mail::smtp::tests::refused_recipient_stops_before_data_without_echoing_server_text ... ok
-test mail::smtp::tests::accepted_message_is_dot_stuffed_with_crlf_and_committed_once ... ok
 test notify::tests::long_text_is_cut ... ok
+test mail::smtp::tests::a_failed_commit_never_sends_the_end_of_data_marker ... ok
 test notify::tests::markup_and_control_characters_from_mail_cannot_reach_the_server ... ok
 test notify::tests::nothing_when_off_or_empty ... ok
 test notify::tests::one_message_shows_sender_name_and_subject_never_the_body ... ok
 test notify::tests::several_messages_list_a_few_and_count_the_rest ... ok
+test mail::smtp::tests::refused_recipient_stops_before_data_without_echoing_server_text ... ok
+test mail::smtp::tests::accepted_message_is_dot_stuffed_with_crlf_and_committed_once ... ok
 test mail::smtp::tests::starttls_is_required_and_pre_encryption_data_is_refused ... ok
 test mail::smtp::tests::an_explicit_refusal_after_data_is_not_sent_and_says_whether_to_retry ... ok
-test backup::tests::crafted_backups_cannot_write_other_keyring_items_or_tables ... ok
 test backup::tests::every_store_table_declares_whether_it_is_backed_up ... ok
-test mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body ... FAILED
-test backup::tests::backup_from_an_older_schema_restores_into_the_current_one ... ok
-test backup::tests::restored_outgoing_work_comes_back_paused ... ok
-test mail::imap::tests::compatible_fetch_responses_download_every_message ... FAILED
+test backup::tests::crafted_backups_cannot_write_other_keyring_items_or_tables ... ok
 test mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data ... FAILED
+test backup::tests::backup_from_an_older_schema_restores_into_the_current_one ... ok
+test mail::imap::tests::compatible_fetch_responses_download_every_message ... FAILED
+test backup::tests::restored_outgoing_work_comes_back_paused ... ok
+test mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body ... FAILED
 test mail::smtp::tests::a_lost_or_missing_final_reply_is_unknown ... ok
 test mail::imap::tests::folder_errors_distinguish_rejection_from_disconnect_without_echoing_server_data ... ok
 
 failures:
 
----- mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body stdout ----
+---- mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data stdout ----
 
-thread 'mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body' (20445049) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
+thread 'mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data' (20647563) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
 called `Result::unwrap()` on an `Err` value: Imap { operation: "test login", reason: "the server closed the connection" }
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
 ---- mail::imap::tests::compatible_fetch_responses_download_every_message stdout ----
 
-thread 'mail::imap::tests::compatible_fetch_responses_download_every_message' (20445050) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
+thread 'mail::imap::tests::compatible_fetch_responses_download_every_message' (20647562) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
 called `Result::unwrap()` on an `Err` value: Imap { operation: "test login", reason: "the server closed the connection" }
 
----- mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data stdout ----
+---- mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body stdout ----
 
-thread 'mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data' (20445051) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
+thread 'mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body' (20647561) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
 called `Result::unwrap()` on an `Err` value: Imap { operation: "test login", reason: "the server closed the connection" }
 
 
@@ -1821,53 +1822,55 @@ failures:
     mail::imap::tests::compatible_fetch_responses_download_every_message
     mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data
 
-test result: FAILED. 47 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+test result: FAILED. 47 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s
 
 error: test failed, to rerun pass `-p pigeon-core --lib`
      Running tests/attachments.rs (target/debug/deps/attachments-6d0140c19e786802)
 
-running 15 tests
+running 17 tests
+test kept_payload_is_removed_with_its_message ... ok
+test chosen_sources_load_alone_and_narrow_the_csp ... ok
 test remote_images_stay_blocked_unless_asked_for ... ok
 test changed_folder_epoch_refuses_instead_of_fetching_another_message ... ok
 test kept_payloads_go_with_the_account ... ok
-test kept_payload_is_removed_with_its_message ... ok
-test keeping_refuses_a_part_whose_message_row_was_reused_meanwhile ... ok
-test viewer_document_opens_offline_without_embedded_images ... ok
 test only_parts_listed_for_the_message_can_be_requested ... ok
+test keeping_refuses_a_part_whose_message_row_was_reused_meanwhile ... ok
 test viewer_document_embeds_referenced_images_with_one_connection ... ok
-test keep_setting_applies_to_embedded_images ... ok
-test trusted_senders_load_remote_images_and_survive_a_restart ... ok
-test locking_the_keyring_discards_session_downloads ... ok
 test kept_download_survives_restart_offline_and_stays_encrypted ... ok
+test keep_setting_applies_to_embedded_images ... ok
+test locking_the_keyring_discards_session_downloads ... ok
 test download_is_session_only_by_default ... ok
+test viewer_document_opens_offline_without_embedded_images ... ok
+test trusted_senders_load_remote_images_and_survive_a_restart ... ok
+test a_sender_can_be_trusted_for_chosen_sources_only ... ok
 test embedded_images_stop_downloading_at_the_document_budget ... ok
 test kept_and_session_images_count_toward_the_document_budget ... ok
 
-test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.87s
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.87s
 
      Running tests/backup.rs (target/debug/deps/backup-71decb3850f9cc87)
 
 running 16 tests
 test short_passphrases_are_refused_and_write_nothing ... ok
 test restore_is_refused_while_an_account_is_added_or_its_password_changes ... ok
-test failing_to_save_a_new_store_key_puts_back_the_store_and_passwords ... ok
-test restore_recovers_a_store_whose_key_was_lost ... ok
-test failing_to_rename_the_new_store_into_place_puts_everything_back ... ok
-test keyring_failure_part_way_through_passwords_puts_back_earlier_ones ... ok
 test successful_restore_writes_every_backed_up_password ... ok
-test backup_restores_local_data_and_passwords_on_a_new_device_without_mail ... ok
-test failing_to_move_the_live_store_aside_puts_back_passwords ... ok
-test wrong_passphrase_leaves_the_store_untouched ... ok
-test account_changes_are_refused_while_a_restore_runs ... ok
-test restore_replaces_local_data_and_keeps_the_previous_store_aside ... ok
+test failing_to_save_a_new_store_key_puts_back_the_store_and_passwords ... ok
+test failing_to_rename_the_new_store_into_place_puts_everything_back ... ok
+test restore_recovers_a_store_whose_key_was_lost ... ok
 test backups_never_contain_the_store_key ... ok
+test failing_to_move_the_live_store_aside_puts_back_passwords ... ok
+test keyring_failure_part_way_through_passwords_puts_back_earlier_ones ... ok
+test account_changes_are_refused_while_a_restore_runs ... ok
 test restore_is_refused_while_an_account_syncs ... ok
+test restore_replaces_local_data_and_keeps_the_previous_store_aside ... ok
+test wrong_passphrase_leaves_the_store_untouched ... ok
+test backup_restores_local_data_and_passwords_on_a_new_device_without_mail ... ok
 test backups_taken_during_sync_are_consistent_and_do_not_stall_it has been running for over 60 seconds
 test damaged_truncated_and_foreign_files_are_refused_without_changes has been running for over 60 seconds
 test damaged_truncated_and_foreign_files_are_refused_without_changes ... ok
 test backups_taken_during_sync_are_consistent_and_do_not_stall_it ... ok
 
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 102.21s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 112.26s
 
      Running tests/desktop.rs (target/debug/deps/desktop-75225cf313edc4ff)
 
@@ -1875,8 +1878,8 @@ running 6 tests
 test missing_file_uses_defaults_that_keep_running_in_the_background ... ok
 test partial_file_fills_defaults_and_ignores_unknown_keys ... ok
 test invalid_file_warns_uses_defaults_and_is_never_overwritten ... ok
-test home_manager_symlink_is_managed_and_read_only ... ok
 test read_only_file_is_managed ... ok
+test home_manager_symlink_is_managed_and_read_only ... ok
 test save_round_trips_and_creates_the_directory ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
@@ -1884,11 +1887,11 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/folder_management.rs (target/debug/deps/folder_management-3fa6873a45d6ec55)
 
 running 6 tests
+test a_refused_change_reports_the_server_and_leaves_mail_usable ... ok
+test both_names_after_a_lost_reply_settle_without_pausing_the_account ... ok
+test a_rename_replaces_a_stale_cached_folder_and_keeps_saved_searches ... ok
 test local_checks_report_the_same_offline ... ok
 test a_lost_reply_counts_as_done_once_the_folder_list_shows_it ... ok
-test a_rename_replaces_a_stale_cached_folder_and_keeps_saved_searches ... ok
-test both_names_after_a_lost_reply_settle_without_pausing_the_account ... ok
-test a_refused_change_reports_the_server_and_leaves_mail_usable ... ok
 test server_confirmed_folder_lifecycle_and_interrupted_rename_survive_restart ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
@@ -1897,8 +1900,8 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 running 4 tests
 test zoho_wildcard_flags_parse_in_both_mailbox_and_fetch_responses ... ok
-test zoho_style_bare_content_id_and_repeated_body_extensions_parse_completely ... ok
 test zoho_multipart_without_child_parts_parses_at_any_depth ... ok
+test zoho_style_bare_content_id_and_repeated_body_extensions_parse_completely ... ok
 test malformed_bodystructure_still_fails_closed ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -1922,52 +1925,52 @@ test result: ok. 0 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; fin
      Running tests/mail_actions.rs (target/debug/deps/mail_actions-36eae776c4f36c98)
 
 running 15 tests
-test permanent_delete_without_uidplus_fails_visibly_and_removes_nothing ... ok
-test trash_and_archive_move_mail_on_the_server_and_it_arrives_after_sync ... ok
-test remote_deletion_before_apply_is_a_conflict_and_is_never_resurrected ... ok
-test a_change_the_server_answers_unusably_fails_without_blocking_sync ... ok
-test without_trash_delete_is_refused_and_permanent_delete_spares_other_clients_mail ... ok
-test copy_fallback_moves_without_move_and_stops_on_an_uncertain_copy ... ok
-test a_connection_lost_around_a_write_neither_repeats_nor_duplicates_it ... ok
-test discard_restores_the_local_view_without_writing ... ok
-test queued_changes_are_encrypted_at_rest ... ok
-test queueing_needs_an_unlocked_store_and_validates_requests ... ok
-test a_changed_uidvalidity_turns_queued_changes_into_conflicts ... ok
-test discarding_one_of_overlapping_read_changes_shows_the_remaining_one ... ok
-test offline_mark_read_shows_locally_survives_restart_and_reaches_the_server ... ok
-test an_interrupted_apply_resumes_after_restart ... ok
 test retrying_after_a_refused_source_deletion_does_not_copy_again ... ok
+test copy_fallback_moves_without_move_and_stops_on_an_uncertain_copy ... ok
+test queued_changes_are_encrypted_at_rest ... ok
+test trash_and_archive_move_mail_on_the_server_and_it_arrives_after_sync ... ok
+test a_change_the_server_answers_unusably_fails_without_blocking_sync ... ok
+test discarding_one_of_overlapping_read_changes_shows_the_remaining_one ... ok
+test a_connection_lost_around_a_write_neither_repeats_nor_duplicates_it ... ok
+test a_changed_uidvalidity_turns_queued_changes_into_conflicts ... ok
+test discard_restores_the_local_view_without_writing ... ok
+test permanent_delete_without_uidplus_fails_visibly_and_removes_nothing ... ok
+test without_trash_delete_is_refused_and_permanent_delete_spares_other_clients_mail ... ok
+test queueing_needs_an_unlocked_store_and_validates_requests ... ok
+test an_interrupted_apply_resumes_after_restart ... ok
+test offline_mark_read_shows_locally_survives_restart_and_reaches_the_server ... ok
+test remote_deletion_before_apply_is_a_conflict_and_is_never_resurrected ... ok
 
-test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
 
      Running tests/mail_engine.rs (target/debug/deps/mail_engine-47e1c5a6046e9262)
 
 running 13 tests
-test failed_credential_removal_keeps_the_account_and_can_be_retried ... ok
-test credential_reverification_and_local_removal_do_not_damage_cached_mail_on_failure ... ok
 test malformed_queries_are_actionable_and_punctuation_never_becomes_sql ... ok
-test cancellation_before_a_queued_search_starts_is_not_lost ... ok
 test uid_validity_reset_keeps_old_cache_until_replacement_finishes ... ok
+test failed_credential_removal_keeps_the_account_and_can_be_retried ... ok
+test cancellation_before_a_queued_search_starts_is_not_lost ... ok
 test slow_network_does_not_block_cached_search_and_sync_can_be_cancelled ... ok
-test synced_mail_is_searchable_without_duplicates_and_readable_after_restart_offline ... ok
+test removing_a_large_account_leaves_the_store_available_and_blocks_sync ... ok
+test credential_reverification_and_local_removal_do_not_damage_cached_mail_on_failure ... ok
 test authenticated_account_is_available_after_reopening_without_exposing_password ... ok
+test synced_mail_is_searchable_without_duplicates_and_readable_after_restart_offline ... ok
 test search_combines_human_filters_with_text_and_saved_search_survives_restart ... ok
+test one_unparseable_message_does_not_block_later_mail_or_other_folders ... ok
 test parser_recovery_is_bounded_and_refuses_changed_folder_epochs ... ok
 test interrupted_sync_keeps_cached_mail_and_resumes_after_restart ... ok
-test one_unparseable_message_does_not_block_later_mail_or_other_folders ... ok
-test removing_a_large_account_leaves_the_store_available_and_blocks_sync ... ok
 
-test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
 
      Running tests/managed.rs (target/debug/deps/managed-6bf1f2bcc05fd26c)
 
 running 7 tests
 test missing_file_declares_nothing_and_bad_entries_are_reported ... ok
 test a_certificate_file_is_read_and_the_app_cannot_claim_managed ... ok
-test an_account_that_leaves_the_file_becomes_ordinary_and_keeps_its_mail ... ok
 test managed_accounts_cannot_be_removed_or_edited_in_the_app ... ok
-test changes_apply_in_place_and_keep_the_password ... ok
 test an_unreadable_file_changes_nothing ... ok
+test an_account_that_leaves_the_file_becomes_ordinary_and_keeps_its_mail ... ok
+test changes_apply_in_place_and_keep_the_password ... ok
 test declared_account_waits_for_a_password_then_syncs ... ok
 
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
@@ -1978,27 +1981,27 @@ running 2 tests
 test a_reused_row_id_does_not_hide_a_new_message ... ok
 test only_new_unread_inbox_mail_is_reported ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
      Running tests/operations.rs (target/debug/deps/operations-682d99d677ef9d32)
 
 running 14 tests
-test operations_list_newest_last_with_account_filter ... ok
-test dependent_operation_waits_for_its_parent ... ok
 test transient_failure_backs_off_then_a_permanent_failure_waits_for_the_user ... ok
+test dependent_operation_waits_for_its_parent ... ok
 test unregistered_kinds_stay_queued ... ok
-test a_running_operation_cannot_be_cancelled ... ok
-test a_panicking_handler_fails_safely ... ok
 test delayed_operation_waits_and_can_be_cancelled_before_it_starts ... ok
+test a_panicking_handler_fails_safely ... ok
 test queued_operation_runs_once_and_is_done ... ok
-test nothing_runs_while_the_keyring_is_locked ... ok
+test a_running_operation_cannot_be_cancelled ... ok
 test held_operations_wait_for_release ... ok
+test operations_list_newest_last_with_account_filter ... ok
+test nothing_runs_while_the_keyring_is_locked ... ok
 test an_outcome_reached_while_locked_is_recorded_after_unlock_without_rerunning ... ok
 test unknown_outcome_is_never_retried_without_an_explicit_decision ... ok
 test restart_recovers_interrupted_work_by_whether_it_passed_the_point_of_no_return ... ok
 test restore_refuses_to_replace_the_store_while_an_operation_is_on_the_wire ... ok
 
-test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.14s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.53s
 
      Running tests/replies.rs (target/debug/deps/replies-283b44eb3d825036)
 
@@ -2007,7 +2010,7 @@ test a_reply_is_saved_as_a_threaded_draft_from_the_receiving_account ... ok
 test replying_to_a_message_that_is_gone_fails_cleanly ... ok
 test a_forward_starts_a_new_conversation ... ok
 
-test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
 
      Running tests/search_benchmark.rs (target/debug/deps/search_benchmark-c94d1dbe178f8276)
 
@@ -2026,37 +2029,37 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/sender_images.rs (target/debug/deps/sender_images-c9c230c6ed8f86f8)
 
 running 8 tests
-test a_locked_store_asks_nothing ... ok
 test skipped_domains_never_reach_the_service ... ok
-test being_offline_is_not_mistaken_for_having_no_icon ... ok
+test a_locked_store_asks_nothing ... ok
 test an_icon_is_asked_for_once_by_registrable_domain ... ok
+test being_offline_is_not_mistaken_for_having_no_icon ... ok
 test something_that_is_not_an_image_is_never_shown ... ok
+test a_recent_icon_is_not_asked_for_again ... ok
 test having_no_icon_is_remembered_for_a_while ... ok
 test an_old_icon_keeps_showing_offline_and_is_replaced_once_reachable ... ok
-test a_recent_icon_is_not_asked_for_again ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
      Running tests/sending.rs (target/debug/deps/sending-f6b8765c1c3e4335)
 
 running 19 tests
-test an_account_with_unsent_mail_cannot_be_removed ... ok
-test invalid_messages_are_refused_and_the_draft_is_kept ... ok
+test a_send_without_a_sent_copy_leaves_the_outbox_once_accepted ... ok
+test offline_sends_wait_and_permanent_refusals_go_back_to_drafts ... ok
 test a_missing_sent_folder_fails_the_copy_and_leaves_the_send_accepted ... ok
-test send_again_after_unknown_is_explicit ... ok
-test an_unknown_outcome_waits_for_a_decision ... ok
-test sending_submits_once_then_saves_a_sent_copy_with_bcc ... ok
+test an_account_with_unsent_mail_cannot_be_removed ... ok
 test accounts_without_smtp_cannot_send_until_it_is_added ... ok
 test a_failed_sent_copy_never_submits_again ... ok
-test offline_sends_wait_and_permanent_refusals_go_back_to_drafts ... ok
-test confirmed_recipients_keep_names_and_survive_dismissal_and_restart ... ok
-test a_send_without_a_sent_copy_leaves_the_outbox_once_accepted ... ok
+test an_unknown_outcome_waits_for_a_decision ... ok
+test send_again_after_unknown_is_explicit ... ok
+test invalid_messages_are_refused_and_the_draft_is_kept ... ok
+test sending_submits_once_then_saves_a_sent_copy_with_bcc ... ok
 test sent_items_can_be_dismissed_without_resending ... ok
-test undo_within_the_delay_restores_the_draft_and_sends_nothing ... ok
-test unsent_and_unknown_recipients_are_not_remembered ... ok
 test drafts_autosave_and_survive_a_restart ... ok
-test nothing_is_sent_while_the_keyring_is_locked ... ok
+test undo_within_the_delay_restores_the_draft_and_sends_nothing ... ok
 test a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy ... ok
+test confirmed_recipients_keep_names_and_survive_dismissal_and_restart ... ok
+test nothing_is_sent_while_the_keyring_is_locked ... ok
+test unsent_and_unknown_recipients_are_not_remembered ... ok
 test named_signatures_survive_restart_and_draft_choice_controls_sent_text ... ok
 test upgrading_imports_older_confirmed_recipients_even_after_dismissal ... ok
 
@@ -2082,24 +2085,24 @@ test diagnostics_report_sqlcipher_fts5_memory_temp_and_wal ... ok
 test memory_security_stays_off ... ok
 test fts5_search_finds_body_and_subject_text ... ok
 test wrong_key_is_rejected_and_right_key_reopens ... ok
-test upgrading_main_schema_six_keeps_operations_and_adds_attachment_storage ... ok
-test upgrading_early_attachment_schema_keeps_blobs_and_adds_operations ... ok
 test database_and_wal_contain_no_plaintext ... ok
+test upgrading_early_attachment_schema_keeps_blobs_and_adds_operations ... ok
+test upgrading_main_schema_six_keeps_operations_and_adds_attachment_storage ... ok
 test upgrading_main_schema_seven_keeps_operations_attachments_and_mail_and_adds_actions ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
 
      Running tests/unlock.rs (target/debug/deps/unlock-2ba083f000cc27b5)
 
 running 6 tests
 test unavailable_keyring_blocks_without_creating_anything ... ok
 test locked_keyring_blocks_until_unlocked ... ok
+test mismatched_key_reports_wrong_key ... ok
 test missing_key_for_existing_store_is_never_replaced ... ok
 test first_run_generates_and_persists_a_key ... ok
-test mismatched_key_reports_wrong_key ... ok
 test concurrent_first_opens_share_one_durable_key ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
 
      Running tests/upgrade.rs (target/debug/deps/upgrade-6bc56437dc869f49)
 
@@ -2108,22 +2111,25 @@ test schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail ..
 test restore_keeps_real_drafts_outbox_and_mailbox_work_but_never_runs_them has been running for over 60 seconds
 test restore_keeps_real_drafts_outbox_and_mailbox_work_but_never_runs_them ... ok
 
-test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 64.82s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 76.78s
 
      Running tests/viewer.rs (target/debug/deps/viewer-9b2ce4de50c1b2c2)
 
-running 9 tests
+running 12 tests
 test allowed_csp_permits_https_images_and_nothing_else ... ok
 test csp_denies_scripts_connections_and_frames ... ok
-test remote_images_counts_only_what_allowing_would_load ... ok
+test union_of_choices ... ok
+test image_host_refuses_anything_that_is_not_a_plain_https_host ... ok
+test chosen_hosts_load_alone_and_are_the_only_csp_sources ... ok
+test referenced_cids_lists_only_image_sources_after_sanitising ... ok
+test remote_image_hosts_counts_https_images_by_host ... ok
 test blocked_policy_strips_active_and_remote_content ... ok
 test allowed_policy_loads_https_images_only ... ok
-test referenced_cids_lists_only_image_sources_after_sanitising ... ok
-test embedded_images_become_data_urls_without_network_references ... ok
 test remote_policy_is_unchanged_by_inline_images ... ok
+test embedded_images_become_data_urls_without_network_references ... ok
 test inline_images_share_a_document_budget ... ok
 
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.82s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.88s
 
    Doc-tests pigeon_app
 
