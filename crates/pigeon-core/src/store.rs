@@ -219,6 +219,8 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE recipient_history (
         email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT, last_sent INTEGER NOT NULL
     );",
+    "ALTER TABLE messages ADD COLUMN in_reply_to TEXT NOT NULL DEFAULT '';
+    ALTER TABLE messages ADD COLUMN threading_version INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.

@@ -30,6 +30,7 @@ pub mod reply;
 mod sending;
 pub mod smtp;
 pub mod source;
+mod threading;
 pub use actions::{ActionCounts, ActionKind, PendingAction};
 pub use sending::{
     Draft, DraftInput, OutboxItem, SavedRecipient, SendDecision, SendState, SendStatus,
@@ -101,6 +102,8 @@ pub struct MessageContent {
     pub reply_to: String,
     /// The References header: Message-IDs of the conversation so far.
     pub references: String,
+    #[serde(default)]
+    pub in_reply_to: String,
     /// The To and Cc headers alone. `recipients` also holds Bcc.
     pub to_list: String,
     pub cc_list: String,
@@ -133,6 +136,8 @@ pub struct Message {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SearchQuery {
     #[serde(default)]
+    pub conversations: bool,
+    #[serde(default)]
     pub text: String,
     pub account_id: Option<String>,
     pub folder: Option<String>,
@@ -150,6 +155,14 @@ pub struct SearchQuery {
 pub struct SearchResults {
     pub messages: Vec<MessageSummary>,
     pub total: u64,
+    pub groups: HashMap<i64, Vec<i64>>,
+    pub group_messages: HashMap<i64, Vec<MessageSummary>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Conversation {
+    pub messages: Vec<MessageSummary>,
+    pub incomplete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

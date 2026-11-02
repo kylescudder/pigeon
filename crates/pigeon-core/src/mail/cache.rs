@@ -31,12 +31,12 @@ pub(super) struct Arrived {
     ids: Vec<i64>,
 }
 
-const SUMMARY: &str = "m.id,m.account,m.folder,m.sender,m.recipients,m.subject,substr(m.body_text,1,180),m.date,m.unread,m.has_attachments";
+pub(super) const SUMMARY: &str = "m.id,m.account,m.folder,m.sender,m.recipients,m.subject,substr(m.body_text,1,180),m.date,m.unread,m.has_attachments";
 /// Current folder epoch, and not hidden by an outstanding move or deletion.
 pub(super) const VISIBLE: &str =
     "(f.uid_validity IS NULL OR m.uid_validity=f.uid_validity) AND m.local_hidden=0";
 
-fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
+pub(super) fn summary(row: &Row<'_>) -> rusqlite::Result<MessageSummary> {
     Ok(MessageSummary {
         id: row.get(0)?,
         account_id: row.get(1)?,
@@ -105,7 +105,7 @@ impl MailEngine {
         self.with_store(|store| {
             let db = store.connection();
             db.execute("INSERT INTO mail_folders(account,name,kind,uid_validity,total,delimiter) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(account,name) DO UPDATE SET kind=excluded.kind,total=excluded.total,delimiter=excluded.delimiter", params![id,folder.name,folder.kind,snapshot.uid_validity,snapshot.messages.len() as i64,folder.delimiter]).map_err(storage_error)?;
-            let known: HashSet<u32> = db.prepare("SELECT uid FROM messages WHERE account=?1 AND folder=?2 AND uid_validity=?3").map_err(storage_error)?.query_map(params![id,folder.name,snapshot.uid_validity], |row| row.get(0)).map_err(storage_error)?.collect::<rusqlite::Result<_>>().map_err(storage_error)?;
+            let known: HashSet<u32> = db.prepare("SELECT uid FROM messages WHERE account=?1 AND folder=?2 AND uid_validity=?3 AND threading_version=1").map_err(storage_error)?.query_map(params![id,folder.name,snapshot.uid_validity], |row| row.get(0)).map_err(storage_error)?.collect::<rusqlite::Result<_>>().map_err(storage_error)?;
             let cached = snapshot.messages.iter().filter(|message| known.contains(&message.uid)).count();
             db.execute("UPDATE mail_accounts SET sync_folder=?2,sync_cached=?3,sync_total=?4 WHERE id=?1", params![id,folder.name,cached as i64,snapshot.messages.len() as i64]).map_err(storage_error)?;
             Ok(known)
@@ -126,13 +126,14 @@ impl MailEngine {
             stored_unread.clear();
             let tx = store.connection().unchecked_transaction().map_err(storage_error)?;
             {
-                let mut insert = tx.prepare("INSERT INTO messages(account,folder,uid_validity,uid,sender,recipients,subject,body_text,body_html,date,unread,has_attachments,message_id,attachments,reply_to,reply_refs,to_list,cc_list) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18) ON CONFLICT(account,folder,uid_validity,uid) DO NOTHING").map_err(storage_error)?;
+                let mut insert = tx.prepare("INSERT INTO messages(account,folder,uid_validity,uid,sender,recipients,subject,body_text,body_html,date,unread,has_attachments,message_id,attachments,reply_to,reply_refs,to_list,cc_list,in_reply_to,threading_version) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,1) ON CONFLICT(account,folder,uid_validity,uid) DO UPDATE SET message_id=excluded.message_id,reply_refs=excluded.reply_refs,in_reply_to=excluded.in_reply_to,threading_version=1 WHERE messages.threading_version=0").map_err(storage_error)?;
                 for message in messages {
                     let content = &message.content;
                     let attachments = serde_json::to_string(&content.attachments).map_err(|_| MailError::Protocol)?;
                     let unread = flags.get(&message.uid).copied().unwrap_or(true);
-                    let stored = insert.execute(params![id,folder,validity,message.uid,content.sender,content.recipients,content.subject,content.body_text,content.body_html,content.date,unread,!content.attachments.is_empty(),content.message_id,attachments,content.reply_to,content.references,content.to_list,content.cc_list]).map_err(storage_error)?;
-                    if stored == 1 && unread && inbox {
+                    let existed: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM messages WHERE account=?1 AND folder=?2 AND uid_validity=?3 AND uid=?4)", params![id,folder,validity,message.uid], |row| row.get(0)).map_err(storage_error)?;
+                    let stored = insert.execute(params![id,folder,validity,message.uid,content.sender,content.recipients,content.subject,content.body_text,content.body_html,content.date,unread,!content.attachments.is_empty(),content.message_id,attachments,content.reply_to,content.references,content.to_list,content.cc_list,content.in_reply_to]).map_err(storage_error)?;
+                    if stored == 1 && !existed && unread && inbox {
                         stored_unread.push(tx.last_insert_rowid());
                     }
                 }
@@ -240,13 +241,20 @@ impl MailEngine {
             let from = |hint: &str| format!("FROM messages m {hint} JOIN mail_folders f ON f.account=m.account AND f.name=m.folder {fts_join} WHERE {}", conditions.join(" AND "));
             let count_from = from("INDEXED BY messages_search_metadata");
             let total = store.connection().query_row(&format!("SELECT count(*) {count_from}"), params_from_iter(values.iter()), |row| row.get::<_,i64>(0)).map_err(search_error)?;
+            if query.conversations {
+                let sql = format!("SELECT {SUMMARY} {} ORDER BY m.date DESC,m.id DESC", from(""));
+                let matched = store.connection().prepare(&sql).map_err(storage_error)?
+                    .query_map(params_from_iter(values.iter()), summary).map_err(search_error)?
+                    .collect::<rusqlite::Result<Vec<_>>>().map_err(search_error)?;
+                return super::threading::group_results(store.connection(), matched, query);
+            }
             values.push(i64::from(query.limit.unwrap_or(50).clamp(1,100)).into());
             values.push(i64::from(query.offset.unwrap_or(0)).into());
             let page_from = from(if fts_join.is_empty() { "" } else { "INDEXED BY messages_search_metadata" });
             let page_sql = format!("WITH page(id) AS MATERIALIZED (SELECT m.id {page_from} ORDER BY m.date DESC,m.id DESC LIMIT ? OFFSET ?) SELECT {SUMMARY} FROM page JOIN messages m ON m.id=page.id ORDER BY m.date DESC,m.id DESC");
             let mut statement = store.connection().prepare(&page_sql).map_err(storage_error)?;
             let messages = statement.query_map(params_from_iter(values.iter()), summary).map_err(search_error)?.collect::<rusqlite::Result<_>>().map_err(search_error)?;
-            Ok(SearchResults { messages, total: total as u64 })
+            Ok(SearchResults { messages, total: total as u64, groups: HashMap::new(), group_messages: HashMap::new() })
         })
     }
 

@@ -426,6 +426,7 @@ async function attempt(name, cmd, args) {
   await attempt("mail state", "mail_state");
   await attempt("search mail", "search_mail", { query: { text: "" }, requestId: "probe" });
   await attempt("cancel search", "cancel_mail_search", { requestId: "probe" });
+  await attempt("read conversation", "read_mail_conversation", { id: 1, includeJunkTrash: false });
   await attempt("read mail", "read_mail_message", { id: 1 });
   await attempt("sync mail", "sync_mail_account", { id: "probe" });
   await attempt("cancel sync", "cancel_mail_sync", { id: "probe" });
@@ -680,6 +681,7 @@ pub fn run() {
             mail::search_mail,
             mail::cancel_mail_search,
             mail::read_mail_message,
+            mail::read_mail_conversation,
             mail::save_mail_search,
             mail::delete_mail_search,
             mail::remove_mail_account,

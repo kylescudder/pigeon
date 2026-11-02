@@ -166,17 +166,33 @@ test.beforeEach(async ({ page }) => {
               if (query.unread_only)
                 messages = messages.filter((message: any) => message.unread);
               if (query.has_attachments) messages = [];
+              if (query.conversations) {
+                const groups: Record<number, number[]> = {};
+                const group_messages: Record<number, any[]> = {};
+                const rows: any[] = [];
+                for (const message of [...messages].sort((a: any,b: any) => b.date-a.date)) {
+                  const row = rows.find((r: any) => message.thread && r.thread === message.thread && r.account_id === message.account_id);
+                  if (row) { groups[row.id]!.push(message.id); group_messages[row.id]!.push(message); }
+                  else { rows.push({...message}); groups[message.id] = [message.id]; group_messages[message.id] = [message]; }
+                }
+                return {messages: rows, groups, group_messages, total: rows.length};
+              }
               return { messages, total: messages.length };
+            }
+            case "read_mail_conversation": {
+              if (localStorage.getItem("pigeon-test-thread-error")) throw { code: "not_found", message: "Message no longer cached." };
+              const selected = messageById(args.id);
+              return { messages: state.messages.filter((m: any) => !m.hidden && !m.deleted && m.account_id === selected.account_id && (selected.thread ? m.thread === selected.thread : m.id === selected.id)).sort((a: any,b: any) => a.date-b.date), incomplete: !!selected.thread };
             }
             case "read_mail_message":
               return {
                 summary: messageById(args.id),
-                body_text:
+                body_text: messageById(args.id).body_text ?? (
                   localStorage.getItem("pigeon-test-newbody")
                     ? "Updated cached body after sync"
                     : args.id === 1
                     ? "Please find the café receipt. <script>window.mailInjected=true</script>"
-                    : "The delivery plan is ready.",
+                    : "The delivery plan is ready."),
                 has_html: args.id === 2,
                 attachments:
                   args.id === 2
@@ -434,6 +450,7 @@ test("bulk changes queue offline, show pending work and conflicts, and permanent
 
   // Opening unread mail marks it read; offline, the change waits in the queue.
   await page.getByRole("button", { name: /Invoice 4471/ }).click();
+  await page.getByText("Message actions", {exact:true}).click();
   const readerActions = page.getByRole("article", { name: "Message reader" }).getByRole("toolbar", { name: "Message actions" });
   await expect(readerActions.getByRole("button", { name: "Mark unread", exact: true })).toBeVisible();
   if (!narrow) await expect(page.locator(".pending-link")).toContainText("1");
@@ -597,4 +614,88 @@ test("reply opens the composer with the quoted message and keeps it threaded", a
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).drafts[0]);
   expect(saved.in_reply_to).toBe("orig-2@example.test");
   expect(saved.references).toBe("orig-2@example.test");
+});
+
+test("conversations expose offline context, preserve flat search and isolate message actions", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    if (localStorage.getItem("pigeon-fixture-state")) return;
+    const base = { account_id: "acc-1", recipients: "mail@example.test", has_attachments: false, thread: "missing-root", preview: "Cached conversation", unread: true };
+    localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{ id: "acc-1", config: { name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993, username: "mail@example.test", security: "tls" }, status: "error", error: "Offline", sync_cached: 3, sync_total: 3 }],
+      folders: [{ id: "folder-1", account_id: "acc-1", name: "INBOX", kind: "inbox", total: 2, cached: 2, unread: 2 }, {id: "sent", account_id: "acc-1", name: "Sent", kind: "sent", total: 1, cached: 1, unread: 0}],
+      saved_searches: [], messages: [
+        {...base, id: 1, folder: "INBOX", sender: "Alice", subject: "Invoice 4471", date: 1793005200, body_text: "Please find the café receipt.\n\nThe total came to £42.80. Let me know if you need anything else for the expense report.\n\nThanks,\nAlice"},
+        {...base, id: 2, folder: "INBOX", sender: "Bob", subject: "Re: Invoice 4471", date: 1793008800},
+        {...base, id: 3, folder: "Sent", sender: "Me", subject: "Re: Invoice 4471", date: 1793010000, unread: false},
+      ],
+    }));
+    localStorage.setItem("pigeon-test-offline", "true");
+  });
+  await page.goto("/mail?view=inbox");
+  await expect(page.getByText("1 conversation", {exact:true})).toBeVisible();
+  await page.locator(".message-row-open").click();
+  const context = page.getByRole("region", {name: "Conversation messages"});
+  await expect(context.getByRole("button", {name:/Read message from/})).toHaveCount(3);
+  await expect(context.getByText("Part of this conversation is missing")).toBeVisible();
+  await context.getByRole("button", {name: "Read message from Alice", exact:true}).click();
+  await expect(page.locator(".message-text")).toContainText("café receipt");
+  await page.getByText("Message actions", {exact:true}).click();
+  await page.getByRole("toolbar", {name: "Message actions"}).getByRole("button", {name: "Mark unread"}).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).messages.find((m: any) => m.id === 1).unread)).toBe(true);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).messages.find((m: any) => m.id === 3).unread)).toBe(false);
+  expect(await page.locator(".message-reader").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.getByText("Message actions", {exact:true}).click();
+  const body = await page.locator(".message-text").boundingBox();
+  expect(body).not.toBeNull();
+  expect(body!.y + 25).toBeLessThan(testInfo.project.use.viewport!.height);
+  await page.screenshot({path: testInfo.outputPath("conversation-offline.png")});
+  await context.getByRole("button", {name: "Read message from Me", exact:true}).click();
+  await expect(page.locator(".thread-message-active")).toContainText("Sent");
+  await context.getByRole("button", {name: "Read message from Me", exact:true}).click();
+  await expect(page.locator(".message-text")).toHaveCount(0);
+  await context.getByRole("button", {name: "Read message from Alice", exact:true}).click();
+  await expect(page.locator(".message-text")).toContainText("café receipt");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  if (testInfo.project.name.startsWith("narrow")) await page.getByRole("button", {name:"Messages",exact:true}).click();
+  await page.getByLabel("Mail display").selectOption("messages");
+  await expect(page.locator(".message-row-open")).toHaveCount(2);
+  await page.getByLabel("Search mail").fill("receipt");
+  await expect(page.locator(".message-row-open")).toHaveCount(1);
+  await page.getByLabel("Mail display").selectOption("conversations");
+  await page.locator(".message-row-open").click();
+  await expect(context.getByRole("button", {name:/Read message from/})).toHaveCount(3);
+  await page.evaluate(() => localStorage.setItem("pigeon-test-thread-error", "true"));
+  await page.reload();
+  await page.locator(".message-row-open").click();
+  await expect(context.getByRole("alert")).toContainText("Message no longer cached");
+  await expect(page.locator(".message-text")).toBeVisible();
+});
+
+test("long conversations keep the open body visible and earlier and later messages reachable", async ({page}, testInfo) => {
+  await page.addInitScript(() => {
+    if (localStorage.getItem("pigeon-fixture-state")) return;
+    localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{id:"acc-1", config:{name:"Personal",address:"mail@example.test",host:"imap.example.test",port:993,username:"mail@example.test",security:"tls"},status:"idle"}],
+      folders: [{id:"inbox",account_id:"acc-1",name:"INBOX",kind:"inbox",total:15,cached:15,unread:0}], saved_searches:[],
+      messages: Array.from({length:15}, (_,i) => ({id:i+1,account_id:"acc-1",folder:"INBOX",sender:`Person ${i+1}`,recipients:"mail@example.test",subject:"Design review",preview:`Detail for message ${i+1}`,body_text:`Detail for message ${i+1}`,date:1793005200+i*60,unread:false,has_attachments:false,thread:"review"})),
+    }));
+  });
+  await page.goto("/mail?view=inbox");
+  await page.locator(".message-row-open").click();
+  const thread = page.getByRole("region", {name:"Conversation messages",exact:true});
+  await expect(page.locator(".message-text")).toHaveText("Detail for message 15");
+  await expect(thread.getByText("12 earlier messages", {exact:true})).toBeVisible();
+  const body = await page.locator(".message-text").boundingBox();
+  expect(body!.y + 20).toBeLessThan(testInfo.project.use.viewport!.height);
+  await thread.getByText("12 earlier messages", {exact:true}).click();
+  await thread.getByRole("button",{name:"Read message from Person 1",exact:true}).click();
+  await expect(page.locator(".message-text")).toHaveText("Detail for message 1");
+  await thread.getByText("12 later messages", {exact:true}).click();
+  await thread.getByRole("button",{name:"Read message from Person 15",exact:true}).click();
+  await expect(page.locator(".message-text")).toHaveText("Detail for message 15");
+  await page.getByRole("region", {name:"Message from Person 15",exact:true}).focus();
+  await page.keyboard.press("Shift+U");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).messages.find((m:any) => m.id === 15).unread)).toBe(true);
+  expect(await page.locator(".message-reader").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({path:testInfo.outputPath("long-conversation.png")});
 });

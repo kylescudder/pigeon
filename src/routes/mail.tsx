@@ -19,9 +19,11 @@ import {
   replyToMessage,
   type ReplyKind,
   readMailMessage,
+  readMailConversation,
   saveMailSearch,
   searchMail,
   type MailMessage,
+  type MessageSummary,
   type SearchQuery,
 } from "../lib/native";
 
@@ -72,6 +74,8 @@ function Mailbox({
     initialQuery?.has_attachments ?? false,
   );
   const [junk, setJunk] = useState(initialQuery?.include_junk_trash ?? false);
+  const [conversations, setConversations] = useState(initialQuery?.conversations ?? true);
+  const [conversationId, setConversationId] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   // `selected` is the message open in the reader; `checked` is the bulk
   // selection the toolbar and shortcuts act on.
@@ -100,6 +104,7 @@ function Mailbox({
           ? "INBOX"
           : (initialQuery?.folder ?? undefined)));
   const query: SearchQuery = {
+    conversations,
     text: debounced,
     account_id: accountId,
     folder,
@@ -115,6 +120,18 @@ function Mailbox({
     enabled: mail.desktop && !!mail.state,
     refetchInterval: mail.active.size > 0 || mail.state?.accounts.some((item) => item.status === "syncing") ? 2000 : 30000,
   });
+  const context = useQuery({
+    queryKey: ["mail", "conversation", conversationId, junk, folder],
+    queryFn: () => readMailConversation(conversationId!, junk || !!folder),
+    enabled: mail.desktop && !!mail.state && conversations && conversationId !== null,
+    refetchInterval: 30000,
+    gcTime: 0,
+  });
+  const openMessage = (id: number) => {
+    setSelected(id);
+    setConversationId(id);
+    formatted.reset();
+  };
   const detail = useQuery({
     queryKey: ["mail", "message", selected],
     queryFn: () => readMailMessage(selected!),
@@ -156,6 +173,8 @@ function Mailbox({
   const total = results.data?.total ?? 0;
   const messages = results.data?.messages ?? [];
   const checkedMessages = messages.filter((message) => checked.has(message.id));
+  const matchingIds = (id: number) => results.data?.groups?.[id] ?? [id];
+  const bulkIds = checkedMessages.flatMap((message) => matchingIds(message.id));
   const openSummary = detail.data?.summary;
   const afterAction = (ids: number[]) => (hidden: boolean) => {
     if (!hidden) return;
@@ -163,8 +182,9 @@ function Mailbox({
     if (selected !== null && ids.includes(selected)) setSelected(null);
   };
   const bulk = useMessageActions(
-    checkedMessages,
-    afterAction(checkedMessages.map((message) => message.id)),
+    // Bulk selection affects matching rows only, never hidden context.
+    checkedMessages.flatMap((message) => results.data?.group_messages?.[message.id] ?? [message]),
+    afterAction(bulkIds),
   );
   const reader = useMessageActions(
     openSummary ? [openSummary] : [],
@@ -172,9 +192,9 @@ function Mailbox({
   );
   // Opening a message marks it read once. A later explicit Mark unread sticks.
   useEffect(() => {
-    if (openSummary?.unread && !markedRead.current.has(openSummary.id)) {
+    if (openSummary && !markedRead.current.has(openSummary.id)) {
       markedRead.current.add(openSummary.id);
-      void mail.act([openSummary.id], { type: "mark_read" });
+      if (openSummary.unread) void mail.act([openSummary.id], { type: "mark_read" });
     }
   }, [openSummary?.id, openSummary?.unread]);
   const toggle = (id: number, range: boolean) => {
@@ -198,8 +218,9 @@ function Mailbox({
   useEffect(() => {
     setPage(0);
     setSelected(null);
+    setConversationId(null);
     setChecked(new Set());
-  }, [debounced, accountId, folder, unread, attachments, junk]);
+  }, [debounced, accountId, folder, unread, attachments, junk, conversations]);
   useEffect(() => {
     searchInput.current?.focus();
   }, []);
@@ -276,6 +297,11 @@ function Mailbox({
         </button>
       </div>
       <div className="mail-filters">
+        <select aria-label="Mail display" value={conversations ? "conversations" : "messages"}
+          onChange={(event) => setConversations(event.target.value === "conversations")}>
+          <option value="conversations">Conversations</option>
+          <option value="messages">Messages</option>
+        </select>
         <select
           aria-label="Filter by account"
           value={accountId ?? "all"}
@@ -403,11 +429,11 @@ function Mailbox({
                 type="checkbox"
                 aria-label="Select all on this page"
                 disabled={!messages.length}
-                checked={!!messages.length && bulk.count === messages.length}
+                checked={!!messages.length && checkedMessages.length === messages.length}
                 ref={(input) => {
                   if (input)
                     input.indeterminate =
-                      bulk.count > 0 && bulk.count < messages.length;
+                      bulk.count > 0 && checkedMessages.length < messages.length;
                 }}
                 onChange={(event) =>
                   setChecked(
@@ -422,7 +448,7 @@ function Mailbox({
                   ? `${bulk.count} selected`
                   : results.isFetching
                     ? "Searching…"
-                    : `${total.toLocaleString()} ${total === 1 ? "message" : "messages"}`}
+                    : `${total.toLocaleString()} ${conversations ? (total === 1 ? "conversation" : "conversations") : (total === 1 ? "message" : "messages")}`}
               </span>
             </label>
             {savedName && (
@@ -494,15 +520,15 @@ function Mailbox({
               onKeyDown={(event) => {
                 if (handleActionKey(event, bulk.count ? bulk : reader))
                   return;
-                if (event.key === "x" && selected !== null) {
+                if (event.key === "x" && (conversations ? conversationId : selected) !== null) {
                   event.preventDefault();
-                  toggle(selected, false);
+                  toggle((conversations ? conversationId : selected)!, false);
                   return;
                 }
                 if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
                 event.preventDefault();
                 const current = messages.findIndex(
-                  (message) => message.id === selected,
+                  (message) => message.id === (conversations ? conversationId : selected),
                 );
                 const index = Math.max(
                   0,
@@ -513,7 +539,7 @@ function Mailbox({
                 );
                 const message = messages[index];
                 if (message) {
-                  setSelected(message.id);
+                  openMessage(message.id);
                   document.getElementById(`message-${message.id}`)?.focus();
                 }
               }}
@@ -521,7 +547,7 @@ function Mailbox({
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`message-row${selected === message.id ? " selected" : ""}${checked.has(message.id) ? " checked" : ""}${message.unread ? " unread" : ""}`}
+                  className={`message-row${(conversations ? conversationId : selected) === message.id ? " selected" : ""}${checked.has(message.id) ? " checked" : ""}${message.unread ? " unread" : ""}`}
                 >
                 <input
                   type="checkbox"
@@ -536,20 +562,22 @@ function Mailbox({
                   id={`message-${message.id}`}
                   className="message-row-open"
                   aria-label={`${message.subject} — ${message.sender}`}
-                  aria-pressed={selected === message.id}
+                  aria-pressed={(conversations ? conversationId : selected) === message.id}
                   onClick={(event) => {
                     if (event.metaKey || event.ctrlKey || event.shiftKey) {
                       toggle(message.id, event.shiftKey);
                       return;
                     }
-                    setSelected(message.id);
+                    openMessage(message.id);
                     formatted.reset();
                   }}
                 >
                   <span className="message-dot" />
                   <span className="message-row-content">
                     <span className="message-row-top">
-                      <strong>{message.sender || "Unknown sender"}</strong>
+                      <strong>{conversations
+                        ? [...new Set((results.data?.group_messages?.[message.id] ?? [message]).map((member) => senderName(member.sender)))].join(", ")
+                        : message.sender || "Unknown sender"}</strong>
                       <time
                         dateTime={new Date(message.date * 1000).toISOString()}
                       >
@@ -561,6 +589,7 @@ function Mailbox({
                     </span>
                     <span className="message-subject">
                       {message.subject || "(No subject)"}
+                      {conversations && matchingIds(message.id).length > 1 && <small className="conversation-count" aria-label={`${matchingIds(message.id).length} matching messages`}>{matchingIds(message.id).length}</small>}
                       {message.has_attachments && (
                         <Icon name="file" size={12} />
                       )}
@@ -642,15 +671,33 @@ function Mailbox({
               </button>
             </div>
           ) : detail.data ? (
-            <MessageReader
-              message={detail.data}
-              actions={reader}
-              onBack={() => setSelected(null)}
-              onFormatted={() => formatted.mutate()}
-              formattedPending={formatted.isPending}
-              formattedError={formatted.error}
-              missingInline={formatted.data?.missing_inline ?? 0}
-            />
+            conversations ? (
+              <ConversationReader
+                message={detail.data}
+                members={context.data?.messages ?? [detail.data.summary]}
+                loading={context.isPending}
+                contextError={context.error}
+                incomplete={context.data?.incomplete ?? false}
+                onRetry={() => void context.refetch()}
+                onSelect={(id) => { setSelected(id); formatted.reset(); }}
+                actions={reader}
+                onBack={() => setSelected(null)}
+                onFormatted={() => formatted.mutate()}
+                formattedPending={formatted.isPending}
+                formattedError={formatted.error}
+                missingInline={formatted.data?.missing_inline ?? 0}
+              />
+            ) : (
+              <MessageReader
+                message={detail.data}
+                actions={reader}
+                onBack={() => setSelected(null)}
+                onFormatted={() => formatted.mutate()}
+                formattedPending={formatted.isPending}
+                formattedError={formatted.error}
+                missingInline={formatted.data?.missing_inline ?? 0}
+              />
+            )
           ) : null}
         </article>
       </div>
@@ -708,6 +755,108 @@ function Mailbox({
   );
 }
 
+type MessageReaderProps = {
+  message: MailMessage;
+  actions: MessageActions;
+  onBack: () => void;
+  onFormatted: () => void;
+  formattedPending: boolean;
+  formattedError: unknown;
+  missingInline: number;
+  embedded?: boolean;
+};
+
+function senderName(sender: string) {
+  return sender.replace(/\s*<[^>]+>\s*$/, "").replace(/^"|"$/g, "") || sender || "Unknown sender";
+}
+
+function ConversationReader(props: MessageReaderProps & {
+  members: MessageSummary[];
+  loading: boolean;
+  contextError: unknown;
+  incomplete: boolean;
+  onRetry: () => void;
+  onSelect: (id: number) => void;
+}) {
+  const { message, members, actions } = props;
+  const selected = message.summary.id;
+  const [collapsed, setCollapsed] = useState(false);
+  const openHeader = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    setCollapsed(false);
+    openHeader.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+  // A compact window around the open message keeps long threads readable.
+  // Earlier/later messages remain available through ordinary disclosure controls.
+  const all = members.some((member) => member.id === selected)
+    ? members : [...members, message.summary].sort((a, b) => a.date - b.date || a.id - b.id);
+  const position = all.findIndex((member) => member.id === selected);
+  const first = Math.max(0, position - 2);
+  const last = Math.min(all.length, position + 3);
+  const renderMember = (member: MessageSummary) => {
+    const active = member.id === selected;
+    const name = senderName(member.sender);
+    return (
+      <section key={member.id} className={`thread-message${active ? " thread-message-active" : ""}`}>
+        <button
+          type="button"
+          ref={active ? openHeader : undefined}
+          className="thread-message-heading"
+          aria-label={`Read message from ${name}`}
+          aria-expanded={active && !collapsed}
+          aria-controls={active ? `thread-body-${member.id}` : undefined}
+          onClick={() => {
+            if (active) setCollapsed((value) => !value);
+            else { setCollapsed(false); props.onSelect(member.id); }
+          }}
+        >
+          <span className="thread-avatar" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+          <span className="thread-person">
+            <span className="thread-sender">{name}{member.unread && <span className="thread-unread" title="Unread" />}</span>
+            <span className="thread-snippet">{active && !collapsed ? `To: ${member.recipients}` : member.preview || member.subject || "No text preview"}</span>
+          </span>
+          <span className="thread-stamp">
+            <time dateTime={new Date(member.date * 1000).toISOString()}>{new Intl.DateTimeFormat(undefined, {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}).format(member.date * 1000)}</time>
+            <span>{member.folder}</span>
+          </span>
+          <Icon name="chevron" size={13} className={active && !collapsed ? "thread-chevron-open" : undefined} />
+        </button>
+        {active && !collapsed && (
+          <div id={`thread-body-${member.id}`} className="thread-body" tabIndex={0} role="region" aria-label={`Message from ${name}`}>
+            <div className="thread-message-tools">
+              {message.summary.sender !== senderName(message.summary.sender) && <span>{message.summary.sender}</span>}
+              {message.has_html && <button type="button" className="button button-quiet" onClick={props.onFormatted} disabled={props.formattedPending}>{props.formattedPending ? "Opening…" : "Open formatted view"}</button>}
+              <details className="thread-action-menu">
+                <summary>Message actions</summary>
+                <div className="thread-action-popover"><MessageActionButtons actions={actions} /></div>
+              </details>
+            </div>
+            <MessageReader {...props} embedded />
+          </div>
+        )}
+      </section>
+    );
+  };
+  return (
+    <div className="conversation-reader" onKeyDown={(event) => {
+      if (!(event.target instanceof HTMLElement) || event.target.closest("input,select,textarea,summary,button")) return;
+      handleActionKey(event, actions);
+    }}>
+      <header className="thread-heading">
+        <button type="button" className="icon-button thread-back" aria-label="Messages" onClick={props.onBack}><Icon name="chevron" size={16} className="chevron-back" /></button>
+        <div><h2>{message.summary.subject.replace(/^(?:(?:re|fwd?):\s*)+/i, "") || "(No subject)"}</h2><p>{all.length} {all.length === 1 ? "message" : "messages"}{props.loading ? " · Loading conversation…" : ""}</p></div>
+      </header>
+      <div className="thread-timeline" role="region" aria-label="Conversation messages">
+        {props.contextError != null && <div className="thread-notice" role="alert">Conversation unavailable. {errorMessage(props.contextError)} <button type="button" onClick={props.onRetry}>Try again</button></div>}
+        {props.incomplete && <details className="thread-cache-note"><summary>Part of this conversation is missing</summary><p>Some referenced messages are not cached. Sync this account when you’re online to look for them.</p></details>}
+        {first > 0 && <details className="thread-history"><summary>{first} earlier {first === 1 ? "message" : "messages"}</summary>{all.slice(0, first).map(renderMember)}</details>}
+        {all.slice(first, last).map(renderMember)}
+        {last < all.length && <details className="thread-history"><summary>{all.length - last} later messages</summary>{all.slice(last).map(renderMember)}</details>}
+      </div>
+    </div>
+  );
+}
+
 function MessageReader({
   message,
   actions,
@@ -716,18 +865,11 @@ function MessageReader({
   formattedPending,
   formattedError,
   missingInline,
-}: {
-  message: MailMessage;
-  actions: MessageActions;
-  onBack: () => void;
-  onFormatted: () => void;
-  formattedPending: boolean;
-  formattedError: unknown;
-  missingInline: number;
-}) {
+  embedded = false,
+}: MessageReaderProps) {
   return (
     <>
-      <div className="reader-toolbar">
+      {!embedded && <div className="reader-toolbar">
         <button
           className="button button-quiet reader-back"
           type="button"
@@ -749,10 +891,10 @@ function MessageReader({
         <ReplyButtons messageId={message.summary.id} />
         <MessageActionButtons actions={actions} compact />
         <span>Plain text</span>
-      </div>
+      </div>}
       <div className="reader-content">
-        <h2>{message.summary.subject || "(No subject)"}</h2>
-        <div className="reader-identity">
+        {!embedded && <h2>{message.summary.subject || "(No subject)"}</h2>}
+        {!embedded && <div className="reader-identity">
           <span className="sender-avatar">
             {(message.summary.sender || "?").slice(0, 1).toUpperCase()}
           </span>
@@ -767,6 +909,7 @@ function MessageReader({
             </time>
           </div>
         </div>
+        }
         {formattedError != null && (
           <p role="alert" className="mail-inline-error">
             {errorMessage(formattedError)}
@@ -806,6 +949,7 @@ function MessageReader({
             </p>
           </section>
         )}
+        {embedded && <footer className="thread-reply"><ReplyButtons messageId={message.summary.id} /></footer>}
       </div>
     </>
   );
