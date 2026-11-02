@@ -1,13 +1,15 @@
 //! Main-window adapters for the mail engine. No SQL or protocol logic here.
 use pigeon_core::backup::{self, BackupError, Summary};
 use pigeon_core::mail::managed;
+use pigeon_core::mail::remote_images::TrustedSender;
 use pigeon_core::mail::reply::ReplyKind;
 use pigeon_core::mail::{
-    Account, AccountConfig, ActionCounts, ActionKind, Draft, DraftInput, Folder, MailEngine,
-    MailError, Message, OutboxItem, PendingAction, SavedSearch, SearchQuery, SearchResults,
-    SendDecision, SendState, SendingSettings,
+    Account, AccountConfig, ActionCounts, ActionKind, Draft, DraftInput, Folder, ImageSource,
+    MailEngine, MailError, Message, OutboxItem, PendingAction, SavedSearch, SearchQuery,
+    SearchResults, SendDecision, SendState, SendingSettings,
 };
 use pigeon_core::secrets::Secret;
+use pigeon_core::viewer::{self, RemoteContent};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -100,12 +102,9 @@ async fn task<T: Send + 'static>(
                     let _ = window.close();
                 }
             }
-            handle
-                .state::<crate::ShellState>()
-                .viewer_documents
-                .lock()
-                .unwrap()
-                .clear();
+            let state = handle.state::<crate::ShellState>();
+            state.viewer_documents.lock().unwrap().clear();
+            state.message_viewers.lock().unwrap().clear();
         });
     }
     result.map_err(Into::into)
@@ -233,6 +232,43 @@ pub async fn sender_image(
 }
 
 #[tauri::command]
+pub async fn trusted_senders(
+    app: AppHandle,
+    webview: tauri::Webview,
+) -> Result<Vec<TrustedSender>, MailApiError> {
+    guard(&webview)?;
+    task(app, |engine| engine.trusted_senders()).await
+}
+
+/// Always load remote images from the sender of this message: from every
+/// source, or only from `sources` the message loads from.
+#[tauri::command]
+pub async fn trust_sender(
+    app: AppHandle,
+    webview: tauri::Webview,
+    message: i64,
+    sources: Option<Vec<String>>,
+) -> Result<TrustedSender, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.trust_sender_of(message, sources)).await
+}
+
+/// Stops trusting a sender, or only one of their trusted sources.
+#[tauri::command]
+pub async fn distrust_sender(
+    app: AppHandle,
+    webview: tauri::Webview,
+    email: String,
+    source: Option<String>,
+) -> Result<(), MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| {
+        engine.distrust_sender(&email, source.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn save_mail_search(
     app: AppHandle,
     webview: tauri::Webview,
@@ -285,22 +321,56 @@ pub async fn unlock_mail(app: AppHandle, webview: tauri::Webview) -> Result<(), 
 pub struct OpenedMessage {
     /// Embedded images that could not be downloaded, such as while offline.
     missing_inline: u32,
+    /// Remote images that were not loaded.
+    blocked_remote: u32,
+    /// Where the message's remote images come from, loaded or not.
+    sources: Vec<ImageSource>,
+    /// The sender's address, when there is one that images could be allowed for.
+    sender: Option<String>,
+    /// The sender is trusted for every source.
+    trusted: bool,
 }
 
+/// Opens a message's formatted view. Remote images load when asked for (all
+/// of them, or from `load_sources`), when the user's setting loads them
+/// everywhere, or as far as the sender is trusted. Reopening a message
+/// replaces its viewer window.
 #[tauri::command]
 pub async fn open_mail_message(
     app: AppHandle,
     webview: tauri::Webview,
     id: i64,
+    load_images: Option<bool>,
+    load_sources: Option<Vec<String>>,
 ) -> Result<OpenedMessage, MailApiError> {
     guard(&webview)?;
-    // Embedded images are fetched over the mail connection and inlined; the
-    // viewer document itself can load nothing from the network.
-    let document = task(app.clone(), move |engine| engine.viewer_document(id)).await?;
+    let everywhere = app.state::<crate::desktop::DesktopState>().remote_images();
+    // Only well-formed hosts reach the sanitiser and CSP.
+    let sources = load_sources
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|host| viewer::image_host(&format!("https://{}/", host.trim())))
+        .collect::<std::collections::BTreeSet<_>>();
+    let load_remote = match (
+        load_images.unwrap_or(false) || everywhere,
+        sources.is_empty(),
+    ) {
+        (true, _) => RemoteContent::Allowed,
+        (false, true) => RemoteContent::Blocked,
+        (false, false) => RemoteContent::Hosts(sources),
+    };
+    // Embedded images are fetched over the mail connection and inlined.
+    let document = task(app.clone(), move |engine| {
+        engine.viewer_document(id, load_remote)
+    })
+    .await?;
     let opened = OpenedMessage {
         missing_inline: document.missing_inline,
+        blocked_remote: document.blocked_remote,
+        sources: document.sources,
+        sender: document.sender,
+        trusted: document.trusted,
     };
-    let document = document.html;
     let token = app
         .state::<crate::ShellState>()
         .viewer_count
@@ -310,12 +380,25 @@ pub async fn open_mail_message(
         .viewer_documents
         .lock()
         .unwrap()
-        .insert(page.clone(), document);
+        .insert(page.clone(), (document.html, document.remote));
     tauri::async_runtime::spawn_blocking(move || {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = app.clone();
         app.run_on_main_thread(move || {
-            let _ = tx.send(crate::open_viewer(&handle, &page, "Message · Pigeon"));
+            let state = handle.state::<crate::ShellState>();
+            let previous = state.message_viewers.lock().unwrap().remove(&id);
+            if let Some(window) = previous.and_then(|label| handle.get_webview_window(&label)) {
+                let _ = window.close();
+            }
+            let opened = crate::open_viewer(&handle, &page, "Message · Pigeon");
+            if let Ok(label) = &opened {
+                state
+                    .message_viewers
+                    .lock()
+                    .unwrap()
+                    .insert(id, label.clone());
+            }
+            let _ = tx.send(opened);
         })
         .map_err(|error| MailApiError {
             code: "viewer",

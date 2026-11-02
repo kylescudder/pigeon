@@ -14,7 +14,7 @@ use crate::secrets::{KeyringState, Secret, SecretStore};
 use crate::store::Store;
 use crate::unlock::{StoreBlocked, UnlockOutcome, open_store};
 
-pub use attachments::{AttachmentData, MAX_ATTACHMENT_BYTES, ViewerDocument};
+pub use attachments::{AttachmentData, ImageSource, MAX_ATTACHMENT_BYTES, ViewerDocument};
 
 mod actions;
 mod attachments;
@@ -28,6 +28,7 @@ mod net;
 pub mod operations;
 mod query;
 mod recovery;
+pub mod remote_images;
 pub mod reply;
 pub mod sender_images;
 mod sending;

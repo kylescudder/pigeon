@@ -70,6 +70,7 @@ test.beforeEach(async ({ page }) => {
                   notifications: "senderSubject",
                   tray: false,
                   senderImages: !!localStorage.getItem("pigeon-test-sender-images"),
+                  remoteImages: !!localStorage.getItem("pigeon-test-remote-images"),
                 },
                 managed: false,
                 warning: null,
@@ -77,6 +78,8 @@ test.beforeEach(async ({ page }) => {
             case "set_desktop_settings":
               if (args.settings.senderImages) localStorage.setItem("pigeon-test-sender-images", "on");
               else localStorage.removeItem("pigeon-test-sender-images");
+              if (args.settings.remoteImages) localStorage.setItem("pigeon-test-remote-images", "on");
+              else localStorage.removeItem("pigeon-test-remote-images");
               return { settings: args.settings, managed: false, warning: null };
             case "sender_image": {
               const looked = JSON.parse(localStorage.getItem("pigeon-test-looked-up") ?? "[]");
@@ -245,9 +248,42 @@ test.beforeEach(async ({ page }) => {
             case "unlock_mail":
               localStorage.removeItem("pigeon-test-locked");
               return;
-            case "open_mail_message":
+            case "open_mail_message": {
               // Message 2 models opening while its embedded image is unreachable.
-              return { missing_inline: args.id === 2 ? 1 : 0 };
+              // Every message has three remote images from two hosts, from news@example.test.
+              const trust = JSON.parse(localStorage.getItem("pigeon-test-trust") ?? "{}");
+              const sender = "news@example.test";
+              const trusted = trust[sender] ?? { all: false, hosts: [] };
+              const opens = JSON.parse(localStorage.getItem("pigeon-test-opens") ?? "[]");
+              localStorage.setItem("pigeon-test-opens", JSON.stringify([...opens, { id: args.id, loadImages: args.loadImages, loadSources: args.loadSources }]));
+              const everything = args.loadImages || trusted.all || !!localStorage.getItem("pigeon-test-remote-images");
+              const sources = [["tracker.example", 1], ["cdn.news.example", 2]].map(([host, images]) => {
+                const isTrusted = trusted.all || trusted.hosts.includes(host);
+                return { host, images, trusted: isTrusted, loaded: everything || isTrusted || args.loadSources.includes(host) };
+              });
+              const blocked = sources.filter((source) => !source.loaded).reduce((sum, source) => sum + (source.images as number), 0);
+              return { missing_inline: args.id === 2 ? 1 : 0, blocked_remote: blocked, sources, sender, trusted: trusted.all };
+            }
+            case "trusted_senders": {
+              const trust = JSON.parse(localStorage.getItem("pigeon-test-trust") ?? "{}");
+              return Object.entries(trust).map(([email, value]: [string, any]) => ({ email, all: value.all, hosts: value.all ? [] : value.hosts, added: 1793008800 }));
+            }
+            case "trust_sender": {
+              const trust = JSON.parse(localStorage.getItem("pigeon-test-trust") ?? "{}");
+              const current = trust["news@example.test"] ?? { all: false, hosts: [] };
+              trust["news@example.test"] = args.sources
+                ? { all: current.all, hosts: [...new Set([...current.hosts, ...args.sources])] }
+                : { all: true, hosts: [] };
+              localStorage.setItem("pigeon-test-trust", JSON.stringify(trust));
+              return { email: "news@example.test", ...trust["news@example.test"], added: 1793008800 };
+            }
+            case "distrust_sender": {
+              const trust = JSON.parse(localStorage.getItem("pigeon-test-trust") ?? "{}");
+              if (args.source && trust[args.email]) trust[args.email].hosts = trust[args.email].hosts.filter((host: string) => host !== args.source);
+              if (!args.source || (!trust[args.email]?.all && !trust[args.email]?.hosts.length)) delete trust[args.email];
+              localStorage.setItem("pigeon-test-trust", JSON.stringify(trust));
+              return;
+            }
             case "update_mail_password":
               return;
             case "send_state":
@@ -555,6 +591,83 @@ test("formatted view reports embedded images it could not download", async ({ pa
   await page.getByRole("button", { name: /Invoice 4471/ }).click();
   await expect(page.getByRole("heading", { name: "Invoice 4471", exact: true })).toBeVisible();
   await expect(page.getByText(/could not be downloaded/)).toHaveCount(0);
+});
+
+test("remote images load all, chosen sources, or from trusted senders", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("pigeon-fixture-state")) localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{ id: "acc-1", config: { name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993, username: "mail@example.test", security: "tls" }, status: "idle", error: null, last_synced: 1793008800, sync_folder: null, sync_cached: 2, sync_total: 2 }],
+      folders: [{ id: "folder-1", account_id: "acc-1", name: "INBOX", kind: "inbox", delimiter: "/", total: 2, cached: 2, unread: 1 }], saved_searches: [],
+    }));
+  });
+  await page.goto("/mail");
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  const open = page.getByRole("button", { name: "Open formatted view", exact: true });
+  await open.click();
+  const note = page.getByText(/remote images? from/);
+  await expect(note).toHaveText(
+    "3 remote images from 2 sources were not loaded. Loading images tells those servers that you opened this message.",
+  );
+  await page.screenshot({ path: testInfo.outputPath("remote-images-blocked.png") });
+  const opens = () => page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-test-opens") ?? "[]"));
+
+  // Choose one source and load it this once.
+  await page.getByRole("button", { name: "Choose sources…" }).click();
+  const sources = page.getByRole("group", { name: "Image sources" });
+  await expect(sources.getByRole("checkbox")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Load selected", exact: true })).toBeDisabled();
+  await sources.getByRole("checkbox", { name: /cdn\.news\.example/ }).check();
+  await page.screenshot({ path: testInfo.outputPath("remote-images-choose.png") });
+  await page.getByRole("button", { name: "Load selected", exact: true }).click();
+  await expect(note).toHaveText(/^1 remote image from 1 source was not loaded/);
+  expect((await opens()).at(-1)).toMatchObject({ loadImages: false, loadSources: ["cdn.news.example"] });
+
+  // Trust the other source for this sender; the once-loaded one stays loaded.
+  await page.getByRole("button", { name: "Choose sources…" }).click();
+  await sources.getByRole("checkbox", { name: /tracker\.example/ }).check();
+  await page.getByRole("button", { name: "Always load selected from news@example.test" }).click();
+  await expect(note).toHaveCount(0);
+  expect((await opens()).at(-1)).toMatchObject({ loadSources: ["cdn.news.example"] });
+  await expect(page.getByText("From news@example.test, images from tracker.example always load.")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("remote-images-trusted-source.png") });
+
+  // Reopening loads only the trusted source; Load all images is this once.
+  await open.click();
+  await expect(note).toHaveText(/^2 remote images from 1 source were not loaded/);
+  await page.getByRole("button", { name: "Load all images", exact: true }).click();
+  await expect(note).toHaveCount(0);
+  expect((await opens()).at(-1)).toMatchObject({ loadImages: true });
+
+  // Always load all replaces the chosen sources.
+  await open.click();
+  await page.getByRole("button", { name: "Always load all from news@example.test" }).click();
+  await expect(page.getByText("Images from news@example.test always load.")).toBeVisible();
+
+  await page.goto("/settings");
+  const trusted = page.getByRole("region", { name: "Trusted senders" });
+  await expect(trusted.getByText("All sources")).toBeVisible();
+  await trusted.getByRole("button", { name: "Stop loading images from news@example.test" }).click();
+  await expect(trusted.getByText("No trusted senders yet.")).toBeVisible();
+
+  // A sender trusted for chosen sources lists them, each removable.
+  await page.evaluate(() => localStorage.setItem("pigeon-test-trust", JSON.stringify({ "news@example.test": { all: false, hosts: ["cdn.news.example", "tracker.example"] } })));
+  await page.reload();
+  const hosts = trusted.getByRole("list", { name: "Sources trusted for news@example.test" });
+  await expect(hosts.getByRole("listitem")).toHaveCount(2);
+  await trusted.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("trusted-senders.png") });
+  await hosts.getByRole("button", { name: "Stop loading images from tracker.example for news@example.test" }).click();
+  await expect(hosts.getByRole("listitem")).toHaveCount(1);
+  await expect(hosts).toContainText("cdn.news.example");
+
+  // The global setting loads them everywhere.
+  const choice = page.getByRole("group", { name: "Remote images" });
+  await choice.getByRole("button", { name: "Always load" }).click();
+  await expect(choice.getByRole("button", { name: "Always load" })).toHaveAttribute("aria-pressed", "true");
+  await page.goto("/mail");
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await page.getByRole("button", { name: "Open formatted view", exact: true }).click();
+  await expect(page.getByText(/remote images? from/)).toHaveCount(0);
 });
 
 test("a Home Manager account is read-only apart from its password", async ({ page }) => {

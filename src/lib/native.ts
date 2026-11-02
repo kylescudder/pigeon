@@ -33,6 +33,8 @@ export type DesktopSettings = {
   tray: boolean;
   /** Tells an outside service which domains email the user, so it is opt-in. */
   senderImages: boolean;
+  /** Loads remote images in every message, which tells senders you opened it. */
+  remoteImages: boolean;
 };
 export type LoadedDesktopSettings = {
   settings: DesktopSettings;
@@ -210,10 +212,49 @@ export const readMailMessage = (id: number) =>
 /** A `data:` URL, or null when the sender's initials should show instead. */
 export const senderImage = (domain: string) =>
   invoke<string | null>("sender_image", { domain });
-/** Embedded images that could not be downloaded, for example while offline. */
-export type OpenedMessage = { missing_inline: number };
-export const openMailMessage = (id: number) =>
-  invoke<OpenedMessage>("open_mail_message", { id });
+/** One host a message loads remote images from. */
+export type ImageSource = {
+  host: string;
+  images: number;
+  /** Loaded in the viewer just opened. */
+  loaded: boolean;
+  /** Always loads for this sender. */
+  trusted: boolean;
+};
+export type OpenedMessage = {
+  /** Embedded images that could not be downloaded, for example while offline. */
+  missing_inline: number;
+  /** Remote images that were not loaded. */
+  blocked_remote: number;
+  sources: ImageSource[];
+  /** The sender's address, when images could be allowed for it. */
+  sender: string | null;
+  /** The sender is trusted for every source. */
+  trusted: boolean;
+};
+/** Which remote images to load this time, beyond what is trusted. */
+export type LoadImages = { all?: boolean; sources?: string[] };
+/** Opens the formatted view, replacing any already open for this message. */
+export const openMailMessage = (id: number, load: LoadImages = {}) =>
+  invoke<OpenedMessage>("open_mail_message", {
+    id,
+    loadImages: load.all ?? false,
+    loadSources: load.sources ?? [],
+  });
+/** A sender whose remote images load from every source, or chosen hosts. */
+export type TrustedSender = {
+  email: string;
+  all: boolean;
+  hosts: string[];
+  added: number;
+};
+export const trustedSenders = () => invoke<TrustedSender[]>("trusted_senders");
+/** Always loads this message's sender's images: all, or from `sources`. */
+export const trustSender = (message: number, sources?: string[]) =>
+  invoke<TrustedSender>("trust_sender", { message, sources: sources ?? null });
+/** Stops trusting a sender, or only one of their sources. */
+export const distrustSender = (email: string, source?: string) =>
+  invoke<void>("distrust_sender", { email, source: source ?? null });
 export const saveMailSearch = (name: string, query: SearchQuery) =>
   invoke<SavedSearch>("save_mail_search", { name, query });
 export const deleteMailSearch = (id: string) =>

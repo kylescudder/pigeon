@@ -3,6 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use pigeon_core::mail::ImageSource;
 use pigeon_core::mail::source::{
     FolderSnapshot, MailConnector, MailSession, RemoteFlag, RemoteFolder, RemoteMessage,
 };
@@ -11,7 +12,7 @@ use pigeon_core::mail::{
     TransportSecurity,
 };
 use pigeon_core::secrets::{KeyringState, MemoryStore, Secret};
-use pigeon_core::viewer::MAX_INLINE_DOCUMENT_BYTES;
+use pigeon_core::viewer::{MAX_INLINE_DOCUMENT_BYTES, RemoteContent};
 use zeroize::Zeroizing;
 
 const CANARY: &[u8] = b"ATTACHMENT-RETENTION-CANARY-7f3a";
@@ -128,7 +129,9 @@ impl MailSession for Session {
                     body_html: Some(format!(
                         "<p>Hello</p><img src=\"cid:logo@pigeon.test\" alt=\"logo\">\
                          <img src=\"cid:broken@pigeon.test\" alt=\"broken\">\
-                         <img src=\"https://tracker.example/pixel.gif\" alt=\"remote\">{extra_html}"
+                         <img src=\"https://tracker.example/pixel.gif\" alt=\"remote\">\
+                         <img src=\"https://cdn.news.example/hero.png\" alt=\"hero\">\
+                         <img src=\"https://cdn.news.example/footer.png\" alt=\"footer\">{extra_html}"
                     )),
                     date: 1793005200,
                     attachments: attachments.clone(),
@@ -361,7 +364,10 @@ fn locking_the_keyring_discards_session_downloads() {
 fn viewer_document_embeds_referenced_images_with_one_connection() {
     let f = fixture();
     let connects = f.state.lock().unwrap().connects;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
     assert_eq!(document.missing_inline, 1, "the broken part");
     assert!(document.html.contains("data:image/png;base64,"));
     assert!(!document.html.contains("cid:"));
@@ -376,10 +382,190 @@ fn viewer_document_embeds_referenced_images_with_one_connection() {
 }
 
 #[test]
+fn remote_images_stay_blocked_unless_asked_for() {
+    let f = fixture();
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
+    assert_eq!(document.remote, RemoteContent::Blocked);
+    assert_eq!(document.blocked_remote, 3);
+    assert_eq!(
+        document.sources,
+        [
+            source("tracker.example", 1, false, false),
+            source("cdn.news.example", 2, false, false),
+        ]
+    );
+    assert_eq!(document.sender.as_deref(), Some("alice@pigeon.test"));
+    assert!(!document.trusted);
+    assert!(document.html.contains("img-src data:;"));
+    assert!(!document.html.contains("https://"));
+
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Allowed)
+        .unwrap();
+    assert_eq!(document.remote, RemoteContent::Allowed);
+    assert_eq!(document.blocked_remote, 0);
+    assert!(!document.trusted);
+    assert!(document.html.contains("https://tracker.example/pixel.gif"));
+    assert!(document.html.contains("img-src data: https:;"));
+    // Embedded images are still inlined, never left as `cid:`.
+    assert!(document.html.contains("data:image/png;base64,"));
+    assert!(!document.html.contains("cid:"));
+}
+
+fn source(host: &str, images: u32, loaded: bool, trusted: bool) -> ImageSource {
+    ImageSource {
+        host: host.into(),
+        images,
+        loaded,
+        trusted,
+    }
+}
+
+fn hosts(list: &[&str]) -> RemoteContent {
+    RemoteContent::Hosts(list.iter().map(|host| host.to_string()).collect())
+}
+
+#[test]
+fn chosen_sources_load_alone_and_narrow_the_csp() {
+    let f = fixture();
+    let document = f
+        .engine
+        .viewer_document(f.message, hosts(&["cdn.news.example"]))
+        .unwrap();
+    assert_eq!(document.blocked_remote, 1);
+    assert_eq!(
+        document.sources,
+        [
+            source("tracker.example", 1, false, false),
+            source("cdn.news.example", 2, true, false),
+        ]
+    );
+    assert!(document.html.contains("https://cdn.news.example/hero.png"));
+    assert!(!document.html.contains("tracker.example"));
+    assert!(
+        document
+            .html
+            .contains("img-src data: https://cdn.news.example;")
+    );
+}
+
+#[test]
+fn trusted_senders_load_remote_images_and_survive_a_restart() {
+    let mut f = fixture();
+    assert!(f.engine.trusted_senders().unwrap().is_empty());
+    let trusted = f.engine.trust_sender_of(f.message, None).unwrap();
+    assert_eq!(trusted.email, "alice@pigeon.test");
+    assert!(trusted.all);
+    // Trusting twice keeps one entry.
+    f.engine.trust_sender_of(f.message, None).unwrap();
+    f.reopen();
+    let list = f.engine.trusted_senders().unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].email, "alice@pigeon.test");
+    assert_eq!(
+        f.engine.sender_trust("ALICE <Alice@Pigeon.Test>").unwrap(),
+        RemoteContent::Allowed
+    );
+
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
+    assert!(document.trusted);
+    assert_eq!(document.remote, RemoteContent::Allowed);
+    assert!(document.html.contains("https://tracker.example/pixel.gif"));
+
+    f.engine.distrust_sender("Alice@pigeon.test", None).unwrap();
+    assert!(f.engine.trusted_senders().unwrap().is_empty());
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
+    assert!(!document.trusted);
+    assert!(!document.html.contains("tracker.example"));
+}
+
+#[test]
+fn a_sender_can_be_trusted_for_chosen_sources_only() {
+    let mut f = fixture();
+    let trusted = f
+        .engine
+        .trust_sender_of(f.message, Some(vec!["CDN.news.example".into()]))
+        .unwrap();
+    assert!(!trusted.all);
+    assert_eq!(trusted.hosts, ["cdn.news.example"]);
+    f.reopen();
+    assert_eq!(
+        f.engine.sender_trust("alice@pigeon.test").unwrap(),
+        hosts(&["cdn.news.example"])
+    );
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
+    assert!(!document.trusted);
+    assert_eq!(
+        document.sources,
+        [
+            source("tracker.example", 1, false, false),
+            source("cdn.news.example", 2, true, true),
+        ]
+    );
+    assert!(!document.html.contains("tracker.example"));
+
+    // Asking for the other source this once adds to the trusted one.
+    let document = f
+        .engine
+        .viewer_document(f.message, hosts(&["tracker.example"]))
+        .unwrap();
+    assert_eq!(document.blocked_remote, 0);
+    assert!(
+        document
+            .html
+            .contains("img-src data: https://cdn.news.example https://tracker.example;")
+    );
+
+    // Only hosts the message loads from can be trusted.
+    for wanted in [
+        vec![],
+        vec!["elsewhere.example".to_string()],
+        vec!["cdn.news.example;img-src *".to_string()],
+    ] {
+        assert!(matches!(
+            f.engine.trust_sender_of(f.message, Some(wanted)),
+            Err(MailError::InvalidConfig(_))
+        ));
+    }
+
+    // Trusting every source replaces the list; removing one host leaves the rest.
+    f.engine
+        .trust_sender_of(f.message, Some(vec!["tracker.example".into()]))
+        .unwrap();
+    f.engine
+        .distrust_sender("alice@pigeon.test", Some("tracker.example"))
+        .unwrap();
+    assert_eq!(
+        f.engine.trusted_senders().unwrap()[0].hosts,
+        ["cdn.news.example"]
+    );
+    let all = f.engine.trust_sender_of(f.message, None).unwrap();
+    assert!(all.all && all.hosts.is_empty());
+    f.engine.distrust_sender("alice@pigeon.test", None).unwrap();
+    assert!(f.engine.trusted_senders().unwrap().is_empty());
+}
+
+#[test]
 fn viewer_document_opens_offline_without_embedded_images() {
     let f = fixture();
     f.state.lock().unwrap().offline = true;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
     assert_eq!(document.missing_inline, 2);
     assert!(document.html.contains("Hello"));
     assert!(!document.html.contains("cid:"));
@@ -390,11 +576,16 @@ fn keep_setting_applies_to_embedded_images() {
     let mut f = fixture();
     assert!(!f.engine.keep_attachments().unwrap());
     f.engine.set_keep_attachments(true).unwrap();
-    f.engine.viewer_document(f.message).unwrap();
+    f.engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
     f.reopen();
     assert!(f.engine.keep_attachments().unwrap());
     f.state.lock().unwrap().offline = true;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
     assert_eq!(document.missing_inline, 1);
     assert!(document.html.contains("data:image/png;base64,"));
 }
@@ -407,7 +598,10 @@ fn embedded_images_stop_downloading_at_the_document_budget() {
         many_images: Some((12, size)),
         ..Default::default()
     });
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
     let state = f.state.lock().unwrap();
     let many: Vec<_> = state
         .fetches
@@ -445,7 +639,10 @@ fn kept_and_session_images_count_toward_the_document_budget() {
     }
     f.reopen();
     f.state.lock().unwrap().offline = true;
-    let document = f.engine.viewer_document(f.message).unwrap();
+    let document = f
+        .engine
+        .viewer_document(f.message, RemoteContent::Blocked)
+        .unwrap();
     // The logo was never kept, so offline only the kept images can show.
     assert_eq!(
         document.html.matches("data:image/png").count(),

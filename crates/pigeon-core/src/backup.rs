@@ -58,6 +58,8 @@ pub const TABLES: &[(&str, TableRole)] = &[
     ("saved_searches", TableRole::Backed { on_restore: &[] }),
     ("settings", TableRole::Backed { on_restore: &[] }),
     ("recipient_history", TableRole::Backed { on_restore: &[] }),
+    ("image_trust", TableRole::Backed { on_restore: &[] }),
+    ("image_trust_hosts", TableRole::Backed { on_restore: &[] }),
     // Drafts never execute; only an explicit Send creates an operation.
     ("drafts", TableRole::Backed { on_restore: &[] }),
     (

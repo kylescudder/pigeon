@@ -30,7 +30,7 @@ folder:Archive is:unread has:attachment
 
 Dates use the device's local timezone. Structured filters combine with AND; Boolean operators apply to the full-text expression. Clickable account/folder/unread/attachment filters combine with typed terms. Junk/Trash are indexed but excluded by default unless selected or included. Results are sorted newest first, returned in pages of 50, and retain exact counts. Saved searches survive restart in the encrypted database. Explicit sync refreshes an open cached message too; background reader polling detects remote removal/replacement, and closing the reader discards its query cache. Unsaved search text stays in session memory; URLs contain opaque navigation identifiers, not mail addresses, folder names, or search terms.
 
-Plain text is rendered as text in the main window. **Open formatted view** opens sanitised HTML in a separate unprivileged webview with remote content blocked. Embedded (`cid:`) images are downloaded on opening and shown inline; see [attachments and embedded images](#attachments-and-embedded-images-2026-10-30). Attachment filenames/types are visible; saving or opening attachments is not available yet.
+Plain text is rendered as text in the main window. **Open formatted view** opens sanitised HTML in a separate unprivileged webview with remote content blocked unless the user loads it; see [remote images](desktop.md#remote-images). Embedded (`cid:`) images are downloaded on opening and shown inline; see [attachments and embedded images](#attachments-and-embedded-images-2026-10-30). Attachment filenames/types are visible; saving or opening attachments is not available yet.
 
 Use **Manage account** on its overview card to verify a replacement password or remove its local cache and keyring credential. Removal leaves server mail untouched. Password verification failure preserves the preceding working credential.
 
@@ -109,7 +109,7 @@ cargo test --release --locked -p pigeon-core --test search_benchmark -- --ignore
 
 Run this milestone on the user's x86_64 NixOS desktop: connect the actual provider, observe initial coverage and errors, read/search after quitting and reopening offline, confirm filters/saved searches, open a real formatted message, run the expanded isolation probe, then exercise background reopen and both Wayland/X11 where available. No actual user credentials or private mail were used during development.
 
-SMTP/composing/drafts, mailbox mutations and the durable offline action queue, attachment saving/opening, remote-content controls, backups/recovery export, OAuth, notifications, Home Manager startup configuration, and the five-design picker remain later work in the agreed product plan. This receiving build is ready for testing, not a complete daily-client replacement.
+SMTP/composing/drafts, mailbox mutations and the durable offline action queue, attachment saving/opening, backups/recovery export, OAuth, notifications, Home Manager startup configuration, and the five-design picker remain later work in the agreed product plan. This receiving build is ready for testing, not a complete daily-client replacement.
 
 ## Partial-sync diagnosis, 2026-10-30
 
