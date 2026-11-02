@@ -235,6 +235,7 @@ impl MailEngine {
             store.connection().progress_handler(1000, Some(move || cancel.load(Ordering::Relaxed) || Instant::now() > deadline)).map_err(storage_error)?;
             let _progress = SearchProgress(store.connection());
             let mut conditions = vec![VISIBLE.to_owned()];
+            let include_junk_trash = plan.include_junk_trash;
             let mut values = plan.values;
             conditions.extend(plan.filters);
             let fts_join = if !plan.text.is_empty() { conditions.push("messages_fts MATCH ?".into()); values.push(plan.text.into()); "JOIN messages_fts ON messages_fts.rowid=m.id" } else { "" };
@@ -246,7 +247,7 @@ impl MailEngine {
                 let matched = store.connection().prepare(&sql).map_err(storage_error)?
                     .query_map(params_from_iter(values.iter()), summary).map_err(search_error)?
                     .collect::<rusqlite::Result<Vec<_>>>().map_err(search_error)?;
-                return super::threading::group_results(store.connection(), matched, query);
+                return super::threading::group_results(store.connection(), matched, query, include_junk_trash);
             }
             values.push(i64::from(query.limit.unwrap_or(50).clamp(1,100)).into());
             values.push(i64::from(query.offset.unwrap_or(0)).into());
@@ -254,7 +255,7 @@ impl MailEngine {
             let page_sql = format!("WITH page(id) AS MATERIALIZED (SELECT m.id {page_from} ORDER BY m.date DESC,m.id DESC LIMIT ? OFFSET ?) SELECT {SUMMARY} FROM page JOIN messages m ON m.id=page.id ORDER BY m.date DESC,m.id DESC");
             let mut statement = store.connection().prepare(&page_sql).map_err(storage_error)?;
             let messages = statement.query_map(params_from_iter(values.iter()), summary).map_err(search_error)?.collect::<rusqlite::Result<_>>().map_err(search_error)?;
-            Ok(SearchResults { messages, total: total as u64, groups: HashMap::new(), group_messages: HashMap::new() })
+            Ok(SearchResults { messages, total: total as u64, groups: HashMap::new(), group_messages: HashMap::new(), context_include_junk_trash: include_junk_trash })
         })
     }
 

@@ -153,6 +153,9 @@ Use `Ctrl+K` (`Cmd+K` on macOS) to open the command menu. Appearance settings
 provide light, dark, and system themes plus comfortable or compact spacing;
 these preferences are saved on the device. Foundation checks are under Diagnostics.
 
+Senders show as initials. Settings can look up website icons instead, which tells
+DuckDuckGo the domains that email you; see [sender images](docs/desktop.md#sender-images).
+
 ## Development
 
 ```sh

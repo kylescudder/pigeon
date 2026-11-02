@@ -96,14 +96,35 @@ struct ImapSession<T: std::io::Read + std::io::Write> {
     session: Session<T>,
 }
 impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
+    fn create_folder(&mut self, name: &str) -> Result<(), MailError> {
+        self.session
+            .create(name)
+            .map_err(|e| imap_error("creating a folder", e))
+    }
+    fn rename_folder(&mut self, from: &str, to: &str) -> Result<(), MailError> {
+        self.session
+            .rename(from, to)
+            .map_err(|e| imap_error("renaming a folder", e))
+    }
+    fn delete_folder(&mut self, name: &str) -> Result<(), MailError> {
+        self.session
+            .delete(name)
+            .map_err(|e| imap_error("deleting a folder", e))
+    }
     fn folders(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
+        Ok(self
+            .folder_hierarchy()?
+            .into_iter()
+            .filter(|f| f.kind != "container")
+            .collect())
+    }
+    fn folder_hierarchy(&mut self) -> Result<Vec<RemoteFolder>, MailError> {
         let folders = self
             .session
             .list(None, Some("*"))
             .map_err(|error| imap_error("listing folders", error))?;
         Ok(folders
             .iter()
-            .filter(|folder| !folder.attributes().contains(&NameAttribute::NoSelect))
             .map(|folder| {
                 let mut kind = match folder.name().to_ascii_lowercase().as_str() {
                     "inbox" => "inbox",
@@ -125,6 +146,9 @@ impl<T: std::io::Read + std::io::Write + Send> MailSession for ImapSession<T> {
                             _ => kind,
                         };
                     }
+                }
+                if folder.attributes().contains(&NameAttribute::NoSelect) {
+                    kind = "container";
                 }
                 RemoteFolder {
                     name: folder.name().to_owned(),

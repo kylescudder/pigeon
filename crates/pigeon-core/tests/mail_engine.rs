@@ -997,6 +997,39 @@ fn header_threads_span_folders_missing_ancestors_duplicates_and_cycles_but_never
         .unwrap();
     assert_eq!(filtered.total, 1);
     assert_eq!(filtered.groups[&filtered.messages[0].id].len(), 1);
+    // Context follows the effective Junk/Trash scope, including folder: text.
+    assert!(!grouped.context_include_junk_trash);
+    assert!(!filtered.context_include_junk_trash);
+    for scoped in [
+        SearchQuery {
+            text: "folder:Trash".into(),
+            ..query.clone()
+        },
+        SearchQuery {
+            folder: Some("INBOX".into()),
+            ..query.clone()
+        },
+        SearchQuery {
+            include_junk_trash: true,
+            ..query.clone()
+        },
+        SearchQuery {
+            text: "folder:Trash".into(),
+            ..Default::default()
+        },
+    ] {
+        assert!(engine.search(&scoped).unwrap().context_include_junk_trash);
+    }
+    let trash = engine
+        .search(&SearchQuery {
+            text: "folder:Trash".into(),
+            account_id: Some(a.id.clone()),
+            ..query.clone()
+        })
+        .unwrap();
+    assert_eq!(trash.total, 1);
+    let trash_thread = engine.conversation(trash.messages[0].id, true).unwrap();
+    assert_eq!(trash_thread.messages.len(), 5);
     assert_eq!(
         engine
             .conversation(filtered.messages[0].id, false)
@@ -1044,7 +1077,7 @@ fn legacy_header_backfill_preserves_ids_bodies_without_new_arrivals() {
         let UnlockOutcome::Opened { store, .. } = open_store(secrets.as_ref(), &path) else {
             panic!("open")
         };
-        store.connection().execute_batch("ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; PRAGMA user_version=12;").unwrap();
+        store.connection().execute_batch("ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; DROP TABLE image_trust_hosts; DROP TABLE image_trust; DROP TABLE sender_images; DROP TABLE folder_changes; PRAGMA user_version=12;").unwrap();
     }
     let engine = MailEngine::with_connector(path, secrets, Arc::new(ThreadServer));
     assert_eq!(engine.conversation(id, false).unwrap().messages.len(), 1);

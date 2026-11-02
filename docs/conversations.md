@@ -24,7 +24,10 @@ individually. Selecting a header opens its message; selecting it again collapses
 it. Longer conversations disclose earlier/later history around the current
 message. Message actions live in a menu on the open message, with reply controls
 after its body. Narrow layouts reduce mailbox chrome to leave room for reading. Missing references get an explicit partial-cache note.
-Junk/Trash context is omitted unless enabled or viewing a specific folder. The
+Junk/Trash context is omitted unless enabled, viewing a specific folder, or
+searching with `folder:`; search results report this effective scope so the
+reader matches the list. Conversation context refreshes with sync, completed
+actions and the action queue, like search results. The
 Messages selector preserves flat results and individual access. Saved searches
 preserve their display choice; older searches default to Conversations in the UI.
 
@@ -35,7 +38,7 @@ targets matching rows only, including all matches represented by checked groups,
 never out-of-filter context. Existing durable actions, drafts, outbox, formatted
 viewer isolation and offline behavior are reused.
 
-Schema 13 adds In-Reply-To and a header-backfill marker. Pre-upgrade cache rows
+Schema 18 adds In-Reply-To and a header-backfill marker. Pre-upgrade cache rows
 retain their bodies, row IDs and local state. Normal sync refetches those rows
 once, in the existing resumable download batches, updating threading headers
 without producing duplicate rows or arrival notifications. Until this completes,

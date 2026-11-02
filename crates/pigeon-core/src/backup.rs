@@ -58,6 +58,8 @@ pub const TABLES: &[(&str, TableRole)] = &[
     ("saved_searches", TableRole::Backed { on_restore: &[] }),
     ("settings", TableRole::Backed { on_restore: &[] }),
     ("recipient_history", TableRole::Backed { on_restore: &[] }),
+    ("image_trust", TableRole::Backed { on_restore: &[] }),
+    ("image_trust_hosts", TableRole::Backed { on_restore: &[] }),
     // Drafts never execute; only an explicit Send creates an operation.
     ("drafts", TableRole::Backed { on_restore: &[] }),
     (
@@ -100,7 +102,10 @@ pub const TABLES: &[(&str, TableRole)] = &[
     ("messages_fts_data", TableRole::Redownloaded),
     ("messages_fts_docsize", TableRole::Redownloaded),
     ("messages_fts_idx", TableRole::Redownloaded),
+    ("sender_images", TableRole::Redownloaded),
     ("store_meta", TableRole::Device),
+    // Reconciliation intent belongs to this cache; restore redownloads folders.
+    ("folder_changes", TableRole::Device),
 ];
 
 /// Set in `store_meta` by every restore. Outgoing work created before this

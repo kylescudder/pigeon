@@ -122,7 +122,7 @@ impl Original {
     }
 }
 
-fn first_address(field: &str) -> Option<String> {
+pub(super) fn first_address(field: &str) -> Option<String> {
     parse_recipients(field, "From")
         .ok()
         .and_then(|list| list.into_iter().next())

@@ -114,6 +114,7 @@ pub(super) fn group_results(
     db: &Connection,
     matched: Vec<MessageSummary>,
     query: &SearchQuery,
+    include_junk_trash: bool,
 ) -> Result<SearchResults, MailError> {
     // Explicit folder/search access to Trash or Junk already passed the search
     // compiler; include those rows in connectivity, but never in matching IDs.
@@ -154,6 +155,7 @@ pub(super) fn group_results(
         total,
         groups,
         group_messages,
+        context_include_junk_trash: include_junk_trash,
     })
 }
 

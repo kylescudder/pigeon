@@ -140,11 +140,9 @@ fn admin() -> imap::Session<native_tls::TlsStream<std::net::TcpStream>> {
 fn starttls_send_is_accepted_once_and_saved_to_sent() {
     let h = harness(smtp(587, TransportSecurity::StartTls));
     let token = token();
-    let queued = h.send("friend@pigeon.test", &token);
+    h.send("friend@pigeon.test", &token);
     h.drain();
-    let item = h.item(&queued.id);
-    assert!(matches!(item.send, SendStatus::Accepted { .. }), "{item:?}");
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(spooled(&token), 1);
 
     // The Sent copy is a real message the next sync downloads.
@@ -243,7 +241,7 @@ fn a_failed_sent_copy_retries_on_its_own_without_resubmitting() {
     admin.create("Sent").unwrap();
     h.engine.retry_sent_copy(&queued.id).unwrap();
     h.drain();
-    assert_eq!(h.item(&queued.id).sent_copy, SentCopyStatus::Saved);
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(spooled(&token), 1);
     admin.select("Sent").unwrap();
     assert_eq!(admin.search(format!("SUBJECT {token}")).unwrap().len(), 1);
@@ -318,10 +316,7 @@ fn offline_send_waits_then_sends_after_reconnecting() {
     }
     h.engine.retry_send(&queued.id).unwrap();
     h.drain();
-    assert!(matches!(
-        h.item(&queued.id).send,
-        SendStatus::Accepted { .. }
-    ));
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(spooled(&token), 1);
 }
 
