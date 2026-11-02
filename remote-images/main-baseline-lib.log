@@ -1,0 +1,4 @@
+test mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body ... FAILED
+test mail::imap::tests::compatible_fetch_responses_download_every_message ... FAILED
+test mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data ... FAILED
+test result: FAILED. 47 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s

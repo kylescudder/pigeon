@@ -1,0 +1,2141 @@
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body.rs:4:1
+   |
+ 4 | / named!(pub section_part<Vec<u32>>, do_parse!(
+ 5 | |     part: number >>
+ 6 | |     rest: many0!(do_parse!(
+ 7 | |         tag!(".") >>
+...  |
+14 | |     })
+15 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: `#[warn(semicolon_in_expressions_from_non_local_macros)]` (part of `#[warn(future_incompatible)]`) on by default
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body.rs:4:1
+   |
+ 4 | / named!(pub section_part<Vec<u32>>, do_parse!(
+ 5 | |     part: number >>
+ 6 | |     rest: many0!(do_parse!(
+ 7 | |         tag!(".") >>
+...  |
+14 | |     })
+15 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body.rs:28:1
+   |
+28 | / named!(pub section_text<MessageSection>, alt!(
+29 | |     section_msgtext |
+30 | |     do_parse!(tag_no_case!("MIME") >> (MessageSection::Mime))
+31 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body.rs:33:1
+   |
+33 | / named!(pub section_spec<SectionPath>, alt!(
+34 | |     map!(section_msgtext, |val| SectionPath::Full(val)) |
+35 | |     do_parse!(
+36 | |         part: section_part >>
+...  |
+44 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body.rs:53:1
+   |
+53 | / named!(pub msg_att_body_section<AttributeValue>, do_parse!(
+54 | |     tag_no_case!("BODY") >>
+55 | |     section: section >>
+56 | |     index: opt!(do_parse!(
+...  |
+64 | |     (AttributeValue::BodySection { section, index, data })
+65 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body_structure.rs:19:1
+   |
+19 | / named!(body_fields<BodyFields>, do_parse!(
+20 | |     param: body_param >>
+21 | |     tag!(" ") >>
+...  |
+35 | |     (BodyFields { param, id, description, transfer_encoding, octets })
+36 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body_structure.rs:19:1
+   |
+19 | / named!(body_fields<BodyFields>, do_parse!(
+20 | |     param: body_param >>
+21 | |     tag!(" ") >>
+...  |
+35 | |     (BodyFields { param, id, description, transfer_encoding, octets })
+36 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/macros.rs:35:15
+   |
+35 |           match $submac!(i_, $($args)*) {
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+  ::: vendor/imap-proto/src/body_structure.rs:50:1
+   |
+50 | / named!(body_ext_1part<BodyExt1Part>, do_parse!(
+51 | |     // Per RFC 1864, MD5 values are base64-encoded
+52 | |     md5: opt_opt!(preceded!(tag!(" "), nstring_utf8)) >>
+53 | |     disposition: opt_opt!(preceded!(tag!(" "), body_disposition)) >>
+...  |
+62 | |     } })
+63 | | ));
+   | |__- in this macro invocation
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `preceded`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `preceded` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body_structure.rs:50:1
+   |
+50 | / named!(body_ext_1part<BodyExt1Part>, do_parse!(
+51 | |     // Per RFC 1864, MD5 values are base64-encoded
+52 | |     md5: opt_opt!(preceded!(tag!(" "), nstring_utf8)) >>
+53 | |     disposition: opt_opt!(preceded!(tag!(" "), body_disposition)) >>
+...  |
+62 | |     } })
+63 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `preceded`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `preceded` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/macros.rs:35:15
+   |
+35 |           match $submac!(i_, $($args)*) {
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+  ::: vendor/imap-proto/src/body_structure.rs:77:1
+   |
+77 | / named!(body_ext_mpart<BodyExtMPart>, do_parse!(
+78 | |     param: opt_opt!(preceded!(tag!(" "), body_param)) >>
+79 | |     disposition: opt_opt!(preceded!(tag!(" "), body_disposition)) >>
+80 | |     language: opt_opt!(preceded!(tag!(" "), body_lang)) >>
+...  |
+88 | |     } })
+89 | | ));
+   | |__- in this macro invocation
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `preceded`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `preceded` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/body_structure.rs:77:1
+   |
+77 | / named!(body_ext_mpart<BodyExtMPart>, do_parse!(
+78 | |     param: opt_opt!(preceded!(tag!(" "), body_param)) >>
+79 | |     disposition: opt_opt!(preceded!(tag!(" "), body_disposition)) >>
+80 | |     language: opt_opt!(preceded!(tag!(" "), body_lang)) >>
+...  |
+88 | |     } })
+89 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `preceded`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `preceded` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:91:1
+    |
+ 91 | / named!(body_encoding<ContentEncoding>, alt!(
+ 92 | |     delimited!(char!('"'), alt!(
+ 93 | |         map!(tag_no_case!("7BIT"), |_| ContentEncoding::SevenBit) |
+ 94 | |         map!(tag_no_case!("8BIT"), |_| ContentEncoding::EightBit) |
+...   |
+ 99 | |     map!(string_utf8, |enc| ContentEncoding::Other(enc))
+100 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:102:1
+    |
+102 | / named!(body_lang<Option<Vec<&str>>>, alt!(
+103 | |     // body language seems to refer to RFC 3066 language tags, which should be ASCII-only
+104 | |     map!(nstring_utf8, |v| v.map(|s| vec![s])) |
+105 | |     map!(parenthesized_nonempty_list!(string_utf8), Option::from)
+106 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:108:1
+    |
+108 | / named!(body_param<BodyParams>, alt!(
+109 | |     map!(nil, |_| None) |
+110 | |     map!(parenthesized_nonempty_list!(do_parse!(
+111 | |         key: string_utf8 >>
+...   |
+115 | |     )), Option::from)
+116 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/macros.rs:3:9
+    |
+  3 |           delimited!($i, char!('('), $submac!($($args)*), char!(')'))
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: vendor/imap-proto/src/body_structure.rs:108:1
+    |
+108 | / named!(body_param<BodyParams>, alt!(
+109 | |     map!(nil, |_| None) |
+110 | |     map!(parenthesized_nonempty_list!(do_parse!(
+111 | |         key: string_utf8 >>
+...   |
+115 | |     )), Option::from)
+116 | | ));
+    | |__- in this macro invocation
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:118:1
+    |
+118 | / named!(body_extension<BodyExtension>, alt!(
+119 | |     map!(number, |n| BodyExtension::Num(n)) |
+...   |
+123 | |     map!(parenthesized_nonempty_list!(body_extension), |ext| BodyExtension::List(ext))
+124 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/macros.rs:3:9
+    |
+  3 |           delimited!($i, char!('('), $submac!($($args)*), char!(')'))
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: vendor/imap-proto/src/body_structure.rs:126:1
+    |
+126 | / named!(body_disposition<Option<ContentDisposition>>, alt!(
+127 | |     map!(nil, |_| None) |
+128 | |     paren_delimited!(do_parse!(
+129 | |         ty: string_utf8 >>
+...   |
+136 | |     ))
+137 | | ));
+    | |__- in this macro invocation
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:139:1
+    |
+139 | / named!(body_type_basic<BodyStructure>, do_parse!(
+140 | |     media_type: string_utf8 >>
+141 | |     tag!(" ") >>
+142 | |     media_subtype: string_utf8 >>
+...   |
+165 | |     })
+166 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:168:1
+    |
+168 | / named!(body_type_text<BodyStructure>, do_parse!(
+169 | |     tag_no_case!("\"TEXT\"") >>
+170 | |     tag!(" ") >>
+171 | |     media_subtype: string_utf8 >>
+...   |
+197 | |     })
+198 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:200:1
+    |
+200 | / named!(body_type_message<BodyStructure>, do_parse!(
+201 | |     tag_no_case!("\"MESSAGE\" \"RFC822\"") >>
+202 | |     tag!(" ") >>
+203 | |     fields: body_fields >>
+...   |
+233 | |     })
+234 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:236:1
+    |
+236 | / named!(body_type_multipart<BodyStructure>, do_parse!(
+237 | |     bodies: many1!(body) >>
+238 | |     tag!(" ") >>
+239 | |     media_subtype: string_utf8 >>
+...   |
+254 | |     })
+255 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:260:1
+    |
+260 | / named!(body_type_childless_multipart<BodyStructure>, do_parse!(
+261 | |     media_subtype: string_utf8 >>
+262 | |     peek!(preceded!(tag!(" "), body_param)) >>
+263 | |     ext: body_ext_mpart >>
+...   |
+277 | |     })
+278 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:260:1
+    |
+260 | / named!(body_type_childless_multipart<BodyStructure>, do_parse!(
+261 | |     media_subtype: string_utf8 >>
+262 | |     peek!(preceded!(tag!(" "), body_param)) >>
+263 | |     ext: body_ext_mpart >>
+...   |
+277 | |     })
+278 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `preceded`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `preceded` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/macros.rs:3:9
+    |
+  3 |           delimited!($i, char!('('), $submac!($($args)*), char!(')'))
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: vendor/imap-proto/src/body_structure.rs:280:1
+    |
+280 | / named!(pub(crate) body<BodyStructure>, paren_delimited!(
+281 | |     alt!(body_type_text | body_type_message | body_type_basic | body_type_multipart | body_type_childless_multipart)
+282 | | ));
+    | |__- in this macro invocation
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/body_structure.rs:284:1
+    |
+284 | / named!(pub(crate) msg_att_body_structure<AttributeValue>, do_parse!(
+285 | |     tag_no_case!("BODYSTRUCTURE ") >>
+286 | |     body: body >>
+287 | |     (AttributeValue::BodyStructure(body))
+288 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/core.rs:73:1
+   |
+73 | named!(pub quoted_utf8<&str>, map_res!(quoted, str::from_utf8));
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/core.rs:77:1
+   |
+77 | / named!(pub literal<&[u8]>, do_parse!(
+78 | |     tag!("{") >>
+79 | |     len: number >>
+80 | |     tag!("}") >>
+...  |
+83 | |     (data)
+84 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/core.rs:87:1
+   |
+87 | named!(pub string<&[u8]>, alt!(quoted | literal));
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/core.rs:90:1
+   |
+90 | named!(pub string_utf8<&str>, map_res!(string, str::from_utf8));
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/core.rs:107:1
+    |
+107 | named!(pub number<u32>, flat_map!(nom::character::streaming::digit1, parse_to!(u32)));
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `flat_map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `flat_map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/core.rs:110:1
+    |
+110 | named!(pub number_64<u64>, flat_map!(nom::character::streaming::digit1, parse_to!(u64)));
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `flat_map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `flat_map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/core.rs:113:1
+    |
+113 | / named!(pub atom<&str>, map_res!(take_while1!(atom_char),
+114 | |     str::from_utf8
+115 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/core.rs:118:1
+    |
+118 | / named!(pub astring<&[u8]>, alt!(
+119 | |     take_while1!(astring_char) |
+120 | |     string
+121 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/core.rs:124:1
+    |
+124 | named!(pub astring_utf8<&str>, map_res!(astring, str::from_utf8));
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/core.rs:127:1
+    |
+127 | / named!(pub text<&str>, map_res!(take_while!(text_char),
+128 | |     str::from_utf8
+129 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:26:1
+   |
+26 | / named!(status_ok<Status>, map!(tag_no_case!("OK"),
+27 | |     |_s| Status::Ok
+28 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:29:1
+   |
+29 | / named!(status_no<Status>, map!(tag_no_case!("NO"),
+30 | |     |_s| Status::No
+31 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:32:1
+   |
+32 | / named!(status_bad<Status>, map!(tag_no_case!("BAD"),
+33 | |     |_s| Status::Bad
+34 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:35:1
+   |
+35 | / named!(status_preauth<Status>, map!(tag_no_case!("PREAUTH"),
+36 | |     |_s| Status::PreAuth
+37 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:38:1
+   |
+38 | / named!(status_bye<Status>, map!(tag_no_case!("BYE"),
+39 | |     |_s| Status::Bye
+40 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:42:1
+   |
+42 | / named!(status<Status>, alt!(
+43 | |     status_ok |
+44 | |     status_no |
+45 | |     status_bad |
+46 | |     status_preauth |
+47 | |     status_bye
+48 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:61:1
+   |
+61 | / named!(flag_extension<&str>, map_res!(
+62 | |     recognize!(pair!(tag!("\\"), take_while!(atom_char))),
+63 | |     str::from_utf8
+64 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:67:1
+   |
+67 | named!(flag<&str>, alt!(map_res!(tag!("\\*"), str::from_utf8) | flag_extension | atom));
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:67:1
+   |
+67 | named!(flag<&str>, alt!(map_res!(tag!("\\*"), str::from_utf8) | flag_extension | atom));
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:71:1
+   |
+71 | / named!(flag_perm<&str>, alt!(
+72 | |     map_res!(tag!("\\*"), str::from_utf8) |
+73 | |     flag
+74 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc3501.rs:71:1
+   |
+71 | / named!(flag_perm<&str>, alt!(
+72 | |     map_res!(tag!("\\*"), str::from_utf8) |
+73 | |     flag
+74 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:122:1
+    |
+122 | / named!(resp_text_code_uid_validity<ResponseCode>, do_parse!(
+123 | |     tag_no_case!("UIDVALIDITY ") >>
+124 | |     num: number >>
+125 | |     (ResponseCode::UidValidity(num))
+126 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:128:1
+    |
+128 | / named!(resp_text_code_uid_next<ResponseCode>, do_parse!(
+129 | |     tag_no_case!("UIDNEXT ") >>
+130 | |     num: number >>
+131 | |     (ResponseCode::UidNext(num))
+132 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:134:1
+    |
+134 | / named!(resp_text_code_unseen<ResponseCode>, do_parse!(
+135 | |     tag_no_case!("UNSEEN ") >>
+136 | |     num: number >>
+137 | |     (ResponseCode::Unseen(num))
+138 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:140:1
+    |
+140 | / named!(resp_text_code<ResponseCode>, do_parse!(
+141 | |     tag!("[") >>
+142 | |     coded: alt!(
+143 | |         resp_text_code_alert |
+...   |
+159 | |     (coded)
+160 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:162:1
+    |
+162 | / named!(capability<Capability>, alt!(
+163 | |     map!(tag_no_case!("IMAP4rev1"), |_| Capability::Imap4rev1) |
+164 | |     map!(preceded!(tag_no_case!("AUTH="), atom), |a| Capability::Auth(a)) |
+165 | |     map!(atom, |a| Capability::Atom(a))
+166 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:162:1
+    |
+162 | / named!(capability<Capability>, alt!(
+163 | |     map!(tag_no_case!("IMAP4rev1"), |_| Capability::Imap4rev1) |
+164 | |     map!(preceded!(tag_no_case!("AUTH="), atom), |a| Capability::Auth(a)) |
+165 | |     map!(atom, |a| Capability::Atom(a))
+166 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `preceded`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `preceded` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:176:1
+    |
+176 | / named!(capability_data<Vec<Capability>>, map_res!(
+177 | |     do_parse!(
+178 | |         tag_no_case!("CAPABILITY") >>
+179 | |         capabilities: many0!(preceded!(char!(' '), capability)) >>
+...   |
+182 | |     ensure_capabilities_contains_imap4rev
+183 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:176:1
+    |
+176 | / named!(capability_data<Vec<Capability>>, map_res!(
+177 | |     do_parse!(
+178 | |         tag_no_case!("CAPABILITY") >>
+179 | |         capabilities: many0!(preceded!(char!(' '), capability)) >>
+...   |
+182 | |     ensure_capabilities_contains_imap4rev
+183 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `preceded`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `preceded` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:190:1
+    |
+190 | / named!(mailbox_data_search<Response>, do_parse!(
+191 | |     tag_no_case!("SEARCH") >>
+192 | |     ids: many0!(do_parse!(
+193 | |         tag!(" ") >>
+...   |
+197 | |     (Response::IDs(ids))
+198 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:200:1
+    |
+200 | / named!(mailbox_data_flags<Response>, do_parse!(
+201 | |     tag_no_case!("FLAGS ") >>
+202 | |     flags: flag_list >>
+203 | |     (Response::MailboxData(MailboxDatum::Flags(flags)))
+204 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:206:1
+    |
+206 | / named!(mailbox_data_exists<Response>, do_parse!(
+207 | |     num: number >>
+208 | |     tag_no_case!(" EXISTS") >>
+209 | |     (Response::MailboxData(MailboxDatum::Exists(num)))
+210 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:212:1
+    |
+212 | / named!(mailbox_list<(Vec<&str>, Option<&str>, &str)>, do_parse!(
+213 | |     flags: flag_list >>
+214 | |     tag!(" ") >>
+215 | |     delimiter: alt!(
+...   |
+221 | |     ((flags, delimiter, name))
+222 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:224:1
+    |
+224 | / named!(mailbox_data_list<Response>, do_parse!(
+225 | |     tag_no_case!("LIST ") >>
+226 | |     data: mailbox_list >>
+227 | |     (Response::MailboxData(MailboxDatum::List {
+...   |
+231 | |     }))
+232 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:234:1
+    |
+234 | / named!(mailbox_data_lsub<Response>, do_parse!(
+235 | |     tag_no_case!("LSUB ") >>
+236 | |     data: mailbox_list >>
+237 | |     (Response::MailboxData(MailboxDatum::List {
+...   |
+241 | |     }))
+242 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:246:1
+    |
+246 | / named!(status_att<StatusAttribute>, alt!(
+247 | |     rfc4551::status_att_val_highest_mod_seq |
+248 | |     do_parse!(
+249 | |         tag_no_case!("MESSAGES ") >>
+...   |
+273 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:246:1
+    |
+246 | / named!(status_att<StatusAttribute>, alt!(
+247 | |     rfc4551::status_att_val_highest_mod_seq |
+248 | |     do_parse!(
+249 | |         tag_no_case!("MESSAGES ") >>
+...   |
+273 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:277:1
+    |
+277 | / named!(mailbox_data_status<Response>, do_parse!(
+278 | |     tag_no_case!("STATUS ") >>
+279 | |     mailbox: mailbox >>
+280 | |     tag!(" ") >>
+...   |
+285 | |     }))
+286 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:288:1
+    |
+288 | / named!(mailbox_data_recent<Response>, do_parse!(
+289 | |     num: number >>
+290 | |     tag_no_case!(" RECENT") >>
+291 | |     (Response::MailboxData(MailboxDatum::Recent(num)))
+292 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:294:1
+    |
+294 | / named!(mailbox_data<Response>, alt!(
+295 | |     mailbox_data_flags |
+296 | |     mailbox_data_exists |
+297 | |     mailbox_data_list |
+...   |
+301 | |     mailbox_data_search
+302 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/macros.rs:3:9
+    |
+  3 |           delimited!($i, char!('('), $submac!($($args)*), char!(')'))
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: vendor/imap-proto/src/parser/rfc3501.rs:306:1
+    |
+306 | / named!(address<Address>, paren_delimited!(
+307 | |     do_parse!(
+308 | |         name: nstring >>
+309 | |         tag!(" ") >>
+...   |
+322 | | ));
+    | |__- in this macro invocation
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:324:1
+    |
+324 | / named!(opt_addresses<Option<Vec<Address>>>, alt!(
+325 | |     map!(nil, |_s| None) |
+326 | |     map!(paren_delimited!(
+327 | |         many1!(do_parse!(
+...   |
+332 | |     ), |v| Some(v))
+333 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/macros.rs:3:9
+    |
+  3 |           delimited!($i, char!('('), $submac!($($args)*), char!(')'))
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: vendor/imap-proto/src/parser/rfc3501.rs:324:1
+    |
+324 | / named!(opt_addresses<Option<Vec<Address>>>, alt!(
+325 | |     map!(nil, |_s| None) |
+326 | |     map!(paren_delimited!(
+327 | |         many1!(do_parse!(
+...   |
+332 | |     ), |v| Some(v))
+333 | | ));
+    | |__- in this macro invocation
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/macros.rs:3:9
+    |
+  3 |           delimited!($i, char!('('), $submac!($($args)*), char!(')'))
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: vendor/imap-proto/src/parser/rfc3501.rs:335:1
+    |
+335 | / named!(pub(crate) envelope<Envelope>, paren_delimited!(
+336 | |     do_parse!(
+337 | |         date: nstring >>
+338 | |         tag!(" ") >>
+...   |
+369 | | ));
+    | |__- in this macro invocation
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:371:1
+    |
+371 | / named!(msg_att_envelope<AttributeValue>, do_parse!(
+372 | |     tag_no_case!("ENVELOPE ") >>
+373 | |     envelope: envelope >>
+374 | |     (AttributeValue::Envelope(Box::new(envelope)))
+375 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:377:1
+    |
+377 | / named!(msg_att_internal_date<AttributeValue>, do_parse!(
+378 | |     tag_no_case!("INTERNALDATE ") >>
+379 | |     date: nstring_utf8 >>
+380 | |     (AttributeValue::InternalDate(date.unwrap()))
+381 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:383:1
+    |
+383 | / named!(msg_att_flags<AttributeValue>, do_parse!(
+384 | |     tag_no_case!("FLAGS ") >>
+385 | |     flags: flag_list >>
+386 | |     (AttributeValue::Flags(flags))
+387 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:389:1
+    |
+389 | / named!(msg_att_rfc822<AttributeValue>, do_parse!(
+390 | |     tag_no_case!("RFC822 ") >>
+391 | |     raw: nstring >>
+392 | |     (AttributeValue::Rfc822(raw))
+393 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:395:1
+    |
+395 | / named!(msg_att_rfc822_header<AttributeValue>, do_parse!(
+396 | |     tag_no_case!("RFC822.HEADER ") >>
+397 | |     opt!(tag!(" ")) >> // extra space workaround for DavMail
+398 | |     raw: nstring >>
+399 | |     (AttributeValue::Rfc822Header(raw))
+400 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:402:1
+    |
+402 | / named!(msg_att_rfc822_size<AttributeValue>, do_parse!(
+403 | |     tag_no_case!("RFC822.SIZE ") >>
+404 | |     num: number >>
+405 | |     (AttributeValue::Rfc822Size(num))
+406 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:408:1
+    |
+408 | / named!(msg_att_rfc822_text<AttributeValue>, do_parse!(
+409 | |     tag_no_case!("RFC822.TEXT ") >>
+410 | |     raw: nstring >>
+411 | |     (AttributeValue::Rfc822Text(raw))
+412 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:414:1
+    |
+414 | / named!(msg_att_uid<AttributeValue>, do_parse!(
+415 | |     tag_no_case!("UID ") >>
+416 | |     num: number >>
+417 | |     (AttributeValue::Uid(num))
+418 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:420:1
+    |
+420 | / named!(msg_att<AttributeValue>, alt!(
+421 | |     msg_att_body_section |
+422 | |     msg_att_body_structure |
+423 | |     msg_att_envelope |
+...   |
+431 | |     msg_att_uid
+432 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:436:1
+    |
+436 | / named!(message_data_fetch<Response>, do_parse!(
+437 | |     num: number >>
+438 | |     tag_no_case!(" FETCH ") >>
+439 | |     attrs: msg_att_list >>
+440 | |     (Response::Fetch(num, attrs))
+441 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:443:1
+    |
+443 | / named!(message_data_expunge<Response>, do_parse!(
+444 | |     num: number >>
+445 | |     tag_no_case!(" EXPUNGE") >>
+446 | |     (Response::Expunge(num))
+447 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:449:1
+    |
+449 | / named!(tag<RequestId>, map!(
+450 | |     map_res!(take_while1!(tag_char), str::from_utf8),
+451 | |     |s| RequestId(s.to_string())
+452 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:449:1
+    |
+449 | / named!(tag<RequestId>, map!(
+450 | |     map_res!(take_while1!(tag_char), str::from_utf8),
+451 | |     |s| RequestId(s.to_string())
+452 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map_res`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map_res` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:458:1
+    |
+458 | / named!(resp_text<(Option<ResponseCode>, Option<&str>)>, do_parse!(
+459 | |     code: opt!(resp_text_code) >>
+460 | |     text: text >>
+461 | |     ({
+...   |
+470 | |     })
+471 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:473:1
+    |
+473 | / named!(continue_req<Response>, do_parse!(
+474 | |     tag!("+") >>
+475 | |     opt!(tag!(" ")) >> // Some servers do not send the space :/
+476 | |     text: resp_text >> // TODO: base64
+...   |
+481 | |     })
+482 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:484:1
+    |
+484 | / named!(response_tagged<Response>, do_parse!(
+485 | |     tag: tag >>
+486 | |     tag!(" ") >>
+487 | |     status: status >>
+...   |
+496 | |     })
+497 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:499:1
+    |
+499 | / named!(resp_cond<Response>, do_parse!(
+500 | |     status: status >>
+501 | |     tag!(" ") >>
+502 | |     text: resp_text >>
+...   |
+507 | |     })
+508 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:510:1
+    |
+510 | / named!(response_data<Response>, do_parse!(
+511 | |     tag!("* ") >>
+512 | |     contents: alt!(
+513 | |         resp_cond |
+...   |
+521 | |     (contents)
+522 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc3501.rs:524:1
+    |
+524 | / named!(response<Response>, alt!(
+525 | |     continue_req |
+526 | |     response_data |
+527 | |     response_tagged
+528 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc4551.rs:18:1
+   |
+18 | / named!(pub (crate) resp_text_code_highest_mod_seq<ResponseCode>, do_parse!(
+19 | |     tag_no_case!("HIGHESTMODSEQ ") >>
+20 | |     num: number_64 >>
+21 | |     (ResponseCode::HighestModSeq(num))
+22 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+  --> vendor/imap-proto/src/parser/rfc4551.rs:27:1
+   |
+27 | / named!(pub (crate) status_att_val_highest_mod_seq<StatusAttribute>, do_parse!(
+28 | |     tag_no_case!("HIGHESTMODSEQ ") >>
+29 | |     mod_sequence_valzer: number_64 >>
+30 | |     (StatusAttribute::HighestModSeq(mod_sequence_valzer))
+31 | | ));
+   | |__^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc5464.rs:128:1
+    |
+128 | / named!(string_value<Option<String>>, do_parse!(
+129 | |     value: map!(alt!(quoted | literal), slice_to_str) >>
+130 | |         (Some(value.to_string()))
+131 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `map`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `map` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc5464.rs:128:1
+    |
+128 | / named!(string_value<Option<String>>, do_parse!(
+129 | |     value: map!(alt!(quoted | literal), slice_to_str) >>
+130 | |         (Some(value.to_string()))
+131 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/macros.rs:3:9
+    |
+  3 |           delimited!($i, char!('('), $submac!($($args)*), char!(')'))
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: vendor/imap-proto/src/parser/rfc5464.rs:133:1
+    |
+133 | / named!(keyval_list<Vec<Metadata>>, do_parse!(
+134 | |     list: parenthesized_nonempty_list!(do_parse!(
+135 | |         key: map!(entry_name, slice_to_str) >>
+136 | |             tag!(" ") >>
+...   |
+140 | |         (list)
+141 | | ));
+    | |__- in this macro invocation
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc5464.rs:148:1
+    |
+148 | / named!(metadata_common<&[u8]>, do_parse!(
+149 | |     tag_no_case!("METADATA ") >>
+150 | |         mbox: quoted >>
+151 | |         tag!(" ") >>
+152 | |         (mbox)
+153 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc5464.rs:156:1
+    |
+156 | / named!(metadata_solicited<Response>, do_parse!(
+157 | |     mbox: metadata_common >>
+158 | |     tail: keyval_list >>
+159 | |         (Response::MailboxData(MailboxDatum::MetadataSolicited {
+160 | |             mailbox:slice_to_str(mbox), values:tail
+161 | |         }))
+162 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc5464.rs:165:1
+    |
+165 | / named!(metadata_unsolicited<Response>, do_parse!(
+166 | |     mbox: metadata_common >>
+167 | |         tail: entry_list >>
+168 | |         (Response::MailboxData(MailboxDatum::MetadataUnsolicited {
+169 | |             mailbox:slice_to_str(mbox), values:tail
+170 | |         }))
+171 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `do_parse`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `do_parse` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: trailing semicolon in macro used in expression position
+   --> vendor/imap-proto/src/parser/rfc5464.rs:174:1
+    |
+174 | / named!(pub resp_metadata<Response>, do_parse!(
+175 | |     r: alt!(metadata_solicited |
+176 | |             metadata_unsolicited) >>
+177 | |         (r)
+178 | | ));
+    | |__^
+    |
+    = note: macro invocations at the end of a block are treated as expressions
+    = note: to ignore the value produced by the macro, add a semicolon after the invocation of `alt`
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: this warning originates in the macro `alt` which comes from the expansion of the macro `named` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: field `0` is never read
+  --> vendor/imap-proto/src/parser/rfc5464.rs:21:19
+   |
+21 |     PrivateShared(usize),
+   |     ------------- ^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+21 -     PrivateShared(usize),
+21 +     PrivateShared(()),
+   |
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> vendor/imap-proto/src/lib.rs:34:21
+   |
+34 | fn quoted_string(s: &str) -> Result<Cow<str>, &'static str> {
+   |                     ^^^^            ^^^^^^^^ the same lifetime is hidden here
+   |                     |
+   |                     the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+   = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+   |
+34 | fn quoted_string(s: &str) -> Result<Cow<'_, str>, &'static str> {
+   |                                         +++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> vendor/imap-proto/src/parser/rfc3501.rs:532:28
+    |
+532 | pub fn parse_response(msg: &[u8]) -> ParseResult {
+    |                            ^^^^^     ^^^^^^^^^^^ the same lifetime is hidden here
+    |                            |
+    |                            the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+    |
+532 | pub fn parse_response(msg: &[u8]) -> ParseResult<'_> {
+    |                                                 ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> vendor/imap-proto/src/parser/rfc5464.rs:29:28
+   |
+29 | fn check_private_shared(i: &[u8]) -> EntryParseStage {
+   |                            ^^^^^     ^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                            |
+   |                            the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+29 | fn check_private_shared(i: &[u8]) -> EntryParseStage<'_> {
+   |                                                     ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> vendor/imap-proto/src/parser/rfc5464.rs:41:19
+   |
+41 | fn check_admin(i: &[u8], l: usize) -> EntryParseStage {
+   |                   ^^^^^               ^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                   |
+   |                   the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+41 | fn check_admin(i: &[u8], l: usize) -> EntryParseStage<'_> {
+   |                                                      ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> vendor/imap-proto/src/parser/rfc5464.rs:49:28
+   |
+49 | fn check_vendor_comment(i: &[u8], l: usize) -> EntryParseStage {
+   |                            ^^^^^               ^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                            |
+   |                            the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+49 | fn check_vendor_comment(i: &[u8], l: usize) -> EntryParseStage<'_> {
+   |                                                               ++++
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+  --> vendor/imap-proto/src/parser/rfc5464.rs:66:18
+   |
+66 | fn check_path(i: &[u8], l: usize) -> EntryParseStage {
+   |                  ^^^^^               ^^^^^^^^^^^^^^^ the same lifetime is hidden here
+   |                  |
+   |                  the lifetime is elided here
+   |
+   = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+help: use `'_` for type paths
+   |
+66 | fn check_path(i: &[u8], l: usize) -> EntryParseStage<'_> {
+   |                                                     ++++
+
+warning: `imap-proto` (lib) generated 206 warnings (102 duplicates) (run `cargo fix --lib -p imap-proto` to apply 6 suggestions)
+   Compiling pigeon-core v0.1.0 (/Users/kyle/.t3/worktrees/pigeon/t3-866d3e98/crates/pigeon-core)
+   Compiling pigeon v0.1.0 (/Users/kyle/.t3/worktrees/pigeon/t3-866d3e98/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.18s
+     Running unittests src/lib.rs (target/debug/deps/pigeon_app-9fa0254c97ad7b0d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/pigeon-2534206addad6aeb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/pigeon_core-b28263430a4eb3f9)
+
+running 50 tests
+test backup::tests::backed_up_outgoing_work_must_pause_on_restore ... ok
+test mail::diagnostics::tests::unexpected_responses_keep_only_variant_status_and_code ... ok
+test mail::imap::tests::only_dotted_part_numbers_reach_a_fetch_command ... ok
+test mail::diagnostics::tests::private_fields_and_literals_are_omitted_but_protocol_shape_remains ... ok
+test mail::diagnostics::tests::long_structures_after_large_literals_keep_their_failure_point ... ok
+test mail::diagnostics::tests::malformed_strings_and_literals_do_not_leak_remainders ... ok
+test mail::reply::tests::reply_all_adds_the_others_but_not_me_or_the_sender ... ok
+test mail::reply::tests::a_missing_message_id_means_no_threading_headers ... ok
+test mail::reply::tests::forward_has_no_recipient_or_threading_and_carries_the_headers ... ok
+test mail::reply::tests::an_existing_prefix_is_not_doubled ... ok
+test mail::reply::tests::reply_all_never_copies_a_blind_recipient ... ok
+test mail::reply::tests::mail_stored_before_the_lists_never_exposes_bcc_from_sent ... ok
+test mail::reply::tests::reply_to_is_preferred_over_from ... ok
+test mail::reply::tests::replying_to_my_own_message_goes_to_who_i_wrote_to ... ok
+test mail::reply::tests::reply_goes_to_the_sender_quotes_and_threads ... ok
+test mail::reply::tests::newlines_in_headers_are_flattened_and_long_bodies_are_cut ... ok
+test mail::reply::tests::the_references_chain_is_kept_and_extended ... ok
+test mail::sender_images::tests::a_missing_icons_placeholder_is_not_taken_for_an_icon ... ok
+test mail::sender_images::tests::only_a_clear_answer_counts_as_having_no_icon ... ok
+test mail::sender_images::tests::an_oversized_icon_is_treated_as_none ... ok
+test mail::sender_images::tests::personal_mail_domains_are_skipped_but_their_companies_are_not ... ok
+test mail::sender_images::tests::private_reserved_and_malformed_names_are_never_looked_up ... ok
+test mail::sender_images::tests::subdomains_collapse_so_a_sender_cannot_mint_one_per_recipient ... ok
+test mail::sender_images::tests::only_raster_images_become_data_urls ... ok
+test mail::sending::tests::new_messages_have_no_threading_headers ... ok
+test mail::sending::tests::threading_values_cannot_inject_headers ... ok
+test mail::sending::tests::replies_carry_threading_headers ... ok
+test mail::smtp::tests::rejected_credentials_are_an_authentication_error ... ok
+test notify::tests::a_bare_address_is_used_when_there_is_no_name ... ok
+test mail::smtp::tests::a_failed_commit_never_sends_the_end_of_data_marker ... ok
+test notify::tests::a_flood_is_counted_beyond_the_few_that_are_described ... ok
+test notify::tests::count_reveals_only_how_many ... ok
+test mail::smtp::tests::refused_recipient_stops_before_data_without_echoing_server_text ... ok
+test mail::smtp::tests::accepted_message_is_dot_stuffed_with_crlf_and_committed_once ... ok
+test notify::tests::long_text_is_cut ... ok
+test notify::tests::markup_and_control_characters_from_mail_cannot_reach_the_server ... ok
+test notify::tests::nothing_when_off_or_empty ... ok
+test notify::tests::one_message_shows_sender_name_and_subject_never_the_body ... ok
+test notify::tests::several_messages_list_a_few_and_count_the_rest ... ok
+test mail::smtp::tests::starttls_is_required_and_pre_encryption_data_is_refused ... ok
+test mail::smtp::tests::an_explicit_refusal_after_data_is_not_sent_and_says_whether_to_retry ... ok
+test backup::tests::crafted_backups_cannot_write_other_keyring_items_or_tables ... ok
+test backup::tests::every_store_table_declares_whether_it_is_backed_up ... ok
+test mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body ... FAILED
+test backup::tests::backup_from_an_older_schema_restores_into_the_current_one ... ok
+test backup::tests::restored_outgoing_work_comes_back_paused ... ok
+test mail::imap::tests::compatible_fetch_responses_download_every_message ... FAILED
+test mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data ... FAILED
+test mail::smtp::tests::a_lost_or_missing_final_reply_is_unknown ... ok
+test mail::imap::tests::folder_errors_distinguish_rejection_from_disconnect_without_echoing_server_data ... ok
+
+failures:
+
+---- mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body stdout ----
+
+thread 'mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body' (20445049) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
+called `Result::unwrap()` on an `Err` value: Imap { operation: "test login", reason: "the server closed the connection" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- mail::imap::tests::compatible_fetch_responses_download_every_message stdout ----
+
+thread 'mail::imap::tests::compatible_fetch_responses_download_every_message' (20445050) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
+called `Result::unwrap()` on an `Err` value: Imap { operation: "test login", reason: "the server closed the connection" }
+
+---- mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data stdout ----
+
+thread 'mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data' (20445051) panicked at crates/pigeon-core/src/mail/imap.rs:943:14:
+called `Result::unwrap()` on an `Err` value: Imap { operation: "test login", reason: "the server closed the connection" }
+
+
+failures:
+    mail::imap::tests::childless_multipart_recovers_text_from_the_raw_body
+    mail::imap::tests::compatible_fetch_responses_download_every_message
+    mail::imap::tests::diagnostic_report_separates_syntax_failures_from_server_refusals_without_private_data
+
+test result: FAILED. 47 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+error: test failed, to rerun pass `-p pigeon-core --lib`
+     Running tests/attachments.rs (target/debug/deps/attachments-6d0140c19e786802)
+
+running 15 tests
+test remote_images_stay_blocked_unless_asked_for ... ok
+test changed_folder_epoch_refuses_instead_of_fetching_another_message ... ok
+test kept_payloads_go_with_the_account ... ok
+test kept_payload_is_removed_with_its_message ... ok
+test keeping_refuses_a_part_whose_message_row_was_reused_meanwhile ... ok
+test viewer_document_opens_offline_without_embedded_images ... ok
+test only_parts_listed_for_the_message_can_be_requested ... ok
+test viewer_document_embeds_referenced_images_with_one_connection ... ok
+test keep_setting_applies_to_embedded_images ... ok
+test trusted_senders_load_remote_images_and_survive_a_restart ... ok
+test locking_the_keyring_discards_session_downloads ... ok
+test kept_download_survives_restart_offline_and_stays_encrypted ... ok
+test download_is_session_only_by_default ... ok
+test embedded_images_stop_downloading_at_the_document_budget ... ok
+test kept_and_session_images_count_toward_the_document_budget ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.87s
+
+     Running tests/backup.rs (target/debug/deps/backup-71decb3850f9cc87)
+
+running 16 tests
+test short_passphrases_are_refused_and_write_nothing ... ok
+test restore_is_refused_while_an_account_is_added_or_its_password_changes ... ok
+test failing_to_save_a_new_store_key_puts_back_the_store_and_passwords ... ok
+test restore_recovers_a_store_whose_key_was_lost ... ok
+test failing_to_rename_the_new_store_into_place_puts_everything_back ... ok
+test keyring_failure_part_way_through_passwords_puts_back_earlier_ones ... ok
+test successful_restore_writes_every_backed_up_password ... ok
+test backup_restores_local_data_and_passwords_on_a_new_device_without_mail ... ok
+test failing_to_move_the_live_store_aside_puts_back_passwords ... ok
+test wrong_passphrase_leaves_the_store_untouched ... ok
+test account_changes_are_refused_while_a_restore_runs ... ok
+test restore_replaces_local_data_and_keeps_the_previous_store_aside ... ok
+test backups_never_contain_the_store_key ... ok
+test restore_is_refused_while_an_account_syncs ... ok
+test backups_taken_during_sync_are_consistent_and_do_not_stall_it has been running for over 60 seconds
+test damaged_truncated_and_foreign_files_are_refused_without_changes has been running for over 60 seconds
+test damaged_truncated_and_foreign_files_are_refused_without_changes ... ok
+test backups_taken_during_sync_are_consistent_and_do_not_stall_it ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 102.21s
+
+     Running tests/desktop.rs (target/debug/deps/desktop-75225cf313edc4ff)
+
+running 6 tests
+test missing_file_uses_defaults_that_keep_running_in_the_background ... ok
+test partial_file_fills_defaults_and_ignores_unknown_keys ... ok
+test invalid_file_warns_uses_defaults_and_is_never_overwritten ... ok
+test home_manager_symlink_is_managed_and_read_only ... ok
+test read_only_file_is_managed ... ok
+test save_round_trips_and_creates_the_directory ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/folder_management.rs (target/debug/deps/folder_management-3fa6873a45d6ec55)
+
+running 6 tests
+test local_checks_report_the_same_offline ... ok
+test a_lost_reply_counts_as_done_once_the_folder_list_shows_it ... ok
+test a_rename_replaces_a_stale_cached_folder_and_keeps_saved_searches ... ok
+test both_names_after_a_lost_reply_settle_without_pausing_the_account ... ok
+test a_refused_change_reports_the_server_and_leaves_mail_usable ... ok
+test server_confirmed_folder_lifecycle_and_interrupted_rename_survive_restart ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/imap_compatibility.rs (target/debug/deps/imap_compatibility-920fc0168be102bd)
+
+running 4 tests
+test zoho_wildcard_flags_parse_in_both_mailbox_and_fetch_responses ... ok
+test zoho_style_bare_content_id_and_repeated_body_extensions_parse_completely ... ok
+test zoho_multipart_without_child_parts_parses_at_any_depth ... ok
+test malformed_bodystructure_still_fails_closed ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/imap_server.rs (target/debug/deps/imap_server-8cda856360305e7a)
+
+running 10 tests
+test dropped_wire_connection_preserves_offline_mail_and_recovers ... ignored, requires the disposable Dovecot TLS server
+test invalid_certificate_and_bad_password_are_rejected_without_saving_accounts ... ignored, requires the disposable Dovecot TLS server
+test mime_text_is_decoded_without_downloading_the_nine_megabyte_attachment ... ignored, requires the disposable Dovecot TLS server and counting relay
+test parts_download_on_request_byte_exact_without_marking_mail_read ... ignored, requires the disposable Dovecot TLS server and counting relay
+test real_folder_management_is_visible_to_a_second_client ... ignored, requires the disposable Dovecot TLS server
+test real_queue_survives_restart_and_never_resurrects_remotely_deleted_mail ... ignored, requires the disposable Dovecot TLS server
+test real_queued_changes_are_observed_by_a_second_client ... ignored, requires the disposable Dovecot TLS server
+test real_read_only_sync_downloads_text_and_indexes_it_across_folders ... ignored, requires the disposable Dovecot TLS server
+test real_tls_account_can_authenticate_and_discover_folders ... ignored, requires the disposable Dovecot TLS server
+test remote_flags_and_deletions_update_cache_after_restart ... ignored, requires the disposable Dovecot TLS server
+
+test result: ok. 0 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mail_actions.rs (target/debug/deps/mail_actions-36eae776c4f36c98)
+
+running 15 tests
+test permanent_delete_without_uidplus_fails_visibly_and_removes_nothing ... ok
+test trash_and_archive_move_mail_on_the_server_and_it_arrives_after_sync ... ok
+test remote_deletion_before_apply_is_a_conflict_and_is_never_resurrected ... ok
+test a_change_the_server_answers_unusably_fails_without_blocking_sync ... ok
+test without_trash_delete_is_refused_and_permanent_delete_spares_other_clients_mail ... ok
+test copy_fallback_moves_without_move_and_stops_on_an_uncertain_copy ... ok
+test a_connection_lost_around_a_write_neither_repeats_nor_duplicates_it ... ok
+test discard_restores_the_local_view_without_writing ... ok
+test queued_changes_are_encrypted_at_rest ... ok
+test queueing_needs_an_unlocked_store_and_validates_requests ... ok
+test a_changed_uidvalidity_turns_queued_changes_into_conflicts ... ok
+test discarding_one_of_overlapping_read_changes_shows_the_remaining_one ... ok
+test offline_mark_read_shows_locally_survives_restart_and_reaches_the_server ... ok
+test an_interrupted_apply_resumes_after_restart ... ok
+test retrying_after_a_refused_source_deletion_does_not_copy_again ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/mail_engine.rs (target/debug/deps/mail_engine-47e1c5a6046e9262)
+
+running 13 tests
+test failed_credential_removal_keeps_the_account_and_can_be_retried ... ok
+test credential_reverification_and_local_removal_do_not_damage_cached_mail_on_failure ... ok
+test malformed_queries_are_actionable_and_punctuation_never_becomes_sql ... ok
+test cancellation_before_a_queued_search_starts_is_not_lost ... ok
+test uid_validity_reset_keeps_old_cache_until_replacement_finishes ... ok
+test slow_network_does_not_block_cached_search_and_sync_can_be_cancelled ... ok
+test synced_mail_is_searchable_without_duplicates_and_readable_after_restart_offline ... ok
+test authenticated_account_is_available_after_reopening_without_exposing_password ... ok
+test search_combines_human_filters_with_text_and_saved_search_survives_restart ... ok
+test parser_recovery_is_bounded_and_refuses_changed_folder_epochs ... ok
+test interrupted_sync_keeps_cached_mail_and_resumes_after_restart ... ok
+test one_unparseable_message_does_not_block_later_mail_or_other_folders ... ok
+test removing_a_large_account_leaves_the_store_available_and_blocks_sync ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+     Running tests/managed.rs (target/debug/deps/managed-6bf1f2bcc05fd26c)
+
+running 7 tests
+test missing_file_declares_nothing_and_bad_entries_are_reported ... ok
+test a_certificate_file_is_read_and_the_app_cannot_claim_managed ... ok
+test an_account_that_leaves_the_file_becomes_ordinary_and_keeps_its_mail ... ok
+test managed_accounts_cannot_be_removed_or_edited_in_the_app ... ok
+test changes_apply_in_place_and_keep_the_password ... ok
+test an_unreadable_file_changes_nothing ... ok
+test declared_account_waits_for_a_password_then_syncs ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/notify.rs (target/debug/deps/notify-11c0fb18963a44d4)
+
+running 2 tests
+test a_reused_row_id_does_not_hide_a_new_message ... ok
+test only_new_unread_inbox_mail_is_reported ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/operations.rs (target/debug/deps/operations-682d99d677ef9d32)
+
+running 14 tests
+test operations_list_newest_last_with_account_filter ... ok
+test dependent_operation_waits_for_its_parent ... ok
+test transient_failure_backs_off_then_a_permanent_failure_waits_for_the_user ... ok
+test unregistered_kinds_stay_queued ... ok
+test a_running_operation_cannot_be_cancelled ... ok
+test a_panicking_handler_fails_safely ... ok
+test delayed_operation_waits_and_can_be_cancelled_before_it_starts ... ok
+test queued_operation_runs_once_and_is_done ... ok
+test nothing_runs_while_the_keyring_is_locked ... ok
+test held_operations_wait_for_release ... ok
+test an_outcome_reached_while_locked_is_recorded_after_unlock_without_rerunning ... ok
+test unknown_outcome_is_never_retried_without_an_explicit_decision ... ok
+test restart_recovers_interrupted_work_by_whether_it_passed_the_point_of_no_return ... ok
+test restore_refuses_to_replace_the_store_while_an_operation_is_on_the_wire ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.14s
+
+     Running tests/replies.rs (target/debug/deps/replies-283b44eb3d825036)
+
+running 3 tests
+test a_reply_is_saved_as_a_threaded_draft_from_the_receiving_account ... ok
+test replying_to_a_message_that_is_gone_fails_cleanly ... ok
+test a_forward_starts_a_new_conversation ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/search_benchmark.rs (target/debug/deps/search_benchmark-c94d1dbe178f8276)
+
+running 2 tests
+test indexed_search_first_page_p95_is_under_200_ms_for_100k_messages ... ignored, explicit 100k-message performance gate; run with --ignored --nocapture
+test managing_a_100k_message_folder_leaves_other_views_responsive ... ignored, explicit 100k-message performance gate; run with --ignored --nocapture
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/secret_service.rs (target/debug/deps/secret_service-4031937332086112)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sender_images.rs (target/debug/deps/sender_images-c9c230c6ed8f86f8)
+
+running 8 tests
+test a_locked_store_asks_nothing ... ok
+test skipped_domains_never_reach_the_service ... ok
+test being_offline_is_not_mistaken_for_having_no_icon ... ok
+test an_icon_is_asked_for_once_by_registrable_domain ... ok
+test something_that_is_not_an_image_is_never_shown ... ok
+test having_no_icon_is_remembered_for_a_while ... ok
+test an_old_icon_keeps_showing_offline_and_is_replaced_once_reachable ... ok
+test a_recent_icon_is_not_asked_for_again ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/sending.rs (target/debug/deps/sending-f6b8765c1c3e4335)
+
+running 19 tests
+test an_account_with_unsent_mail_cannot_be_removed ... ok
+test invalid_messages_are_refused_and_the_draft_is_kept ... ok
+test a_missing_sent_folder_fails_the_copy_and_leaves_the_send_accepted ... ok
+test send_again_after_unknown_is_explicit ... ok
+test an_unknown_outcome_waits_for_a_decision ... ok
+test sending_submits_once_then_saves_a_sent_copy_with_bcc ... ok
+test accounts_without_smtp_cannot_send_until_it_is_added ... ok
+test a_failed_sent_copy_never_submits_again ... ok
+test offline_sends_wait_and_permanent_refusals_go_back_to_drafts ... ok
+test confirmed_recipients_keep_names_and_survive_dismissal_and_restart ... ok
+test a_send_without_a_sent_copy_leaves_the_outbox_once_accepted ... ok
+test sent_items_can_be_dismissed_without_resending ... ok
+test undo_within_the_delay_restores_the_draft_and_sends_nothing ... ok
+test unsent_and_unknown_recipients_are_not_remembered ... ok
+test drafts_autosave_and_survive_a_restart ... ok
+test nothing_is_sent_while_the_keyring_is_locked ... ok
+test a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy ... ok
+test named_signatures_survive_restart_and_draft_choice_controls_sent_text ... ok
+test upgrading_imports_older_confirmed_recipients_even_after_dismissal ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/smtp_server.rs (target/debug/deps/smtp_server-a624d4e61094c688)
+
+running 6 tests
+test a_failed_sent_copy_retries_on_its_own_without_resubmitting ... ignored, requires the disposable mail test server
+test an_unknown_outcome_survives_restart_without_resending ... ignored, requires the disposable mail test server
+test offline_send_waits_then_sends_after_reconnecting ... ignored, requires the disposable mail test server
+test server_failures_map_to_outcomes_without_duplicate_delivery ... ignored, requires the disposable mail test server
+test starttls_send_is_accepted_once_and_saved_to_sent ... ignored, requires the disposable mail test server
+test undo_before_the_delay_sends_nothing ... ignored, requires the disposable mail test server
+
+test result: ok. 0 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/store.rs (target/debug/deps/store-cc1b7cfe1bf6a8ee)
+
+running 9 tests
+test debug_output_redacts_key ... ok
+test diagnostics_report_sqlcipher_fts5_memory_temp_and_wal ... ok
+test memory_security_stays_off ... ok
+test fts5_search_finds_body_and_subject_text ... ok
+test wrong_key_is_rejected_and_right_key_reopens ... ok
+test upgrading_main_schema_six_keeps_operations_and_adds_attachment_storage ... ok
+test upgrading_early_attachment_schema_keeps_blobs_and_adds_operations ... ok
+test database_and_wal_contain_no_plaintext ... ok
+test upgrading_main_schema_seven_keeps_operations_attachments_and_mail_and_adds_actions ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/unlock.rs (target/debug/deps/unlock-2ba083f000cc27b5)
+
+running 6 tests
+test unavailable_keyring_blocks_without_creating_anything ... ok
+test locked_keyring_blocks_until_unlocked ... ok
+test missing_key_for_existing_store_is_never_replaced ... ok
+test first_run_generates_and_persists_a_key ... ok
+test mismatched_key_reports_wrong_key ... ok
+test concurrent_first_opens_share_one_durable_key ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/upgrade.rs (target/debug/deps/upgrade-6bc56437dc869f49)
+
+running 2 tests
+test schema_8_store_upgrades_keeping_queued_work_attachments_actions_and_mail ... ok
+test restore_keeps_real_drafts_outbox_and_mailbox_work_but_never_runs_them has been running for over 60 seconds
+test restore_keeps_real_drafts_outbox_and_mailbox_work_but_never_runs_them ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 64.82s
+
+     Running tests/viewer.rs (target/debug/deps/viewer-9b2ce4de50c1b2c2)
+
+running 9 tests
+test allowed_csp_permits_https_images_and_nothing_else ... ok
+test csp_denies_scripts_connections_and_frames ... ok
+test remote_images_counts_only_what_allowing_would_load ... ok
+test blocked_policy_strips_active_and_remote_content ... ok
+test allowed_policy_loads_https_images_only ... ok
+test referenced_cids_lists_only_image_sources_after_sanitising ... ok
+test embedded_images_become_data_urls_without_network_references ... ok
+test remote_policy_is_unchanged_by_inline_images ... ok
+test inline_images_share_a_document_budget ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.82s
+
+   Doc-tests pigeon_app
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests pigeon_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: 1 target failed:
+    `-p pigeon-core --lib`
