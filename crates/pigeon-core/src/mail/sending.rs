@@ -307,6 +307,14 @@ fn clean_composition(html: &str) -> String {
         .to_string()
 }
 
+// The composer encodes significant spaces as no-break spaces so that HTML
+// keeps them; the text alternative wants ordinary ones.
+fn plain_alternative(html: &str) -> Result<String, MailError> {
+    html2text::from_read(html.as_bytes(), 100)
+        .map(|text| text.replace('\u{a0}', " "))
+        .map_err(|_| invalid("could not convert the formatted message to text"))
+}
+
 fn clean_style(style: &str) -> String {
     style
         .split(';')
@@ -398,8 +406,7 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
     let subject = single_line(&draft.subject);
     let mut html = draft.body_html.as_deref().map(clean_composition);
     let mut body = match &html {
-        Some(html) => html2text::from_read(html.as_bytes(), 100)
-            .map_err(|_| invalid("could not convert the formatted message to text"))?,
+        Some(html) => plain_alternative(html)?,
         None => draft.body.clone(),
     };
     if !sending.signature.trim().is_empty() {
@@ -551,8 +558,7 @@ pub(super) fn upsert_draft(conn: &Connection, draft: &DraftInput) -> Result<Draf
     };
     if let Some(html) = &stored.body_html {
         let html = clean_composition(html);
-        stored.body = html2text::from_read(html.as_bytes(), 100)
-            .map_err(|_| invalid("could not convert the formatted message to text"))?;
+        stored.body = plain_alternative(&html)?;
         stored.body_html = Some(html);
     }
     let payload = serde_json::to_string(&stored)

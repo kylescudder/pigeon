@@ -689,6 +689,26 @@ fn rich_draft_recovers_and_sends_safe_alternatives_with_signatures() {
 }
 
 #[test]
+fn encoded_whitespace_survives_in_both_alternatives() {
+    let f = fixture();
+    let mut draft = f.draft();
+    draft.body_html = Some("Total:\u{a0} \u{a0}42<br>\u{a0} \u{a0} indented".into());
+    let saved = f.engine.save_draft(draft.clone()).unwrap();
+    assert!(saved.body.contains("Total:   42"));
+    assert!(saved.body.contains("    indented"));
+    assert!(!saved.body.contains('\u{a0}'));
+    f.engine.send_draft(draft).unwrap();
+    while f.engine.run_next_operation().unwrap() {}
+    let sent = f.smtp.sent.lock().unwrap();
+    let parsed = mailparse::parse_mail(sent[0].1.as_bytes()).unwrap();
+    let text = parsed.subparts[0].get_body().unwrap();
+    assert!(text.contains("Total:   42") && text.contains("    indented"));
+    assert!(!text.contains('\u{a0}'));
+    let html = parsed.subparts[1].get_body().unwrap();
+    assert!(html.contains("&nbsp; &nbsp;") || html.contains("\u{a0} \u{a0}"));
+}
+
+#[test]
 fn old_draft_payloads_default_to_plain_text() {
     let input: DraftInput = serde_json::from_str(r#"{"body":"Old text"}"#).unwrap();
     assert!(input.body_html.is_none());

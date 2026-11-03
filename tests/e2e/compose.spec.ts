@@ -591,6 +591,20 @@ test("plain conversion keeps recovered HTML content even when its text alternati
   await expect(page.getByLabel("Message", {exact:true})).toHaveValue("First\nSecond\nBudget\nPlans");
 });
 
+test("indentation and repeated spaces survive into the sent HTML and back to plain text", async ({ page }) => {
+  await fixture(page, { drafts: [{ body: "Total:   42\n    indented\tcell" }] });
+  await page.goto("/compose?draft=saved-1");
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Rich text" }).click();
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  const saved = () => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("pigeon-compose-fixture")!).drafts[0].body_html as string);
+  // Without the composer's pre-wrap style, recipients only see encoded spaces.
+  expect(await saved()).toBe("Total:\u00a0 \u00a042<br>\u00a0 \u00a0 indented\u00a0 \u00a0 cell");
+  await page.reload();
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Plain text" }).click();
+  await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Total:   42\n    indented    cell");
+});
+
 test("the formatting toolbar covers text styles, colours, links and blocks, all surviving a reload", async ({ page }) => {
   await fixture(page, {});
   await page.goto("/compose");

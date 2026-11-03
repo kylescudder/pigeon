@@ -44,7 +44,10 @@ export function safeHref(href: string): string | null {
 export function cleanComposition(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const clean = (node: Node): string => {
-    if (node.nodeType === Node.TEXT_NODE) return escapeText(node.textContent ?? "");
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      return node.parentElement?.closest("pre") ? escapeText(text) : keepWhitespace(text);
+    }
     if (!(node instanceof Element) || DROPPED.has(node.tagName)) return "";
     const children = Array.from(node.childNodes, clean).join("");
     const tag = TAGS[node.tagName];
@@ -69,8 +72,24 @@ function escapeText(text: string) {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+// The composer shows whitespace as typed (white-space: pre-wrap), but that
+// style does not travel with the message, so encode it in the markup itself:
+// line breaks become <br>, tabs four spaces, and a run of spaces alternates
+// with no-break spaces so it neither collapses nor stops the line wrapping.
+function keepWhitespace(text: string) {
+  return text.split("\n").map((line) => {
+    const expanded = line.replaceAll("\t", "    ");
+    return escapeText(expanded.replace(/ +/g, (run, at: number) => {
+      if (run.length === 1 && at > 0 && at + 1 < expanded.length) return run;
+      const spaces = Array.from(run, (_, index) => (index % 2 ? " " : "\u00a0"));
+      if (at + run.length === expanded.length) spaces[spaces.length - 1] = "\u00a0";
+      return spaces.join("");
+    }));
+  }).join("<br>");
+}
+
 export function textComposition(text: string) {
-  return escapeText(text).replaceAll("\n", "<br>");
+  return keepWhitespace(text);
 }
 
 // Use the visible authored content when removing formatting, including a
@@ -101,7 +120,7 @@ export function plainComposition(html: string): string {
     }
     return blocks.has(node.tagName) && !["UL", "OL"].includes(node.tagName) ? text + "\n" : text;
   };
-  return children(doc.body).replace(/\n$/, "");
+  return children(doc.body).replaceAll("\u00a0", " ").replace(/\n$/, "");
 }
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
