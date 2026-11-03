@@ -248,6 +248,8 @@ export type DraftInput = {
   bcc: string;
   subject: string;
   body: string;
+  /** Null/absent sends only text/plain; rich text also carries a text alternative. */
+  body_html?: string | null;
   /** Set on replies so other mail clients thread them. */
   in_reply_to?: string;
   references?: string;

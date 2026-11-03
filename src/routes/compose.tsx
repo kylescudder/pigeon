@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
+import { CompositionBody, plainComposition, textComposition } from "../components/composition-body";
 import { RecipientInput } from "../components/recipient-input";
 import { Icon } from "../components/icon";
 import { MailGate, useMail } from "../components/mail-provider";
@@ -89,6 +90,7 @@ function Composer({
     bcc: initial?.bcc ?? "",
     subject: initial?.subject ?? "",
     body: initial?.body ?? "",
+    body_html: initial?.body_html ?? null,
     // Kept as they are so a reply stays threaded through every autosave.
     in_reply_to: initial?.in_reply_to ?? "",
     references: initial?.references ?? "",
@@ -105,6 +107,7 @@ function Composer({
   formRef.current = form;
   const inFlight = useRef<Promise<unknown> | null>(null);
   const sending = useRef(false);
+  const revision = useRef(0);
 
   // A new message gets its draft id from its first save.
   const adopt = (draftId: string) => {
@@ -121,10 +124,11 @@ function Composer({
     if (inFlight.current) await inFlight.current.catch(() => {});
     if (sending.current) return;
     setSaveState("saving");
+    const savingRevision = revision.current;
     const pending = saveDraft(formRef.current).then(
       (saved) => {
         adopt(saved.id);
-        setSaveState("saved");
+        setSaveState(savingRevision === revision.current ? "saved" : "idle");
         void refresh();
       },
       (error) => setSaveState({ error: errorMessage(error) }),
@@ -190,8 +194,10 @@ function Composer({
   });
 
   const update = (patch: Partial<DraftInput>) => {
+    revision.current += 1;
     setForm((current) => ({ ...current, ...patch }));
     setDirty(true);
+    setSaveState("idle");
   };
   const account = accounts.find((candidate) => candidate.id === form.account_id);
   const canSend = !!account?.config.sending?.smtp;
@@ -314,13 +320,24 @@ function Composer({
               maxLength={998}
             />
           </div>
-          <textarea
-            className="composer-body"
-            aria-label="Message"
-            value={form.body}
-            onChange={(event) => update({ body: event.target.value })}
-            placeholder="Write your message"
-          />
+          <div className="composition-format">
+            <div className="segmented-control" role="group" aria-label="Message format">
+              {([["plain", "Plain text"], ["rich", "Rich text"]] as const).map(([format, label]) => (
+                <button key={format} type="button" disabled={busy}
+                  aria-pressed={(form.body_html == null) === (format === "plain")}
+                  onClick={() => {
+                    if ((form.body_html == null) === (format === "plain")) return;
+                    update(format === "plain"
+                      ? { body: plainComposition(form.body_html ?? ""), body_html: null }
+                      : { body_html: textComposition(form.body) });
+                  }}>{label}</button>
+              ))}
+            </div>
+            <span>Plain text removes formatting. Pasted content uses text only.</span>
+          </div>
+          <CompositionBody key={form.body_html == null ? "plain" : "rich"}
+            body={form.body} html={form.body_html ?? null} disabled={busy}
+            onChange={(body, body_html) => update({ body, body_html })} />
           {account?.config.sending?.signature && (
             <pre className="composer-signature" aria-label="Signature">
               {`-- \n${account.config.sending.signature}`}

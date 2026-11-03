@@ -234,6 +234,13 @@ fn sending_submits_once_then_saves_a_sent_copy_with_bcc() {
             "dave@pigeon.test"
         ]
     );
+    assert_eq!(
+        mailparse::parse_mail(message.as_bytes())
+            .unwrap()
+            .ctype
+            .mimetype,
+        "text/plain"
+    );
     assert!(message.contains("Pigeon Tester"));
     assert!(message.contains("Subject: Quarterly receipts"));
     assert!(message.contains("Sent from a test"));
@@ -618,5 +625,148 @@ fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
             .name
             .as_deref(),
         Some("Alice")
+    );
+}
+
+#[test]
+fn rich_draft_recovers_and_sends_safe_alternatives_with_signatures() {
+    let f = fixture();
+    let mut draft = f.draft();
+    draft.body_html = Some("<p>Hello <b>café</b></p><ul><li>Budget</li></ul><img src='https://tracker.test/pixel'><script>bad()</script>".into());
+    let saved = f.engine.save_draft(draft).unwrap();
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let restored = reopened.send_state().unwrap().drafts.remove(0);
+    assert_eq!(restored.id, saved.id);
+    assert!(restored.body_html.as_ref().unwrap().contains("<b>café</b>"));
+    assert!(!restored.body_html.as_ref().unwrap().contains("tracker"));
+    assert!(!restored.body_html.as_ref().unwrap().contains("script"));
+    assert!(restored.body.contains("Budget"));
+    let queued = reopened
+        .send_draft(DraftInput {
+            id: Some(restored.id),
+            body: restored.body,
+            body_html: restored.body_html,
+            ..f.draft()
+        })
+        .unwrap();
+    let editable = reopened.return_to_drafts(&queued.id).unwrap();
+    assert!(editable.body_html.unwrap().contains("<b>café</b>"));
+    reopened
+        .send_draft(DraftInput {
+            id: Some(editable.id),
+            body_html: saved.body_html,
+            ..f.draft()
+        })
+        .unwrap();
+    while reopened.run_next_operation().unwrap() {}
+    let sent = f.smtp.sent.lock().unwrap();
+    let parsed = mailparse::parse_mail(sent[0].1.as_bytes()).unwrap();
+    assert_eq!(parsed.ctype.mimetype, "multipart/alternative");
+    assert_eq!(parsed.subparts.len(), 2);
+    assert_eq!(parsed.subparts[0].ctype.mimetype, "text/plain");
+    assert_eq!(parsed.subparts[1].ctype.mimetype, "text/html");
+    for part in &parsed.subparts {
+        let body = part.get_body().unwrap();
+        assert!(
+            body.contains("café") && body.contains("Budget") && body.contains("Sent from a test")
+        );
+        assert!(!body.contains("tracker") && !body.contains("bad()"));
+    }
+    assert!(!sent[0].1.contains("dave@pigeon.test"));
+    let appended = f.imap.appended.lock().unwrap();
+    let copy = mailparse::parse_mail(appended[0].1.as_bytes()).unwrap();
+    for i in 0..2 {
+        assert_eq!(
+            parsed.subparts[i].get_body().unwrap(),
+            copy.subparts[i].get_body().unwrap()
+        );
+    }
+}
+
+#[test]
+fn old_draft_payloads_default_to_plain_text() {
+    let input: DraftInput = serde_json::from_str(r#"{"body":"Old text"}"#).unwrap();
+    assert!(input.body_html.is_none());
+}
+
+#[test]
+fn rich_formatting_keeps_composer_styles_and_links_but_nothing_active_or_remote() {
+    let f = fixture();
+    let mut draft = f.draft();
+    draft.body_html = Some(concat!(
+        r#"<h1 style="text-align: center; position: fixed">Plan</h1>"#,
+        r#"<p><u>Under</u> <s>gone</s> x<sup>2</sup> H<sub>2</sub>O "#,
+        r#"<span style="color: #d93025; background-color: rgb(255, 242, 168); font-size: 90px">red</span> "#,
+        r#"<span style="background-image: url(https://tracker.test/a)">plain</span> "#,
+        r#"<span style="color: expression(alert(1))">expr</span> "#,
+        r#"<span style="background-color: initial; font-weight: inherit">junk</span></p>"#,
+        r#"<blockquote>Quoted</blockquote>"#,
+        r#"<blockquote style="margin: 0 0 0 40px; border: none; padding: 0px">Indented</blockquote>"#,
+        r#"<pre><code>let x = 1;</code></pre><hr>"#,
+        r#"<a href="https://example.test/docs" onclick="x()" target="_blank">Docs</a> "#,
+        r#"<a href="mailto:alice@pigeon.test">Mail</a> "#,
+        r#"<a href="javascript:alert(1)">Bad</a> <a href="/relative">Rel</a> "#,
+        r#"<img src="https://tracker.test/pixel"><iframe src="https://evil.test"></iframe>"#,
+    ).into());
+    let html = f.engine.save_draft(draft).unwrap().body_html.unwrap();
+    for kept in [
+        r#"<h1 style="text-align: center">Plan</h1>"#,
+        "<u>Under</u>",
+        "<s>gone</s>",
+        "<sup>2</sup>",
+        "<sub>2</sub>",
+        r#"<span style="color: #d93025; background-color: rgb(255, 242, 168)">red</span>"#,
+        "<blockquote>Quoted</blockquote>",
+        r#"<blockquote style="margin: 0 0 0 40px; border: none; padding: 0px">Indented</blockquote>"#,
+        "<pre><code>let x = 1;</code></pre><hr>",
+        r#"<a href="https://example.test/docs">Docs</a>"#,
+        r#"<a href="mailto:alice@pigeon.test">Mail</a>"#,
+    ] {
+        assert!(html.contains(kept), "{kept} missing from {html}");
+    }
+    for dropped in [
+        "position",
+        "font-size",
+        "tracker",
+        "expression",
+        "javascript",
+        "relative",
+        "onclick",
+        "target",
+        "iframe",
+        "evil",
+    ] {
+        assert!(!html.contains(dropped), "{dropped} survived in {html}");
+    }
+    f.engine
+        .send_draft(DraftInput {
+            body_html: Some(html),
+            ..f.draft()
+        })
+        .unwrap();
+    f.drain();
+    let sent = f.smtp.sent.lock().unwrap();
+    let parsed = mailparse::parse_mail(sent[0].1.as_bytes()).unwrap();
+    let text = parsed.subparts[0].get_body().unwrap();
+    for visible in [
+        "Plan",
+        "Quoted",
+        "Indented",
+        "let x = 1;",
+        "Docs",
+        "https://example.test/docs",
+    ] {
+        assert!(text.contains(visible), "{visible} missing from {text}");
+    }
+    assert!(
+        parsed.subparts[1]
+            .get_body()
+            .unwrap()
+            .contains(r#"<a href="https://example.test/docs">Docs</a>"#)
     );
 }
