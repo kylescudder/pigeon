@@ -147,7 +147,13 @@ fn convert(name: &str, declared: Declared) -> Result<ManagedAccount, String> {
         username: declared.user_name.clone(),
     });
     let config = AccountConfig {
-        name: name.to_owned(),
+        // Sender names may be longer than account labels. Keep valid declarations
+        // loadable without truncating the name used on outgoing mail.
+        name: if declared.real_name.trim().is_empty() || declared.real_name.len() > 120 {
+            name.to_owned()
+        } else {
+            declared.real_name.clone()
+        },
         address: declared.address,
         host: declared.imap.host,
         port: declared.imap.port,
