@@ -71,7 +71,9 @@ On every mail refresh the app reads the file and reconciles it with its store:
 
 1. **Stable identity.** A declared account's id is `managed-<name>`, so its
    keyring password and cached mail survive a rebuild. The account label uses
-   `realName`, falling back to the attribute key when it is empty or whitespace.
+   `realName`, falling back to the attribute key when it is empty, whitespace,
+   or exceeds the label limit of 120 UTF-8 bytes. The full `realName` is still
+   used as the outgoing sender name (up to its separate 200-byte limit).
 2. **Created without a password.** The account appears with "enter this
    account's password to start syncing". The password is verified when entered,
    as for any account, and kept in the keyring.

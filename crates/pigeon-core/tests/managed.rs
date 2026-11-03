@@ -299,3 +299,46 @@ fn changing_real_name_updates_the_label_without_replacing_the_account() {
     assert_eq!(accounts[0].config.sending.display_name, "New name");
     engine.sync_account("managed-personal").unwrap();
 }
+
+#[test]
+fn long_real_names_keep_accounts_managed_and_their_sender_names_intact() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path());
+    engine
+        .reconcile_managed(&write(dir.path(), &declaration("imap.example.test")))
+        .unwrap();
+    engine
+        .update_password("managed-personal", Zeroizing::new(b"app-password".to_vec()))
+        .unwrap();
+
+    // The sender-name limit is 200 bytes; account labels permit only 120.
+    // Cover both limits and multibyte names, including a boundary-crossing character.
+    for (real_name, expected_label) in [
+        ("A".repeat(120), "A".repeat(120)),
+        ("A".repeat(121), "personal".into()),
+        ("A".repeat(200), "personal".into()),
+        ("é".repeat(60), "é".repeat(60)),
+        (format!("{}é", "A".repeat(119)), "personal".into()),
+        ("é".repeat(100), "personal".into()),
+    ] {
+        let mut json: serde_json::Value =
+            serde_json::from_str(&declaration("imap2.example.test")).unwrap();
+        json["accounts"]["personal"]["realName"] = real_name.clone().into();
+        let declared = write(dir.path(), &json.to_string());
+        assert!(
+            declared.warnings.is_empty(),
+            "valid sender name ({} bytes) was rejected: {:?}",
+            real_name.len(),
+            declared.warnings
+        );
+        engine.reconcile_managed(&declared).unwrap();
+        let accounts = engine.accounts().unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].id, "managed-personal");
+        assert!(accounts[0].config.managed);
+        assert_eq!(accounts[0].config.name, expected_label);
+        assert_eq!(accounts[0].config.sending.display_name, real_name);
+        assert_eq!(accounts[0].config.host, "imap2.example.test");
+        engine.sync_account("managed-personal").unwrap();
+    }
+}
