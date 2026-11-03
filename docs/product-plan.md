@@ -71,6 +71,7 @@ Tauri remains provisional until Linux rendering, hostile-content isolation, pack
 - Explain the loss model: server mail can be downloaded again; losing the database key and recovery material loses local-only data. Full-disk protection remains complementary. Encryption does not promise confidentiality against malware or root accessing an unlocked session.
 - Display sanitised HTML email inside a proven unprivileged viewer, with scripts disabled, restrictive network behaviour, and no native command access. Provide a plain-text view.
 - Block remote content by default. Offer per-message image loading, optional trusted-sender exceptions, and a global preference. Embedded images can display without fetching an external image resource. Explicit remote loading can still disclose activity to that resource's operator.
+- Sender images are initials by default. Website icons are opt-in and come from one fixed icon service, never the sender's own servers; see [sender images](desktop.md#sender-images).
 - Open links in the user's normal browser. Attachments are never executed automatically; export or external opening creates an explicit boundary outside the encrypted store.
 - Keep credentials, keys, personal mail, and sensitive content out of logs, test evidence, Nix expressions, and the Nix store.
 
@@ -82,7 +83,7 @@ Tauri remains provisional until Linux rendering, hostile-content isolation, pack
 - From the overview, support both merged mail views and individual-account views. The estate overview is distinct from the merged inbox.
 - A practical three-pane interface with adjustable density, light/dark themes, keyboard navigation, and a command palette remains the functional baseline.
 - The visual direction is a compact Raycast/iOS-inspired desktop interface: layered surfaces, restrained rounding, grouped controls, and clear typography. The foundation shell now includes a composed empty overview, persistent theme/density settings, keyboard command navigation, and a secondary Diagnostics view. The receiving build adds real account setup, estate/account views, cached reading, and search.
-- Message grouping and conversation threading are deferred; use a flat message list initially.
+- Conversation grouping and reading are now in scope (expanded by the user on 2026-11-01). Group using account-scoped Message-ID/In-Reply-To/References links, retain flat-message access and exact search matches, and keep actions/replies tied to the open message. See [conversation behavior and verification](conversations.md).
 - Closing the window keeps the application running and synchronising by default. Make this configurable and provide an explicit Quit action and optional launch-at-login.
 - Desktop notifications omit message bodies by default.
 - Reopening through the desktop launcher must work with the background application. Support operation without a tray; tray availability must not determine whether the app can be reopened or quit.
@@ -143,7 +144,7 @@ Gate: state preserved while switching; accessible keyboard/focus behaviour; actu
 
 ## Explicitly deferred scope
 
-Automatic filing rules, automatic categorisation, conversation grouping, attachment-content indexing, full calendar/contacts management, AI features, scheduled sending, mail merge, templates, cross-device preference sync, other operating systems/architectures, and end-to-end message encryption are outside the initial release. Local storage encryption does not imply end-to-end email encryption.
+Automatic filing rules, automatic categorisation, attachment-content indexing, full calendar/contacts management, AI features, scheduled sending, mail merge, templates, cross-device preference sync, other operating systems/architectures, and end-to-end message encryption are outside the initial release. Local storage encryption does not imply end-to-end email encryption.
 
 ## Verification and evidence policy
 

@@ -170,6 +170,7 @@ impl MailEngine {
             let now = now();
             let mut queued = 0;
             for ((account, folder, validity), (folder_kind, mut items)) in groups {
+                super::folders::ensure_ready(&tx, &account)?;
                 let target = match &kind {
                     ActionKind::MarkRead | ActionKind::MarkUnread => None,
                     ActionKind::DeletePermanently => None,
@@ -374,6 +375,7 @@ impl MailEngine {
         account: &Account,
         password: &Secret,
     ) -> Result<(), MailError> {
+        self.with_store(|store| super::folders::ensure_ready(store.connection(), &account.id))?;
         let mut session: Option<Box<dyn MailSession>> = None;
         let mut capabilities = None;
         let mut last = 0;

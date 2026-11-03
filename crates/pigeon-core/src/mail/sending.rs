@@ -20,6 +20,14 @@ const MAX_FIELD: usize = 64 * 1024;
 /// After this many tries a Sent copy stops retrying on its own.
 const SENT_COPY_ATTEMPTS: u32 = 6;
 
+/// A named plain-text signature saved with an account.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedSignature {
+    pub id: String,
+    pub name: String,
+    pub body: String,
+}
+
 /// How an account sends mail. Stored inside the account settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -29,6 +37,8 @@ pub struct SendingSettings {
     pub display_name: String,
     /// Plain text appended below a standard "-- " separator.
     pub signature: String,
+    /// Alternatives; `signature` remains the default for older accounts.
+    pub signatures: Vec<SavedSignature>,
     /// Off for providers that file sent mail themselves.
     pub save_sent_copy: bool,
 }
@@ -39,6 +49,7 @@ impl Default for SendingSettings {
             smtp: None,
             display_name: String::new(),
             signature: String::new(),
+            signatures: Vec::new(),
             save_sent_copy: true,
         }
     }
@@ -56,6 +67,8 @@ pub struct DraftInput {
     pub body: String,
     /// None means plain text. Some carries the restricted authored HTML.
     pub body_html: Option<String>,
+    /// None uses the account default; Some("") omits the signature.
+    pub signature: Option<String>,
     /// Message-ID of the message this replies to, without angle brackets.
     pub in_reply_to: String,
     /// Message-IDs of the conversation so far, space separated.
@@ -73,6 +86,7 @@ pub struct Draft {
     pub body: String,
     /// None means plain text. Some carries the restricted authored HTML.
     pub body_html: Option<String>,
+    pub signature: Option<String>,
     pub in_reply_to: String,
     pub references: String,
     pub updated: i64,
@@ -180,6 +194,13 @@ pub(super) fn invalid(message: &str) -> MailError {
 }
 
 fn check_draft(draft: &DraftInput) -> Result<(), MailError> {
+    if draft
+        .signature
+        .as_ref()
+        .is_some_and(|text| text.len() > 10_000)
+    {
+        return Err(invalid("the signature is too long"));
+    }
     if draft.body.len() > MAX_BODY
         || draft
             .body_html
@@ -409,17 +430,14 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
         Some(html) => plain_alternative(html)?,
         None => draft.body.clone(),
     };
-    if !sending.signature.trim().is_empty() {
-        body = format!(
-            "{}\n\n-- \n{}",
-            body.trim_end(),
-            sending.signature.trim_end()
-        );
+    let signature = draft.signature.as_deref().unwrap_or(&sending.signature);
+    if !signature.trim().is_empty() {
+        body = format!("{}\n\n-- \n{}", body.trim_end(), signature.trim_end());
     }
     if let Some(html) = &mut html {
-        if !sending.signature.trim().is_empty() {
+        if !signature.trim().is_empty() {
             html.push_str("<p>-- <br>");
-            html.push_str(&escape_html(sending.signature.trim_end()).replace('\n', "<br>"));
+            html.push_str(&escape_html(signature.trim_end()).replace('\n', "<br>"));
             html.push_str("</p>");
         }
     }
@@ -540,6 +558,7 @@ fn draft_from_payload(id: &str, payload: &str, updated: i64) -> Result<Draft, Ma
         subject: input.subject,
         body: input.body,
         body_html: input.body_html,
+        signature: input.signature,
         in_reply_to: input.in_reply_to,
         references: input.references,
         updated,
@@ -824,15 +843,15 @@ impl MailEngine {
                 .map_err(storage_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(storage_error)?;
-            let day_ago = operations::now_ms() - 24 * 60 * 60 * 1000;
             let mut outbox = Vec::new();
             for (id, account_id, subject, recipients, created, submit, copy, accepted) in rows {
                 let submit = operations::get(conn, &submit)?;
                 let copy = copy.map(|copy| operations::get(conn, &copy)).transpose()?;
                 let send = send_status(&submit, accepted);
                 let sent_copy = sent_copy_status(copy.as_ref());
-                // Finished sends drop out of the outbox after a day.
-                if matches!(send, SendStatus::Accepted { at } if at < day_ago)
+                // A finished send leaves the outbox; only a Sent copy still
+                // on its way or needing a retry keeps it here.
+                if matches!(send, SendStatus::Accepted { .. })
                     && matches!(sent_copy, SentCopyStatus::Saved | SentCopyStatus::NotRequested)
                 {
                     continue;
@@ -910,12 +929,13 @@ impl MailEngine {
             subject: saved.subject.clone(),
             body: saved.body.clone(),
             body_html: saved.body_html.clone(),
+            signature: saved.signature.clone(),
             in_reply_to: saved.in_reply_to.clone(),
             references: saved.references.clone(),
         };
         let built = build(&account, &input, operations::now_ms() / 1000)?;
         let outbox_id = random_id()?;
-        self.with_store(|store| {
+        let item = self.with_store(|store| {
             let tx = store
                 .connection()
                 .unchecked_transaction()
@@ -931,6 +951,7 @@ impl MailEngine {
                 .map_err(|_| MailError::Storage("could not queue the message".into()))?;
             let envelope = serde_json::to_string(&(&built.envelope.from, &built.envelope.recipients))
                 .map_err(|_| MailError::Storage("could not queue the message".into()))?;
+            let created = operations::now_ms();
             tx.execute(
                 "INSERT INTO outbox(id,account,draft,envelope,message,sent_copy,message_id,subject,recipients,submit_op,created)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -945,25 +966,27 @@ impl MailEngine {
                     built.subject,
                     built.recipients,
                     op.id,
-                    operations::now_ms()
+                    created
                 ],
             )
             .map_err(storage_error)?;
             tx.execute("DELETE FROM drafts WHERE id=?1", [&saved.id])
                 .map_err(storage_error)?;
             tx.commit().map_err(storage_error)?;
-            Ok(())
+            // Built here, not read back: with no undo delay the message may
+            // be sent and out of the outbox before it could be read.
+            Ok(OutboxItem {
+                id: outbox_id,
+                account_id,
+                subject: built.subject,
+                recipients: built.recipients,
+                created,
+                send: send_status(&op, None),
+                sent_copy: sent_copy_status(None),
+            })
         })?;
         self.wake_operations();
-        self.outbox_item(&outbox_id)
-    }
-
-    fn outbox_item(&self, id: &str) -> Result<OutboxItem, MailError> {
-        self.send_state()?
-            .outbox
-            .into_iter()
-            .find(|item| item.id == id)
-            .ok_or(MailError::NotFound)
+        Ok(item)
     }
 
     /// Undo before sending starts, or edit a message that failed. Puts it
@@ -1198,6 +1221,24 @@ pub(crate) fn validate_sending(settings: &SendingSettings) -> Result<(), MailErr
     }
     if settings.signature.len() > 10_000 {
         return Err(invalid("the signature is too long"));
+    }
+    if settings.signatures.len() > 20 {
+        return Err(invalid("save up to 20 signatures per account"));
+    }
+    let mut ids = std::collections::HashSet::new();
+    for signature in &settings.signatures {
+        if signature.id.is_empty()
+            || signature.id.len() > 64
+            || !ids.insert(&signature.id)
+            || signature.name.trim().is_empty()
+            || signature.name.len() > 100
+            || signature.name.contains(['\r', '\n', '\0'])
+            || signature.body.len() > 10_000
+        {
+            return Err(invalid(
+                "each signature needs a unique ID, a name up to 100 characters and text up to 10000 bytes",
+            ));
+        }
     }
     if let Some(smtp) = &settings.smtp {
         if smtp.host.trim().is_empty()

@@ -5,6 +5,8 @@ pub(super) struct SearchPlan {
     pub filters: Vec<String>,
     pub values: Vec<Value>,
     pub text: String,
+    /// Whether Junk and Trash are in scope, from settings or the query text.
+    pub include_junk_trash: bool,
 }
 
 pub(super) fn compile(query: &SearchQuery) -> Result<SearchPlan, MailError> {
@@ -17,6 +19,7 @@ pub(super) fn compile(query: &SearchQuery) -> Result<SearchPlan, MailError> {
         filters: Vec::new(),
         values: Vec::new(),
         text: String::new(),
+        include_junk_trash: false,
     };
     if let Some(account) = &query.account_id {
         plan.filters.push("m.account=?".into());
@@ -135,6 +138,7 @@ pub(super) fn compile(query: &SearchQuery) -> Result<SearchPlan, MailError> {
         plan.filters.push("f.kind NOT IN ('junk','trash')".into());
     }
     plan.text = text.join(" ");
+    plan.include_junk_trash = include_junk;
     Ok(plan)
 }
 

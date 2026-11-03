@@ -3,7 +3,7 @@
 //! capabilities, so a sanitiser bypass alone must not reach native commands.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use ammonia::{Builder, UrlRelative};
@@ -47,10 +47,70 @@ pub fn normalise_cid(value: &str) -> String {
         .to_owned()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which remote images a document may load. Only https images ever load.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteContent {
     Blocked,
     Allowed,
+    /// Only images from these hosts, as returned by [`image_host`].
+    Hosts(BTreeSet<String>),
+}
+
+impl RemoteContent {
+    /// Everything either choice allows.
+    pub fn union(self, other: RemoteContent) -> RemoteContent {
+        match (self, other) {
+            (RemoteContent::Allowed, _) | (_, RemoteContent::Allowed) => RemoteContent::Allowed,
+            (RemoteContent::Blocked, other) | (other, RemoteContent::Blocked) => other,
+            (RemoteContent::Hosts(mut a), RemoteContent::Hosts(b)) => {
+                a.extend(b);
+                RemoteContent::Hosts(a)
+            }
+        }
+    }
+
+    fn loads(&self, url: &str) -> bool {
+        match self {
+            RemoteContent::Blocked => false,
+            RemoteContent::Allowed => image_host(url).is_some(),
+            RemoteContent::Hosts(hosts) => {
+                image_host(url).is_some_and(|host| hosts.contains(&host))
+            }
+        }
+    }
+}
+
+/// The host (with any port) of an https image URL, lowercased, or `None` for
+/// anything else. Deliberately strict: a URL whose host is not plain ASCII
+/// letters, digits, dots, hyphens and a port is never loaded, so the host
+/// shown to the user, the one compared here and the one in the CSP agree.
+pub fn image_host(url: &str) -> Option<String> {
+    let url = url.trim();
+    let rest = url
+        .get(..8)
+        .filter(|scheme| scheme.eq_ignore_ascii_case("https://"))
+        .map(|_| &url[8..])?;
+    if rest.contains('\\') {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host = authority.to_ascii_lowercase();
+    let (name, port) = match host.split_once(':') {
+        Some((name, port)) => (name, Some(port)),
+        None => (host.as_str(), None),
+    };
+    let name_ok = !name.is_empty()
+        && name.len() <= 253
+        && !name.starts_with(['.', '-'])
+        && !name.ends_with(['.', '-'])
+        && name.contains('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    let port_ok = port.is_none_or(|port| {
+        !port.is_empty() && port.len() <= 5 && port.chars().all(|c| c.is_ascii_digit())
+    });
+    (name_ok && port_ok).then_some(host)
 }
 
 /// Sanitises untrusted message HTML. Scripts, frames, forms, event handlers,
@@ -58,7 +118,7 @@ pub enum RemoteContent {
 /// `cid:` images survive.
 pub fn sanitise(html: &str, remote: RemoteContent) -> String {
     clean(html, move |element, attribute, value| {
-        filter_attribute(remote, element, attribute, value)
+        filter_attribute(&remote, element, attribute, value)
     })
 }
 
@@ -67,7 +127,7 @@ pub fn referenced_cids(html: &str) -> Vec<String> {
     let found = Arc::new(Mutex::new(Vec::new()));
     let sink = found.clone();
     clean(html, move |element, attribute, value| {
-        let kept = filter_attribute(RemoteContent::Blocked, element, attribute, value);
+        let kept = filter_attribute(&RemoteContent::Blocked, element, attribute, value);
         if (element, attribute) == ("img", "src")
             && kept.is_some()
             && value.trim_start().to_ascii_lowercase().starts_with("cid:")
@@ -80,6 +140,26 @@ pub fn referenced_cids(html: &str) -> Vec<String> {
     std::mem::take(&mut *found.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Each host a message's remote images could load from, with how many
+/// images it serves, in the order they first appear.
+pub fn remote_image_hosts(html: &str) -> Vec<(String, u32)> {
+    let found: Arc<Mutex<Vec<(String, u32)>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = found.clone();
+    clean(html, move |element, attribute, value| {
+        if (element, attribute) == ("img", "src")
+            && let Some(host) = image_host(value)
+            && let Ok(mut found) = sink.lock()
+        {
+            match found.iter_mut().find(|(known, _)| *known == host) {
+                Some((_, count)) => *count += 1,
+                None => found.push((host, 1)),
+            }
+        }
+        filter_attribute(&RemoteContent::Blocked, element, attribute, value)
+    });
+    std::mem::take(&mut *found.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
 /// Like [`sanitise`], but resolves `cid:` images to `data:` URLs from parts
 /// already downloaded. Unresolved, non-raster, or over-budget images lose
 /// their source and show only their alt text; no `cid:` reference remains.
@@ -87,7 +167,7 @@ pub fn sanitise_inline(html: &str, remote: RemoteContent, inline: &InlineImages)
     let inline = Arc::new(inline.clone());
     let budget = Mutex::new(MAX_INLINE_DOCUMENT_BYTES);
     clean(html, move |element, attribute, value| {
-        let kept = filter_attribute(remote, element, attribute, value)?;
+        let kept = filter_attribute(&remote, element, attribute, value)?;
         if (element, attribute) != ("img", "src")
             || !value.trim_start().to_ascii_lowercase().starts_with("cid:")
         {
@@ -123,7 +203,7 @@ fn clean(
 }
 
 fn filter_attribute<'a>(
-    remote: RemoteContent,
+    remote: &RemoteContent,
     element: &str,
     attribute: &str,
     value: &'a str,
@@ -136,7 +216,7 @@ fn filter_attribute<'a>(
         .then_some(Cow::Borrowed(value)),
         ("img", "src") => {
             let inline = lower.starts_with("cid:") || lower.starts_with("data:image/");
-            let remote_ok = remote == RemoteContent::Allowed && lower.starts_with("https:");
+            let remote_ok = remote.loads(value);
             (inline || remote_ok).then_some(Cow::Borrowed(value))
         }
         // `data:` is only permitted for images; drop it anywhere else.
@@ -149,8 +229,15 @@ fn filter_attribute<'a>(
 /// frames, no form submission; images limited by the remote-content choice.
 pub fn content_security_policy(remote: RemoteContent) -> String {
     let img = match remote {
-        RemoteContent::Blocked => "img-src data:",
-        RemoteContent::Allowed => "img-src data: https:",
+        RemoteContent::Blocked => "img-src data:".to_owned(),
+        RemoteContent::Allowed => "img-src data: https:".to_owned(),
+        // Hosts are re-checked here: the CSP must never take anything else.
+        RemoteContent::Hosts(hosts) => hosts
+            .iter()
+            .filter(|host| image_host(&format!("https://{host}/")).as_deref() == Some(host))
+            .fold("img-src data:".to_owned(), |csp, host| {
+                csp + " https://" + host
+            }),
     };
     format!(
         "default-src 'none'; {img}; style-src 'unsafe-inline'; script-src 'none'; \

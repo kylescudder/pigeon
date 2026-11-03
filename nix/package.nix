@@ -15,6 +15,7 @@
   dbus,
   gnome-keyring,
   libayatana-appindicator,
+  alsa-lib,
 }:
 
 let
@@ -39,6 +40,7 @@ let
       ../src-tauri/tauri.conf.json
       ../src-tauri/capabilities
       ../src-tauri/icons
+      ../src-tauri/sounds
       ../src-tauri/src
     ];
   };
@@ -108,6 +110,7 @@ rustPlatform.buildRustPackage (
       gtk3
       dbus
       libayatana-appindicator
+      alsa-lib
     ];
 
     postPatch = withNodeModules;

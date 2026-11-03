@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const port = process.env.PIGEON_E2E_PORT ?? "1422";
+const port = Number(process.env.PIGEON_E2E_PORT ?? 1422);
 const artifacts = process.env.PIGEON_E2E_ARTIFACTS ?? "evidence/playwright";
 
 export default defineConfig({

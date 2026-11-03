@@ -10,6 +10,8 @@
       {
         "closeToBackground": true,
         "notifications": "senderSubject",
+        "remoteImages": false,
+        "senderImages": false,
         "tray": false
       }
     ''}

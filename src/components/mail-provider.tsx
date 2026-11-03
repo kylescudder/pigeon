@@ -75,6 +75,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
       // store becomes unavailable. Never keep showing a previous success.
       client.removeQueries({ queryKey: ["mail", "search"] });
       client.removeQueries({ queryKey: ["mail", "message"] });
+      client.removeQueries({ queryKey: ["mail", "conversation"] });
       client.removeQueries({ queryKey: ["mail", "actions"] });
       client.removeQueries({ queryKey: ["send"] });
     }
@@ -83,12 +84,14 @@ export function MailProvider({ children }: { children: ReactNode }) {
   const pendingChanges = stateQuery.data?.actions?.pending ?? 0;
   useEffect(() => {
     void client.invalidateQueries({ queryKey: ["mail", "search"] });
+    void client.invalidateQueries({ queryKey: ["mail", "conversation"] });
     void client.invalidateQueries({ queryKey: ["mail", "actions"] });
   }, [pendingChanges, client]);
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: MAIL_STATE_KEY });
     await client.invalidateQueries({ queryKey: ["mail", "search"] });
     await client.invalidateQueries({ queryKey: ["mail", "message"] });
+    await client.invalidateQueries({ queryKey: ["mail", "conversation"] });
     await client.invalidateQueries({ queryKey: ["mail", "actions"] });
     await client.invalidateQueries({ queryKey: ["send"] });
   };
