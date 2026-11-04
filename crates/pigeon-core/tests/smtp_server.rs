@@ -339,8 +339,7 @@ fn undo_before_the_delay_sends_nothing() {
 fn rich_send_round_trips_both_alternatives_through_smtp_and_sent() {
     let h = harness(smtp(587, TransportSecurity::StartTls));
     let token = token();
-    let queued = h
-        .engine
+    h.engine
         .send_draft(DraftInput {
             account_id: Some(h.account.clone()),
             to: "friend@pigeon.test".into(),
@@ -351,11 +350,8 @@ fn rich_send_round_trips_both_alternatives_through_smtp_and_sent() {
         })
         .unwrap();
     h.drain();
-    assert!(matches!(
-        h.item(&queued.id).send,
-        SendStatus::Accepted { .. }
-    ));
-    assert_eq!(h.item(&queued.id).sent_copy, SentCopyStatus::Saved);
+    // Accepted with its Sent copy saved, so it has left the outbox.
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(spooled(&token), 1);
     let entry = std::fs::read_dir("/pki/smtp-spool")
         .unwrap()

@@ -434,12 +434,12 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
     if !signature.trim().is_empty() {
         body = format!("{}\n\n-- \n{}", body.trim_end(), signature.trim_end());
     }
-    if let Some(html) = &mut html {
-        if !signature.trim().is_empty() {
-            html.push_str("<p>-- <br>");
-            html.push_str(&escape_html(signature.trim_end()).replace('\n', "<br>"));
-            html.push_str("</p>");
-        }
+    if let Some(html) = &mut html
+        && !signature.trim().is_empty()
+    {
+        html.push_str("<p>-- <br>");
+        html.push_str(&escape_html(signature.trim_end()).replace('\n', "<br>"));
+        html.push_str("</p>");
     }
     let body = crlf(&body);
     let display_name = single_line(&sending.display_name);
