@@ -620,3 +620,221 @@ test("multiple signatures can be named, saved, selected per draft and removed", 
   await expect(form.getByLabel("Saved signature").getByRole("option", { name: "Work", exact: true })).toHaveCount(0);
   await expect(form.getByLabel("Default signature")).toHaveValue("");
 });
+
+test("rich text survives autosave, reload and undo, and converts explicitly to plain text", async ({ page }, testInfo) => {
+  await fixture(page, { undo: 30 });
+  await page.goto("/compose");
+  await page.getByLabel("To", { exact: true }).fill("alice@example.test");
+  await page.getByLabel("Subject", { exact: true }).fill("Formatted update");
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Rich text" }).click();
+  const message = page.getByRole("textbox", { name: "Message", exact: true });
+  await message.fill("Hello café");
+  await message.press("ControlOrMeta+a");
+  await page.getByRole("button", { name: "Bold", exact: true }).click();
+  await expect(message.locator("b, strong")).toHaveText("Hello café");
+  await expect(page.getByRole("button", { name: "Bold", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  await page.reload();
+  await expect(message.locator("b, strong")).toHaveText("Hello café");
+  await page.screenshot({ path: testInfo.outputPath("rich-composer.png") });
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.locator(".undo-send-bar").getByRole("button", { name: "Undo" }).click();
+  await expect(message.locator("b, strong")).toHaveText("Hello café");
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Plain text" }).click();
+  await expect(message).toHaveValue("Hello café");
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  await page.reload();
+  await expect(message).toHaveValue("Hello café");
+  await expect(page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Plain text" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("rich editing supports lists, italic and safe paste, preserving reply metadata after a refused send", async ({ page }) => {
+  await fixture(page, { drafts: [{
+    body: "\n\nOn Monday, Alice wrote:\n> Original <text>\n",
+    subject: "Re: Plans", in_reply_to: "original@example.test", references: "root@example.test original@example.test",
+  }] });
+  await page.goto("/compose?draft=saved-1");
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Rich text" }).click();
+  const message = page.getByRole("textbox", { name: "Message", exact: true });
+  await expect(message).toContainText("> Original <text>");
+  await message.fill("Agenda");
+  await message.press("ControlOrMeta+a");
+  // Standard editor shortcuts, with the toolbar reflecting the caret.
+  const italic = page.getByRole("button", { name: "Italic", exact: true });
+  await expect(italic).toHaveAttribute("aria-pressed", "false");
+  await message.press("ControlOrMeta+i");
+  await expect(message.locator("i, em")).toHaveText("Agenda");
+  await expect(italic).toHaveAttribute("aria-pressed", "true");
+  await message.press("ControlOrMeta+Shift+8");
+  await expect(message.locator("ul li")).toHaveText("Agenda");
+  await message.press("ControlOrMeta+Shift+8");
+  await expect(message.locator("ul")).toHaveCount(0);
+  // The toolbar is one tab stop with arrow-key movement.
+  const toolbar = page.getByRole("toolbar", { name: "Formatting" });
+  await toolbar.getByRole("button", { name: "Bold", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await expect(toolbar.getByRole("button", { name: "Underline", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(message.locator("u")).toHaveText("Agenda");
+  // Applying a format returns to the message, as editors do.
+  await expect(message).toBeFocused();
+  await toolbar.getByRole("button", { name: "Bold", exact: true }).focus();
+  await page.keyboard.press("Home");
+  await expect(toolbar.getByRole("button", { name: "Undo", exact: true })).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(toolbar.getByRole("button", { name: "Clear formatting", exact: true })).toBeFocused();
+  await page.getByRole("button", { name: "Numbered list", exact: true }).click();
+  await expect(message.locator("ol li")).toHaveText("Agenda");
+  await message.press("ArrowRight");
+  await message.press("End");
+  await message.evaluate((element) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", " Safe paste");
+    data.setData("text/html", '<img src="https://tracker.test"><b onclick="alert(1)">Unsafe</b>');
+    element.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+  });
+  await expect(message).toContainText("Safe paste");
+  await expect(message.locator("img, [onclick]")).toHaveCount(0);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("add at least one recipient");
+  await page.reload();
+  await expect(message.locator("ol li")).toContainText("Agenda");
+  await expect(message).toContainText("Safe paste");
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-compose-fixture")!).drafts[0]);
+  expect(saved.in_reply_to).toBe("original@example.test");
+  expect(saved.references).toBe("root@example.test original@example.test");
+});
+
+test("plain conversion keeps recovered HTML content even when its text alternative is stale", async ({ page }) => {
+  await fixture(page, {drafts:[{
+    body: "Stale", body_html: "<div>First</div><div>Second</div><ul><li>Budget</li><li>Plans</li></ul>",
+  }]});
+  await page.goto("/compose?draft=saved-1");
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Plain text" }).click();
+  await expect(page.getByLabel("Message", {exact:true})).toHaveValue("First\nSecond\nBudget\nPlans");
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  await page.reload();
+  await expect(page.getByLabel("Message", {exact:true})).toHaveValue("First\nSecond\nBudget\nPlans");
+});
+
+test("indentation and repeated spaces survive into the sent HTML and back to plain text", async ({ page }) => {
+  await fixture(page, { drafts: [{ body: "Total:   42\n    indented\tcell" }] });
+  await page.goto("/compose?draft=saved-1");
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Rich text" }).click();
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  const saved = () => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("pigeon-compose-fixture")!).drafts[0].body_html as string);
+  // Without the composer's pre-wrap style, recipients only see encoded spaces.
+  expect(await saved()).toBe("Total:\u00a0 \u00a042<br>\u00a0 \u00a0 indented\u00a0 \u00a0 cell");
+  await page.reload();
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Plain text" }).click();
+  await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Total:   42\n    indented    cell");
+});
+
+test("the formatting toolbar covers text styles, colours, links and blocks, all surviving a reload", async ({ page }) => {
+  await fixture(page, {});
+  await page.goto("/compose");
+  await page.getByLabel("To", { exact: true }).fill("alice@example.test");
+  await page.getByRole("group", { name: "Message format" }).getByRole("button", { name: "Rich text" }).click();
+  const message = page.getByRole("textbox", { name: "Message", exact: true });
+  const toolbar = page.getByRole("toolbar", { name: "Formatting" });
+  await message.fill("Title");
+  await toolbar.getByLabel("Text style").selectOption("h1");
+  await expect(message.locator("h1")).toHaveText("Title");
+  await message.press("End");
+  await message.press("Enter");
+  await page.keyboard.type("Body text");
+  await expect(toolbar.getByLabel("Text style")).toHaveValue("div");
+  await message.getByText("Body text").selectText();
+  await toolbar.getByRole("button", { name: "Underline", exact: true }).click();
+  await message.press("ControlOrMeta+Shift+x");
+  await expect(message.locator("u")).toHaveText("Body text");
+  await expect(message.locator("s, strike")).toHaveText("Body text");
+  await expect(toolbar.getByRole("button", { name: "Strikethrough", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await toolbar.getByRole("button", { name: "Text colour", exact: true }).click();
+  await page.getByRole("dialog", { name: "Text colour" }).getByRole("button", { name: "Red" }).click();
+  await toolbar.getByRole("button", { name: "Highlight", exact: true }).click();
+  await page.getByRole("dialog", { name: "Highlight" }).getByRole("button", { name: "Yellow" }).click();
+  await expect(message.locator('font[color="#d93025"], [style*="color: rgb(217, 48, 37)"]')).toHaveText("Body text");
+  await expect(message.locator('[style*="background-color"]')).toHaveText("Body text");
+  await message.press("ControlOrMeta+k");
+  const link = page.getByRole("dialog", { name: "Link" });
+  await link.getByLabel("Link address").fill("not a link");
+  await link.getByRole("button", { name: "Apply" }).click();
+  await expect(link.getByRole("alert")).toHaveText("Enter a web or email address.");
+  await link.getByLabel("Link address").fill("example.test/docs");
+  await link.getByLabel("Link address").press("Enter");
+  await expect(message.locator('a[href="https://example.test/docs"]')).toHaveText("Body text");
+  await expect(toolbar.getByRole("button", { name: "Link", exact: true })).toHaveAttribute("aria-pressed", "true");
+  // The shortcut belongs to the editor here, not quick navigation.
+  await expect(page.locator("dialog.command-dialog[open]")).toHaveCount(0);
+  await toolbar.getByRole("button", { name: "Align centre", exact: true }).click();
+  await expect(toolbar.getByRole("button", { name: "Align centre", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await message.press("End");
+  await message.press("Enter");
+  await toolbar.getByRole("button", { name: "Align left", exact: true }).click();
+  await page.keyboard.type("Quoted");
+  await message.press("ControlOrMeta+Shift+9");
+  await expect(message.locator("blockquote")).toHaveText("Quoted");
+  await expect(toolbar.getByRole("button", { name: "Quote", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await toolbar.getByRole("button", { name: "Horizontal line", exact: true }).click();
+  await expect(message.locator("hr")).toHaveCount(1);
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  await page.reload();
+  await expect(message.locator("h1")).toHaveText("Title");
+  await expect(message.locator('a[href="https://example.test/docs"]')).toHaveText("Body text");
+  await expect(message.locator('[style*="text-align: center"]')).toContainText("Body text");
+  await expect(message.locator('[style*="color: #d93025"]')).toHaveText("Body text");
+  await expect(message.locator("blockquote")).toHaveText("Quoted");
+  await expect(message.locator("hr")).toHaveCount(1);
+  // Clearing removes character formatting; undo and redo go through the editor history.
+  await message.locator("h1").click();
+  await message.press("ControlOrMeta+a");
+  await message.press("ControlOrMeta+Backslash");
+  await expect(message.locator("u, s, strike")).toHaveCount(0);
+  await toolbar.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(message.locator("u")).not.toHaveCount(0);
+  await toolbar.getByRole("button", { name: "Redo", exact: true }).click();
+  await expect(message.locator("u")).toHaveCount(0);
+});
+
+test("text colour and highlight can be removed and lists indent", async ({ page }) => {
+  await fixture(page, { drafts: [{ body: "", body_html: '<div><span style="color: #d93025; background-color: #fff2a8">Warm</span></div><ul><li>One</li><li>Two</li></ul>' }] });
+  await page.goto("/compose?draft=saved-1");
+  const message = page.getByRole("textbox", { name: "Message", exact: true });
+  const toolbar = page.getByRole("toolbar", { name: "Formatting" });
+  await message.getByText("Warm").selectText();
+  await toolbar.getByRole("button", { name: "Text colour", exact: true }).click();
+  await page.getByRole("dialog", { name: "Text colour" }).getByRole("button", { name: "Default colour" }).click();
+  await toolbar.getByRole("button", { name: "Highlight", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Highlight" })).toHaveCount(0);
+  await toolbar.getByRole("button", { name: "Highlight", exact: true }).click();
+  await page.getByRole("dialog", { name: "Highlight" }).getByRole("button", { name: "No highlight" }).click();
+  // The colour is gone and the highlight no longer shows.
+  await expect(message.locator('font, [style*="color: #d93025"], [style*="rgb(217, 48, 37)"]')).toHaveCount(0);
+  await expect(message.getByText("Warm")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await message.getByText("Two").click();
+  await message.press("ControlOrMeta+BracketRight");
+  await expect(message.locator("ul ul li")).toHaveText("Two");
+  await message.press("ControlOrMeta+BracketLeft");
+  await expect(message.locator("ul ul")).toHaveCount(0);
+});
+
+test("restored drafts cannot bring active content, remote resources or arbitrary styles into the composer", async ({ page }) => {
+  await fixture(page, { drafts: [{ body: "", body_html: [
+    '<p style="position: fixed; color: #188038">Safe <img src="https://tracker.test/p" onerror="window.pwned=1"></p>',
+    '<a href="javascript:window.pwned=1">bad</a> <a href="https://example.test" onclick="window.pwned=1">good</a>',
+    '<span style="background: url(https://tracker.test/b)">bg</span><script>window.pwned=1</script><iframe src="https://evil.test"></iframe>',
+  ].join("") }] });
+  await page.goto("/compose?draft=saved-1");
+  const message = page.getByRole("textbox", { name: "Message", exact: true });
+  await expect(message).toContainText("Safe");
+  await expect(message.locator("img, script, iframe, [onclick], [onerror]")).toHaveCount(0);
+  await expect(message.locator("p")).toHaveAttribute("style", "color: #188038");
+  await expect(message.locator("a")).toHaveCount(1);
+  await expect(message.locator("a")).toHaveAttribute("href", "https://example.test");
+  await expect(message.locator("[style*=url]")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
+});
