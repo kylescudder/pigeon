@@ -104,6 +104,10 @@ impl Harness {
                 to: to.into(),
                 subject: format!("Test {token}"),
                 body: format!("Synthetic body {token}\n.leading dot line"),
+                attachments: vec![
+                    pigeon_core::mail::DraftAttachment::from_bytes("receipt.bin", b"receipt\0\xff")
+                        .unwrap(),
+                ],
                 ..Default::default()
             })
             .unwrap()
@@ -161,6 +165,19 @@ fn starttls_send_is_accepted_once_and_saved_to_sent() {
     assert!(!results.messages[0].unread);
     let message = h.engine.message(results.messages[0].id).unwrap();
     assert!(message.body_text.contains(".leading dot line"));
+    assert_eq!(message.attachments.len(), 1);
+    assert_eq!(message.attachments[0].filename, "receipt.bin");
+    let attachment = h
+        .engine
+        .attachment(message.summary.id, &message.attachments[0].part, true)
+        .unwrap();
+    assert_eq!(attachment.data.as_slice(), b"receipt\0\xff");
+    let reopened = engine_at(&h.dir, h.secrets.clone());
+    let cached = reopened
+        .attachment(message.summary.id, &message.attachments[0].part, false)
+        .unwrap();
+    assert!(cached.kept);
+    assert_eq!(cached.data.as_slice(), b"receipt\0\xff");
 }
 
 #[test]

@@ -115,6 +115,10 @@ async function fixture(
               settle(state);
               write(state);
               return { drafts: state.drafts, outbox: state.outbox, undo_send_seconds: state.undo, recipients: state.recipients };
+            case "pick_draft_attachment":
+              if (localStorage.getItem("pigeon-test-pick-cancel")) return null;
+              if (localStorage.getItem("pigeon-test-pick-error")) throw { message: "Could not read the chosen file." };
+              return { filename: "receipt.txt", data: "cmVjZWlwdA==" };
             case "save_draft": {
               const draft = draftOf(args.draft);
               write(state);
@@ -493,3 +497,29 @@ for (const outcome of ["failed", "unknown"] as const) {
     await expect(page.getByRole("listbox")).toHaveCount(0);
   });
 }
+
+
+test("attachments survive autosave, reload and outbox undo, and can be removed", async ({ page }, testInfo) => {
+  await fixture(page, { undo: 60 });
+  await page.goto("/compose");
+  await page.getByLabel("To", { exact: true }).fill("bob@example.test");
+  await page.getByRole("button", { name: "Attach file", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove receipt.txt" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Remove receipt.txt" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("attachment-composer.png"), fullPage: true });
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.locator(".undo-send-bar").getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByRole("button", { name: "Remove receipt.txt" })).toBeVisible();
+  await page.getByRole("button", { name: "Remove receipt.txt" }).click();
+  await expect(page.getByRole("status")).toHaveText("Draft saved on this device");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Remove receipt.txt" })).toHaveCount(0);
+  await page.evaluate(() => localStorage.setItem("pigeon-test-pick-error", "1"));
+  await page.getByRole("button", { name: "Attach file", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not read the chosen file");
+  await page.evaluate(() => { localStorage.removeItem("pigeon-test-pick-error"); localStorage.setItem("pigeon-test-pick-cancel", "1"); });
+  await page.getByRole("button", { name: "Attach file", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove receipt.txt" })).toHaveCount(0);
+});

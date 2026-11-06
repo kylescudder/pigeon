@@ -9,6 +9,7 @@ import { useRefreshSend, useSendState } from "../components/send-state";
 import {
   deleteDraft,
   errorMessage,
+  pickDraftAttachment,
   saveDraft,
   sendDraft,
   type Draft,
@@ -89,6 +90,7 @@ function Composer({
     bcc: initial?.bcc ?? "",
     subject: initial?.subject ?? "",
     body: initial?.body ?? "",
+    attachments: initial?.attachments ?? [],
     // Kept as they are so a reply stays threaded through every autosave.
     in_reply_to: initial?.in_reply_to ?? "",
     references: initial?.references ?? "",
@@ -192,10 +194,26 @@ function Composer({
   const update = (patch: Partial<DraftInput>) => {
     setForm((current) => ({ ...current, ...patch }));
     setDirty(true);
+    setSaveState("idle");
   };
+  const attach = useMutation({
+    mutationFn: pickDraftAttachment,
+    onSuccess: (attachment) => {
+      if (!attachment) return;
+      const attachments = [...(formRef.current.attachments ?? []), attachment];
+      const bytes = attachments.reduce((sum, file) => {
+        const padding = file.data.endsWith("==") ? 2 : file.data.endsWith("=") ? 1 : 0;
+        return sum + Math.floor(file.data.length * 3 / 4) - padding;
+      }, 0);
+      if (attachments.length > 32 || bytes > 20 * 1024 * 1024) {
+        throw new Error("Attach at most 32 files totalling 20 MiB.");
+      }
+      update({ attachments });
+    },
+  });
   const account = accounts.find((candidate) => candidate.id === form.account_id);
   const canSend = !!account?.config.sending?.smtp;
-  const busy = submit.isPending || discard.isPending;
+  const busy = submit.isPending || discard.isPending || attach.isPending;
 
   if (!accounts.length)
     return (
@@ -219,7 +237,7 @@ function Composer({
         aria-label="New message"
         onSubmit={(event) => {
           event.preventDefault();
-          submit.mutate();
+          if (!busy) submit.mutate();
         }}
         onKeyDown={(event) => {
           if (
@@ -241,7 +259,7 @@ function Composer({
               : saveState === "saved"
                 ? "Draft saved on this device"
                 : saveState === "idle"
-                  ? ""
+                  ? (dirty ? "Unsaved changes" : "")
                   : `Draft not saved: ${saveState.error}`}
           </span>
         </header>
@@ -314,6 +332,17 @@ function Composer({
               maxLength={998}
             />
           </div>
+          <section className="compose-attachments" aria-label="Attachments">
+            <button type="button" className="button button-secondary" onClick={() => attach.mutate()}>Attach file</button>
+            <small>Up to 32 files, 20 MiB total. Copies stay in the encrypted draft. Forwards include text only; add attachments separately.</small>
+            {(form.attachments ?? []).map((attachment, index) => (
+              <div key={index} className="compose-attachment">
+                <span>{attachment.filename}</span>
+                <button type="button" className="button button-quiet" aria-label={`Remove ${attachment.filename}`}
+                  onClick={() => update({ attachments: form.attachments?.filter((_, i) => i !== index) })}>Remove</button>
+              </div>
+            ))}
+          </section>
           <textarea
             className="composer-body"
             aria-label="Message"
@@ -343,10 +372,10 @@ function Composer({
             </button>
           </div>
         )}
-        {(submit.isError || discard.isError) && (
+        {(submit.isError || discard.isError || attach.isError) && (
           <div className="notice notice-error" role="alert">
             <Icon name="alert" size={17} />
-            <p>{errorMessage(submit.error ?? discard.error)}</p>
+            <p>{errorMessage(submit.error ?? discard.error ?? attach.error)}</p>
           </div>
         )}
         <footer className="composer-actions">

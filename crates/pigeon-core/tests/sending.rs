@@ -201,6 +201,10 @@ impl Fixture {
             bcc: "dave@pigeon.test".into(),
             subject: "Quarterly receipts".into(),
             body: "Hello\n.leading dot".into(),
+            attachments: vec![
+                pigeon_core::mail::DraftAttachment::from_bytes("receipt.bin", b"receipt\0\xff")
+                    .unwrap(),
+            ],
             ..Default::default()
         }
     }
@@ -346,6 +350,9 @@ fn send_again_after_unknown_is_explicit() {
         .unwrap();
     f.drain();
     assert_eq!(f.smtp.submissions(), 2);
+    let submissions = f.smtp.sent.lock().unwrap();
+    assert_eq!(submissions[0].1, submissions[1].1);
+    drop(submissions);
     assert!(matches!(f.item().send, SendStatus::Accepted { .. }));
 }
 
@@ -377,6 +384,9 @@ fn offline_sends_wait_and_permanent_refusals_go_back_to_drafts() {
     let draft = f.engine.return_to_drafts(&queued.id).unwrap();
     assert_eq!(draft.to, f.draft().to);
     assert_eq!(f.smtp.submissions(), 2);
+    let submissions = f.smtp.sent.lock().unwrap();
+    assert_eq!(submissions[0].1, submissions[1].1);
+    drop(submissions);
 }
 
 #[test]
@@ -619,4 +629,103 @@ fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
             .as_deref(),
         Some("Alice")
     );
+}
+
+#[test]
+fn attachment_bytes_survive_restart_undo_and_smtp_and_sent_copy() {
+    use pigeon_core::mail::DraftAttachment;
+    let f = fixture();
+    let bytes = b"receipt\0\xff\r\n";
+    let attachment = DraftAttachment::from_bytes("caf\u{e9}.bin", bytes).unwrap();
+    let saved = f
+        .engine
+        .save_draft(DraftInput {
+            attachments: vec![attachment.clone()],
+            ..f.draft()
+        })
+        .unwrap();
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    assert_eq!(
+        reopened.send_state().unwrap().drafts[0].attachments,
+        vec![attachment.clone()]
+    );
+    reopened.set_undo_send_seconds(60).unwrap();
+    let input = DraftInput {
+        id: Some(saved.id),
+        attachments: vec![attachment.clone()],
+        ..f.draft()
+    };
+    let queued = reopened.send_draft(input.clone()).unwrap();
+    drop(reopened);
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let restored = reopened.return_to_drafts(&queued.id).unwrap();
+    assert_eq!(restored.attachments, vec![attachment]);
+    reopened.set_undo_send_seconds(0).unwrap();
+    reopened
+        .send_draft(DraftInput {
+            id: Some(restored.id),
+            ..input
+        })
+        .unwrap();
+    while reopened.run_next_operation().unwrap() {}
+    let assert_mime = |message: &str| {
+        let parsed = mailparse::parse_mail(message.as_bytes()).unwrap();
+        assert_eq!(parsed.ctype.mimetype, "multipart/mixed");
+        assert_eq!(parsed.subparts.len(), 2);
+        assert_eq!(parsed.subparts[1].get_body_raw().unwrap(), bytes);
+        assert_eq!(
+            parsed.subparts[1]
+                .get_content_disposition()
+                .params
+                .get("filename")
+                .unwrap(),
+            "caf\u{e9}.bin"
+        );
+    };
+    assert_eq!(f.smtp.submissions(), 1);
+    assert_mime(&f.smtp.sent.lock().unwrap()[0].1);
+    assert_mime(&f.imap.appended.lock().unwrap()[0].1);
+}
+
+#[test]
+fn attachments_reject_header_injection_bad_encoding_and_excess_size() {
+    use pigeon_core::mail::{DraftAttachment, MAX_OUTGOING_ATTACHMENT_BYTES};
+    let f = fixture();
+    for filename in ["../secret", "a\r\nBcc: injected", "..", "a\\b"] {
+        assert!(DraftAttachment::from_bytes(filename, b"test").is_err());
+    }
+    let invalid = DraftAttachment {
+        filename: "test.bin".into(),
+        data: "!invalid!".into(),
+    };
+    assert!(
+        f.engine
+            .save_draft(DraftInput {
+                attachments: vec![invalid],
+                ..f.draft()
+            })
+            .is_err()
+    );
+    let large =
+        DraftAttachment::from_bytes("large.bin", &vec![0; MAX_OUTGOING_ATTACHMENT_BYTES / 2 + 1])
+            .unwrap();
+    assert!(
+        f.engine
+            .save_draft(DraftInput {
+                attachments: vec![large.clone(), large],
+                ..f.draft()
+            })
+            .is_err()
+    );
+    assert!(f.engine.send_state().unwrap().drafts.is_empty());
 }

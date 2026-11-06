@@ -2,6 +2,7 @@
 //! SMTP submission, then saving a copy to the Sent folder. The second step
 //! can fail and be retried on its own; it never submits the message again.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -44,6 +45,47 @@ impl Default for SendingSettings {
     }
 }
 
+/// Attachment bytes travel with the encrypted draft/outbox, never as file paths.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DraftAttachment {
+    pub filename: String,
+    pub data: String,
+}
+pub const MAX_OUTGOING_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+
+impl DraftAttachment {
+    pub fn from_bytes(filename: &str, bytes: &[u8]) -> Result<Self, MailError> {
+        if bytes.len() > MAX_OUTGOING_ATTACHMENT_BYTES {
+            return Err(invalid("attachments must total at most 20 MiB"));
+        }
+        let attachment = Self {
+            filename: filename.to_owned(),
+            data: STANDARD.encode(bytes),
+        };
+        attachment.decode()?;
+        Ok(attachment)
+    }
+
+    fn decode(&self) -> Result<Vec<u8>, MailError> {
+        if self.filename.is_empty()
+            || self.filename.len() > 255
+            || self
+                .filename
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '/' | '\\'))
+            || matches!(self.filename.as_str(), "." | "..")
+        {
+            return Err(invalid("choose an attachment with a safe filename"));
+        }
+        if self.data.len() > MAX_OUTGOING_ATTACHMENT_BYTES.div_ceil(3) * 4 {
+            return Err(invalid("attachments must total at most 20 MiB"));
+        }
+        STANDARD
+            .decode(&self.data)
+            .map_err(|_| invalid("attachment data is invalid"))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct DraftInput {
@@ -54,6 +96,7 @@ pub struct DraftInput {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    pub attachments: Vec<DraftAttachment>,
     /// Message-ID of the message this replies to, without angle brackets.
     pub in_reply_to: String,
     /// Message-IDs of the conversation so far, space separated.
@@ -69,6 +112,7 @@ pub struct Draft {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    pub attachments: Vec<DraftAttachment>,
     pub in_reply_to: String,
     pub references: String,
     pub updated: i64,
@@ -176,6 +220,16 @@ pub(super) fn invalid(message: &str) -> MailError {
 }
 
 fn check_draft(draft: &DraftInput) -> Result<(), MailError> {
+    if draft.attachments.len() > 32 {
+        return Err(invalid("attach at most 32 files"));
+    }
+    let mut total = 0;
+    for attachment in &draft.attachments {
+        total += attachment.decode()?.len();
+        if total > MAX_OUTGOING_ATTACHMENT_BYTES {
+            return Err(invalid("attachments must total at most 20 MiB"));
+        }
+    }
     if draft.body.len() > MAX_BODY {
         return Err(invalid("the message is too long"));
     }
@@ -311,6 +365,13 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
         if with_bcc && !bcc.is_empty() {
             builder = builder.bcc(addresses(&bcc));
         }
+        for attachment in &draft.attachments {
+            builder = builder.attachment(
+                "application/octet-stream",
+                attachment.filename.clone(),
+                attachment.decode()?,
+            );
+        }
         builder
             .write_to_vec()
             .map_err(|_| MailError::Storage("could not build the message".into()))
@@ -380,6 +441,7 @@ fn draft_from_payload(id: &str, payload: &str, updated: i64) -> Result<Draft, Ma
         bcc: input.bcc,
         subject: input.subject,
         body: input.body,
+        attachments: input.attachments,
         in_reply_to: input.in_reply_to,
         references: input.references,
         updated,
@@ -744,6 +806,7 @@ impl MailEngine {
             bcc: saved.bcc.clone(),
             subject: saved.subject.clone(),
             body: saved.body.clone(),
+            attachments: saved.attachments.clone(),
             in_reply_to: saved.in_reply_to.clone(),
             references: saved.references.clone(),
         };

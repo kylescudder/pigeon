@@ -168,6 +168,12 @@ test.beforeEach(async ({ page }) => {
               if (query.has_attachments) messages = [];
               return { messages, total: messages.length };
             }
+            case "export_attachment":
+              state.exports ??= [];
+              state.exports.push({ id: args.id, part: args.part, open: args.open });
+              write(state);
+              if (localStorage.getItem("pigeon-export-error")) throw { message: "Could not save attachment." };
+              return !localStorage.getItem("pigeon-export-cancel");
             case "read_mail_message":
               return {
                 summary: messageById(args.id),
@@ -509,7 +515,21 @@ test("formatted view reports embedded images it could not download", async ({ pa
   await page.goto("/mail");
   await page.getByRole("button", { name: /Release planning/ }).click();
   await expect(page.getByText("plan.pdf")).toBeVisible();
-  await expect(page.getByText(/Embedded images appear in the formatted view/)).toBeVisible();
+  await expect(page.getByText(/Saving creates a file outside encrypted storage/)).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).exports ?? [])).toEqual([]);
+  const attachment = page.locator(".message-attachments > div").filter({ hasText: "plan.pdf" });
+  await page.evaluate(() => localStorage.setItem("pigeon-export-cancel", "1"));
+  await attachment.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(attachment.getByRole("status")).toHaveCount(0);
+  await page.evaluate(() => { localStorage.removeItem("pigeon-export-cancel"); localStorage.setItem("pigeon-export-error", "1"); });
+  await attachment.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(attachment.getByRole("alert")).toContainText("Could not save attachment");
+  await page.evaluate(() => localStorage.removeItem("pigeon-export-error"));
+  await attachment.getByRole("button", { name: "Save and open", exact: true }).click();
+  await expect(attachment.getByRole("status")).toContainText("Saved outside encrypted storage");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).exports)).toEqual([
+    { id: 2, part: "2", open: false }, { id: 2, part: "2", open: false }, { id: 2, part: "2", open: true },
+  ]);
   await page.getByRole("button", { name: "Open formatted view", exact: true }).click();
   await expect(page.getByText(/could not be downloaded/)).toHaveText(
     "1 embedded image could not be downloaded, so the formatted view shows its description instead. Reconnect and open it again to try once more.",

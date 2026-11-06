@@ -32,6 +32,8 @@ fn main() {
             "send_state",
             "reply_to_message",
             "save_draft",
+            "pick_draft_attachment",
+            "export_attachment",
             "delete_draft",
             "send_draft",
             "return_to_drafts",

@@ -33,6 +33,8 @@
     "allow-send-state",
     "allow-reply-to-message",
     "allow-save-draft",
+    "allow-pick-draft-attachment",
+    "allow-export-attachment",
     "allow-delete-draft",
     "allow-send-draft",
     "allow-return-to-drafts",

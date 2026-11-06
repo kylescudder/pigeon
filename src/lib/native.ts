@@ -240,7 +240,12 @@ export const discardMailAction = (id: number) =>
 
 // Composing and sending. Drafts and queued messages stay in the encrypted
 // store; outcomes are reported without server reply text.
+export type DraftAttachment = { filename: string; data: string };
+export const pickDraftAttachment = () => invoke<DraftAttachment | null>("pick_draft_attachment");
+export const exportAttachment = (id: number, part: string, open: boolean) =>
+  invoke<boolean>("export_attachment", { id, part, open });
 export type DraftInput = {
+  attachments?: DraftAttachment[];
   id: string | null;
   account_id: string | null;
   to: string;

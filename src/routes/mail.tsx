@@ -15,6 +15,7 @@ import { validateMailRoute } from "../lib/mail-routing";
 import {
   deleteMailSearch,
   errorMessage,
+  exportAttachment,
   openMailMessage,
   replyToMessage,
   type ReplyKind,
@@ -798,12 +799,10 @@ function MessageReader({
                   {attachment.filename}
                   <small>{attachment.content_type}</small>
                 </span>
+                <AttachmentActions id={message.summary.id} part={attachment.part} />
               </div>
             ))}
-            <p>
-              Embedded images appear in the formatted view. Saving and opening
-              attachments is coming in a later build.
-            </p>
+            <p>Saving creates a file outside encrypted storage. “Save and open” also opens it in your default application. Only open files you trust. Forward includes text only; attach files separately.</p>
           </section>
         )}
       </div>
@@ -848,4 +847,14 @@ function ReplyButtons({ messageId }: { messageId: number }) {
       )}
     </>
   );
+}
+
+function AttachmentActions({ id, part }: { id: number; part: string }) {
+  const action = useMutation({ mutationFn: (open: boolean) => exportAttachment(id, part, open) });
+  return <span className="attachment-actions">
+    <button type="button" className="button button-secondary" disabled={action.isPending} onClick={() => action.mutate(false)}>Save</button>
+    <button type="button" className="button button-secondary" disabled={action.isPending} onClick={() => action.mutate(true)}>Save and open</button>
+    {action.isError && <small role="alert">{errorMessage(action.error)}</small>}
+    {action.isSuccess && action.data && <small role="status">Saved outside encrypted storage</small>}
+  </span>;
 }

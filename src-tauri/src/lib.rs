@@ -440,6 +440,8 @@ async function attempt(name, cmd, args) {
   await attempt("retry mail change", "retry_mail_action", { id: 1 });
   await attempt("discard mail change", "discard_mail_action", { id: 1 });
   await attempt("send state", "send_state");
+  await attempt("pick attachment", "pick_draft_attachment");
+  await attempt("export attachment", "export_attachment", { id: 1, part: "2", open: true });
   await attempt("save draft", "save_draft", { draft: { to: "probe@example.test" } });
   await attempt("delete draft", "delete_draft", { id: "probe" });
   await attempt("send draft", "send_draft", { draft: { to: "probe@example.test" } });
@@ -695,6 +697,8 @@ pub fn run() {
             mail::send_state,
             mail::reply_to_message,
             mail::save_draft,
+            mail::pick_draft_attachment,
+            mail::export_attachment,
             mail::delete_draft,
             mail::send_draft,
             mail::return_to_drafts,
