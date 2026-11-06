@@ -21,6 +21,14 @@ const MAX_FIELD: usize = 64 * 1024;
 /// After this many tries a Sent copy stops retrying on its own.
 const SENT_COPY_ATTEMPTS: u32 = 6;
 
+/// A named plain-text signature saved with an account.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedSignature {
+    pub id: String,
+    pub name: String,
+    pub body: String,
+}
+
 /// How an account sends mail. Stored inside the account settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -30,6 +38,8 @@ pub struct SendingSettings {
     pub display_name: String,
     /// Plain text appended below a standard "-- " separator.
     pub signature: String,
+    /// Alternatives; `signature` remains the default for older accounts.
+    pub signatures: Vec<SavedSignature>,
     /// Off for providers that file sent mail themselves.
     pub save_sent_copy: bool,
 }
@@ -40,6 +50,7 @@ impl Default for SendingSettings {
             smtp: None,
             display_name: String::new(),
             signature: String::new(),
+            signatures: Vec::new(),
             save_sent_copy: true,
         }
     }
@@ -97,6 +108,10 @@ pub struct DraftInput {
     pub subject: String,
     pub body: String,
     pub attachments: Vec<DraftAttachment>,
+    /// None means plain text. Some carries the restricted authored HTML.
+    pub body_html: Option<String>,
+    /// None uses the account default; Some("") omits the signature.
+    pub signature: Option<String>,
     /// Message-ID of the message this replies to, without angle brackets.
     pub in_reply_to: String,
     /// Message-IDs of the conversation so far, space separated.
@@ -113,6 +128,9 @@ pub struct Draft {
     pub subject: String,
     pub body: String,
     pub attachments: Vec<DraftAttachment>,
+    /// None means plain text. Some carries the restricted authored HTML.
+    pub body_html: Option<String>,
+    pub signature: Option<String>,
     pub in_reply_to: String,
     pub references: String,
     pub updated: i64,
@@ -230,7 +248,19 @@ fn check_draft(draft: &DraftInput) -> Result<(), MailError> {
             return Err(invalid("attachments must total at most 20 MiB"));
         }
     }
-    if draft.body.len() > MAX_BODY {
+    if draft
+        .signature
+        .as_ref()
+        .is_some_and(|text| text.len() > 10_000)
+    {
+        return Err(invalid("the signature is too long"));
+    }
+    if draft.body.len() > MAX_BODY
+        || draft
+            .body_html
+            .as_ref()
+            .is_some_and(|html| html.len() > MAX_BODY)
+    {
         return Err(invalid("the message is too long"));
     }
     if [&draft.to, &draft.cc, &draft.bcc, &draft.subject]
@@ -285,6 +315,142 @@ pub(super) fn single_line(value: &str) -> String {
     value.replace(['\r', '\n'], " ").trim().to_owned()
 }
 
+// Independent of the incoming-mail viewer policy: authored HTML has no remote
+// resources or embedded content. Only web and email links survive, and only
+// the colour, alignment and indent styles the composer itself produces.
+// Mirrors cleanComposition in src/components/composition-body.tsx.
+const COMPOSITION_TAGS: &[&str] = &[
+    "p",
+    "div",
+    "br",
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "s",
+    "strike",
+    "sub",
+    "sup",
+    "h1",
+    "h2",
+    "h3",
+    "blockquote",
+    "pre",
+    "code",
+    "hr",
+    "ul",
+    "ol",
+    "li",
+    "a",
+    "span",
+];
+const STYLED_TAGS: &[&str] = &[
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "li",
+    "ul",
+    "ol",
+    "blockquote",
+    "span",
+];
+
+fn clean_composition(html: &str) -> String {
+    let mut attributes = std::collections::HashMap::new();
+    for tag in STYLED_TAGS {
+        attributes.insert(*tag, std::collections::HashSet::from(["style"]));
+    }
+    attributes.insert("a", std::collections::HashSet::from(["href"]));
+    ammonia::Builder::default()
+        .tags(COMPOSITION_TAGS.iter().copied().collect())
+        .generic_attributes(std::collections::HashSet::new())
+        .tag_attributes(attributes)
+        .url_schemes(["http", "https", "mailto"].into_iter().collect())
+        .url_relative(ammonia::UrlRelative::Deny)
+        .link_rel(None)
+        .attribute_filter(|_, attribute, value| match attribute {
+            "style" => {
+                let style = clean_style(value);
+                (!style.is_empty()).then_some(style.into())
+            }
+            _ => Some(value.into()),
+        })
+        .clean(html)
+        .to_string()
+}
+
+// The composer encodes significant spaces as no-break spaces so that HTML
+// keeps them; the text alternative wants ordinary ones.
+fn plain_alternative(html: &str) -> Result<String, MailError> {
+    html2text::from_read(html.as_bytes(), 100)
+        .map(|text| text.replace('\u{a0}', " "))
+        .map_err(|_| invalid("could not convert the formatted message to text"))
+}
+
+fn clean_style(style: &str) -> String {
+    style
+        .split(';')
+        .filter_map(|declaration| {
+            let (name, value) = declaration.split_once(':')?;
+            let (name, value) = (name.trim().to_ascii_lowercase(), value.trim());
+            let safe = match name.as_str() {
+                "color" | "background-color" => safe_color(value),
+                "text-align" => ["left", "right", "center", "justify"]
+                    .contains(&value.to_ascii_lowercase().as_str()),
+                "margin" | "margin-left" | "padding" => safe_lengths(value),
+                "border" => value.eq_ignore_ascii_case("none"),
+                _ => false,
+            };
+            safe.then(|| format!("{name}: {value}"))
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn safe_color(value: &str) -> bool {
+    if let Some(hex) = value.strip_prefix('#') {
+        return (3..=8).contains(&hex.len()) && hex.chars().all(|c| c.is_ascii_hexdigit());
+    }
+    let lower = value.to_ascii_lowercase();
+    if let Some(args) = lower
+        .strip_prefix("rgba(")
+        .or_else(|| lower.strip_prefix("rgb("))
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        return args.len() <= 40
+            && args
+                .chars()
+                .all(|c| c.is_ascii_digit() || " ,.%".contains(c));
+    }
+    // Named colours, but not the CSS-wide keywords Chrome scatters into spans.
+    (3..=20).contains(&value.len())
+        && value.chars().all(|c| c.is_ascii_alphabetic())
+        && !["initial", "inherit", "unset", "revert", "currentcolor"].contains(&lower.as_str())
+}
+
+fn safe_lengths(value: &str) -> bool {
+    let parts: Vec<_> = value.split_ascii_whitespace().collect();
+    value.eq_ignore_ascii_case("none")
+        || (1..=4).contains(&parts.len())
+            && parts.iter().all(|part| {
+                let number = part
+                    .strip_suffix("px")
+                    .or_else(|| part.strip_suffix("em"))
+                    .unwrap_or(if *part == "0" { "0" } else { "" });
+                (1..=6).contains(&number.len())
+                    && number.chars().all(|c| c.is_ascii_digit() || c == '.')
+            })
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 fn crlf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\n', "\r\n")
 }
@@ -313,13 +479,21 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
         .ok_or_else(|| invalid("the account address is not valid"))?;
     let message_id = format!("{}@{domain}", random_id()?);
     let subject = single_line(&draft.subject);
-    let mut body = draft.body.clone();
-    if !sending.signature.trim().is_empty() {
-        body = format!(
-            "{}\n\n-- \n{}",
-            body.trim_end(),
-            sending.signature.trim_end()
-        );
+    let mut html = draft.body_html.as_deref().map(clean_composition);
+    let mut body = match &html {
+        Some(html) => plain_alternative(html)?,
+        None => draft.body.clone(),
+    };
+    let signature = draft.signature.as_deref().unwrap_or(&sending.signature);
+    if !signature.trim().is_empty() {
+        body = format!("{}\n\n-- \n{}", body.trim_end(), signature.trim_end());
+    }
+    if let Some(html) = &mut html
+        && !signature.trim().is_empty()
+    {
+        html.push_str("<p>-- <br>");
+        html.push_str(&escape_html(signature.trim_end()).replace('\n', "<br>"));
+        html.push_str("</p>");
     }
     let body = crlf(&body);
     let display_name = single_line(&sending.display_name);
@@ -350,6 +524,9 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
             .message_id(message_id.clone())
             .date(now_secs)
             .text_body(body.clone());
+        if let Some(html) = &html {
+            builder = builder.html_body(html.clone());
+        }
         if !in_reply_to.is_empty() {
             builder = builder.in_reply_to(in_reply_to.clone());
         }
@@ -442,6 +619,8 @@ fn draft_from_payload(id: &str, payload: &str, updated: i64) -> Result<Draft, Ma
         subject: input.subject,
         body: input.body,
         attachments: input.attachments,
+        body_html: input.body_html,
+        signature: input.signature,
         in_reply_to: input.in_reply_to,
         references: input.references,
         updated,
@@ -454,10 +633,15 @@ pub(super) fn upsert_draft(conn: &Connection, draft: &DraftInput) -> Result<Draf
         Some(id) if !id.is_empty() && id.len() <= 64 => id.clone(),
         _ => random_id()?,
     };
-    let stored = DraftInput {
+    let mut stored = DraftInput {
         id: Some(id.clone()),
         ..draft.clone()
     };
+    if let Some(html) = &stored.body_html {
+        let html = clean_composition(html);
+        stored.body = plain_alternative(&html)?;
+        stored.body_html = Some(html);
+    }
     let payload = serde_json::to_string(&stored)
         .map_err(|_| MailError::Storage("could not save the draft".into()))?;
     let now = operations::now_ms();
@@ -721,15 +905,15 @@ impl MailEngine {
                 .map_err(storage_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(storage_error)?;
-            let day_ago = operations::now_ms() - 24 * 60 * 60 * 1000;
             let mut outbox = Vec::new();
             for (id, account_id, subject, recipients, created, submit, copy, accepted) in rows {
                 let submit = operations::get(conn, &submit)?;
                 let copy = copy.map(|copy| operations::get(conn, &copy)).transpose()?;
                 let send = send_status(&submit, accepted);
                 let sent_copy = sent_copy_status(copy.as_ref());
-                // Finished sends drop out of the outbox after a day.
-                if matches!(send, SendStatus::Accepted { at } if at < day_ago)
+                // A finished send leaves the outbox; only a Sent copy still
+                // on its way or needing a retry keeps it here.
+                if matches!(send, SendStatus::Accepted { .. })
                     && matches!(sent_copy, SentCopyStatus::Saved | SentCopyStatus::NotRequested)
                 {
                     continue;
@@ -807,12 +991,14 @@ impl MailEngine {
             subject: saved.subject.clone(),
             body: saved.body.clone(),
             attachments: saved.attachments.clone(),
+            body_html: saved.body_html.clone(),
+            signature: saved.signature.clone(),
             in_reply_to: saved.in_reply_to.clone(),
             references: saved.references.clone(),
         };
         let built = build(&account, &input, operations::now_ms() / 1000)?;
         let outbox_id = random_id()?;
-        self.with_store(|store| {
+        let item = self.with_store(|store| {
             let tx = store
                 .connection()
                 .unchecked_transaction()
@@ -828,6 +1014,7 @@ impl MailEngine {
                 .map_err(|_| MailError::Storage("could not queue the message".into()))?;
             let envelope = serde_json::to_string(&(&built.envelope.from, &built.envelope.recipients))
                 .map_err(|_| MailError::Storage("could not queue the message".into()))?;
+            let created = operations::now_ms();
             tx.execute(
                 "INSERT INTO outbox(id,account,draft,envelope,message,sent_copy,message_id,subject,recipients,submit_op,created)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -842,25 +1029,27 @@ impl MailEngine {
                     built.subject,
                     built.recipients,
                     op.id,
-                    operations::now_ms()
+                    created
                 ],
             )
             .map_err(storage_error)?;
             tx.execute("DELETE FROM drafts WHERE id=?1", [&saved.id])
                 .map_err(storage_error)?;
             tx.commit().map_err(storage_error)?;
-            Ok(())
+            // Built here, not read back: with no undo delay the message may
+            // be sent and out of the outbox before it could be read.
+            Ok(OutboxItem {
+                id: outbox_id,
+                account_id,
+                subject: built.subject,
+                recipients: built.recipients,
+                created,
+                send: send_status(&op, None),
+                sent_copy: sent_copy_status(None),
+            })
         })?;
         self.wake_operations();
-        self.outbox_item(&outbox_id)
-    }
-
-    fn outbox_item(&self, id: &str) -> Result<OutboxItem, MailError> {
-        self.send_state()?
-            .outbox
-            .into_iter()
-            .find(|item| item.id == id)
-            .ok_or(MailError::NotFound)
+        Ok(item)
     }
 
     /// Undo before sending starts, or edit a message that failed. Puts it
@@ -1095,6 +1284,24 @@ pub(crate) fn validate_sending(settings: &SendingSettings) -> Result<(), MailErr
     }
     if settings.signature.len() > 10_000 {
         return Err(invalid("the signature is too long"));
+    }
+    if settings.signatures.len() > 20 {
+        return Err(invalid("save up to 20 signatures per account"));
+    }
+    let mut ids = std::collections::HashSet::new();
+    for signature in &settings.signatures {
+        if signature.id.is_empty()
+            || signature.id.len() > 64
+            || !ids.insert(&signature.id)
+            || signature.name.trim().is_empty()
+            || signature.name.len() > 100
+            || signature.name.contains(['\r', '\n', '\0'])
+            || signature.body.len() > 10_000
+        {
+            return Err(invalid(
+                "each signature needs a unique ID, a name up to 100 characters and text up to 10000 bytes",
+            ));
+        }
     }
     if let Some(smtp) = &settings.smtp {
         if smtp.host.trim().is_empty()

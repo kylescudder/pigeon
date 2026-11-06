@@ -70,3 +70,20 @@ external opening and the new hostile-viewer probe have not been run on NixOS.
 Wayland/X11 and desktop file-association behavior remain runtime gates; the
 filesystem tests and browser screenshots do not establish those boundaries.
 Follow-up logs and reproduction commands are in evidence/attachments-followup.
+
+## Integration with current main (2026-11-06)
+
+Merged current main while retaining its rich-text editor, saved signatures,
+conversation reader and successful-send outbox cleanup. Draft and outbox payloads
+preserve attachments alongside body_html and signature. A new integration test
+checks multipart/mixed containing both multipart/alternative and exact binary
+attachment bytes, with the chosen signature in SMTP and Sent copies. The browser
+attachment journey now uses rich text and checks recovery after reload and undo.
+
+After resolving the conflicts, 63 focused Rust tests passed; the final sending
+run passed 27 tests including the additional rich-text/attachment test. The merged
+composer/reader browser suite passed 125 tests with 1 existing skip, followed by
+6 passing attachment-specific capture checks. Native compilation, TypeScript,
+formatting and diff checks passed. New desktop and narrow screenshots were
+captured from this merged build for PR #25. Native dialog/opening and NixOS runtime
+limitations above still apply. Evidence is in evidence/attachments-pr25.

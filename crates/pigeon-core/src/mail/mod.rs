@@ -14,26 +14,31 @@ use crate::secrets::{KeyringState, Secret, SecretStore};
 use crate::store::Store;
 use crate::unlock::{StoreBlocked, UnlockOutcome, open_store};
 
-pub use attachments::{AttachmentData, MAX_ATTACHMENT_BYTES, ViewerDocument};
+pub use attachments::{AttachmentData, ImageSource, MAX_ATTACHMENT_BYTES, ViewerDocument};
 
 mod actions;
 mod attachments;
 mod cache;
 mod diagnostics;
+mod folders;
 mod imap;
+pub use folders::FolderChange;
 pub mod managed;
 mod net;
 pub mod operations;
 mod query;
 mod recovery;
+pub mod remote_images;
 pub mod reply;
+pub mod sender_images;
 mod sending;
 pub mod smtp;
 pub mod source;
+mod threading;
 pub use actions::{ActionCounts, ActionKind, PendingAction};
 pub use sending::{
     Draft, DraftAttachment, DraftInput, MAX_OUTGOING_ATTACHMENT_BYTES, OutboxItem, SavedRecipient,
-    SendDecision, SendState, SendStatus, SendingSettings, SentCopyStatus,
+    SavedSignature, SendDecision, SendState, SendStatus, SendingSettings, SentCopyStatus,
 };
 static NEXT_ACCESS: AtomicU64 = AtomicU64::new(0);
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);
@@ -101,6 +106,8 @@ pub struct MessageContent {
     pub reply_to: String,
     /// The References header: Message-IDs of the conversation so far.
     pub references: String,
+    #[serde(default)]
+    pub in_reply_to: String,
     /// The To and Cc headers alone. `recipients` also holds Bcc.
     pub to_list: String,
     pub cc_list: String,
@@ -133,6 +140,8 @@ pub struct Message {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SearchQuery {
     #[serde(default)]
+    pub conversations: bool,
+    #[serde(default)]
     pub text: String,
     pub account_id: Option<String>,
     pub folder: Option<String>,
@@ -150,6 +159,16 @@ pub struct SearchQuery {
 pub struct SearchResults {
     pub messages: Vec<MessageSummary>,
     pub total: u64,
+    pub groups: HashMap<i64, Vec<i64>>,
+    pub group_messages: HashMap<i64, Vec<MessageSummary>>,
+    /// The effective Junk/Trash scope, so conversation context matches it.
+    pub context_include_junk_trash: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Conversation {
+    pub messages: Vec<MessageSummary>,
+    pub incomplete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,6 +285,7 @@ pub struct MailEngine {
     secrets: Arc<dyn SecretStore>,
     connector: Arc<dyn source::MailConnector>,
     smtp: Arc<dyn smtp::SmtpTransport>,
+    icons: Arc<dyn sender_images::IconSource>,
     store: Mutex<Option<Store>>,
     syncing: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// Serialises backups and restores with one another.
@@ -350,25 +370,9 @@ impl MailEngine {
         let _lease = self.lease(id)?;
         self.refuse_if_managed(id)?;
         self.check_no_unsent(id)?;
-        // Mail goes first, in batches: each row also rewrites the search index,
-        // so one transaction would hold the store and freeze every other view.
-        // The account and password outlast it, so any failure can be retried.
-        loop {
-            let removed = self.with_store(|store| {
-                store
-                    .connection()
-                    .execute(
-                        "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE account=?1 LIMIT ?2)",
-                        rusqlite::params![id, REMOVAL_BATCH],
-                    )
-                    .map_err(storage_error)
-            })?;
-            if removed == 0 {
-                break;
-            }
-            // The store mutex is not fair; give waiting readers a turn.
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        // Mail goes first. The account and password outlast it, so any failure
+        // can be retried.
+        self.remove_mail_in_batches(id, None)?;
         self.forget_session_parts(Some(id));
         self.secrets
             .delete(&password_name(id))
@@ -386,6 +390,34 @@ impl MailEngine {
             Ok(())
         })
     }
+
+    /// Removes an account's cached mail, or one folder's. Each row also
+    /// rewrites the search index, so one transaction would hold the store and
+    /// freeze every other view.
+    fn remove_mail_in_batches(&self, id: &str, folder: Option<&str>) -> Result<(), MailError> {
+        let scope = if folder.is_some() {
+            "account=?1 AND folder=?2"
+        } else {
+            "account=?1"
+        };
+        let delete = format!(
+            "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE {scope} LIMIT ?3)"
+        );
+        loop {
+            let removed = self.with_store(|store| {
+                store
+                    .connection()
+                    .execute(&delete, rusqlite::params![id, folder, REMOVAL_BATCH])
+                    .map_err(storage_error)
+            })?;
+            if removed == 0 {
+                return Ok(());
+            }
+            // The store mutex is not fair; give waiting readers a turn.
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     pub fn new(path: PathBuf, secrets: Arc<dyn SecretStore>) -> Self {
         Self::with_connector(path, secrets, Arc::new(imap::ImapConnector))
     }
@@ -427,6 +459,7 @@ impl MailEngine {
             secrets,
             connector,
             smtp,
+            icons: Arc::new(sender_images::IconService::default()),
             store: Mutex::new(None),
             syncing: Mutex::new(HashMap::new()),
             recovery: Mutex::new(()),
@@ -437,6 +470,12 @@ impl MailEngine {
             operations_signal: (Mutex::new(false), Condvar::new()),
             arrivals: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// A chosen source of sender icons, in place of the fixed service.
+    pub fn with_icon_source(mut self, icons: Arc<dyn sender_images::IconSource>) -> Self {
+        self.icons = icons;
+        self
     }
 
     pub fn add_account(
@@ -561,6 +600,7 @@ impl MailEngine {
             } else {
                 MailError::Authentication
             })?;
+        self.reconcile_folder_change(id)?;
         // Queued changes go first, so the snapshots below already reflect them.
         self.apply_queue(&account, &password)?;
         let mut session = self.connector.connect(&account.config, &password)?;

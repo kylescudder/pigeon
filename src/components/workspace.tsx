@@ -87,6 +87,8 @@ export function Workspace({ children }: { children: ReactNode }) {
   }, [density]);
   useEffect(() => {
     function keydown(event: KeyboardEvent) {
+      // The message editor uses the shortcut for links, as mail editors do.
+      if (event.defaultPrevented) return;
       if (
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
@@ -117,6 +119,7 @@ export function Workspace({ children }: { children: ReactNode }) {
     {
       "/foundation": "Diagnostics",
       "/settings": "Settings",
+      "/settings/signatures": "Signatures",
       "/mail": "Mail",
       "/pending": "Pending changes",
       "/compose": "New message",

@@ -76,7 +76,7 @@ fn declared_account_waits_for_a_password_then_syncs() {
     let account = &accounts[0];
     assert_eq!(account.id, "managed-personal");
     assert!(account.config.managed);
-    assert_eq!(account.config.name, "personal");
+    assert_eq!(account.config.name, "Me");
     assert_eq!(account.config.host, "imap.example.test");
     let sending = &account.config.sending;
     assert_eq!(sending.display_name, "Me");
@@ -241,4 +241,104 @@ fn a_certificate_file_is_read_and_the_app_cannot_claim_managed() {
         .unwrap();
     assert!(!account.config.managed);
     engine.remove_account(&account.id).unwrap();
+}
+
+#[test]
+fn declared_account_uses_real_name_as_its_label_but_keeps_the_key_as_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path());
+    let declared = write(dir.path(), &declaration("imap.example.test"));
+    engine.reconcile_managed(&declared).unwrap();
+    let accounts = engine.accounts().unwrap();
+    assert_eq!(accounts[0].config.name, "Me");
+    assert_eq!(accounts[0].id, "managed-personal");
+    assert_eq!(accounts[0].config.sending.display_name, "Me");
+}
+
+#[test]
+fn declared_account_label_falls_back_to_the_key_without_a_real_name() {
+    let dir = tempfile::tempdir().unwrap();
+    for real_name in [Some(""), Some("   "), None] {
+        let mut json: serde_json::Value =
+            serde_json::from_str(&declaration("imap.example.test")).unwrap();
+        let entry = json["accounts"]["personal"].as_object_mut().unwrap();
+        match real_name {
+            Some(name) => {
+                entry.insert("realName".into(), name.into());
+            }
+            None => {
+                entry.remove("realName");
+            }
+        }
+        let declared = write(dir.path(), &json.to_string());
+        assert!(declared.warnings.is_empty());
+        assert_eq!(declared.accounts[0].config.name, "personal");
+        assert_eq!(declared.accounts[0].id, "managed-personal");
+    }
+}
+
+#[test]
+fn changing_real_name_updates_the_label_without_replacing_the_account() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path());
+    engine
+        .reconcile_managed(&write(dir.path(), &declaration("imap.example.test")))
+        .unwrap();
+    engine
+        .update_password("managed-personal", Zeroizing::new(b"app-password".to_vec()))
+        .unwrap();
+    let renamed = declaration("imap.example.test")
+        .replace("\"realName\":\"Me\"", "\"realName\":\"New name\"");
+    engine
+        .reconcile_managed(&write(dir.path(), &renamed))
+        .unwrap();
+    let accounts = engine.accounts().unwrap();
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].id, "managed-personal");
+    assert_eq!(accounts[0].config.name, "New name");
+    assert_eq!(accounts[0].config.sending.display_name, "New name");
+    engine.sync_account("managed-personal").unwrap();
+}
+
+#[test]
+fn long_real_names_keep_accounts_managed_and_their_sender_names_intact() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine(dir.path());
+    engine
+        .reconcile_managed(&write(dir.path(), &declaration("imap.example.test")))
+        .unwrap();
+    engine
+        .update_password("managed-personal", Zeroizing::new(b"app-password".to_vec()))
+        .unwrap();
+
+    // The sender-name limit is 200 bytes; account labels permit only 120.
+    // Cover both limits and multibyte names, including a boundary-crossing character.
+    for (real_name, expected_label) in [
+        ("A".repeat(120), "A".repeat(120)),
+        ("A".repeat(121), "personal".into()),
+        ("A".repeat(200), "personal".into()),
+        ("é".repeat(60), "é".repeat(60)),
+        (format!("{}é", "A".repeat(119)), "personal".into()),
+        ("é".repeat(100), "personal".into()),
+    ] {
+        let mut json: serde_json::Value =
+            serde_json::from_str(&declaration("imap2.example.test")).unwrap();
+        json["accounts"]["personal"]["realName"] = real_name.clone().into();
+        let declared = write(dir.path(), &json.to_string());
+        assert!(
+            declared.warnings.is_empty(),
+            "valid sender name ({} bytes) was rejected: {:?}",
+            real_name.len(),
+            declared.warnings
+        );
+        engine.reconcile_managed(&declared).unwrap();
+        let accounts = engine.accounts().unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].id, "managed-personal");
+        assert!(accounts[0].config.managed);
+        assert_eq!(accounts[0].config.name, expected_label);
+        assert_eq!(accounts[0].config.sending.display_name, real_name);
+        assert_eq!(accounts[0].config.host, "imap2.example.test");
+        engine.sync_account("managed-personal").unwrap();
+    }
 }

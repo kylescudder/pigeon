@@ -144,11 +144,9 @@ fn admin() -> imap::Session<native_tls::TlsStream<std::net::TcpStream>> {
 fn starttls_send_is_accepted_once_and_saved_to_sent() {
     let h = harness(smtp(587, TransportSecurity::StartTls));
     let token = token();
-    let queued = h.send("friend@pigeon.test", &token);
+    h.send("friend@pigeon.test", &token);
     h.drain();
-    let item = h.item(&queued.id);
-    assert!(matches!(item.send, SendStatus::Accepted { .. }), "{item:?}");
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(spooled(&token), 1);
 
     // The Sent copy is a real message the next sync downloads.
@@ -260,7 +258,7 @@ fn a_failed_sent_copy_retries_on_its_own_without_resubmitting() {
     admin.create("Sent").unwrap();
     h.engine.retry_sent_copy(&queued.id).unwrap();
     h.drain();
-    assert_eq!(h.item(&queued.id).sent_copy, SentCopyStatus::Saved);
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(spooled(&token), 1);
     admin.select("Sent").unwrap();
     assert_eq!(admin.search(format!("SUBJECT {token}")).unwrap().len(), 1);
@@ -335,10 +333,7 @@ fn offline_send_waits_then_sends_after_reconnecting() {
     }
     h.engine.retry_send(&queued.id).unwrap();
     h.drain();
-    assert!(matches!(
-        h.item(&queued.id).send,
-        SendStatus::Accepted { .. }
-    ));
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
     assert_eq!(spooled(&token), 1);
 }
 
@@ -354,4 +349,60 @@ fn undo_before_the_delay_sends_nothing() {
     h.drain();
     assert_eq!(spooled(&token), 0);
     assert_eq!(h.engine.send_state().unwrap().drafts.len(), 1);
+}
+
+#[test]
+#[ignore = "requires the disposable mail test server"]
+fn rich_send_round_trips_both_alternatives_through_smtp_and_sent() {
+    let h = harness(smtp(587, TransportSecurity::StartTls));
+    let token = token();
+    h.engine
+        .send_draft(DraftInput {
+            account_id: Some(h.account.clone()),
+            to: "friend@pigeon.test".into(),
+            bcc: "blind@pigeon.test".into(),
+            subject: token.clone(),
+            body_html: Some("<p>Hello <b>café</b></p><ol><li>Budget</li></ol>".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    h.drain();
+    // Accepted with its Sent copy saved, so it has left the outbox.
+    assert!(h.engine.send_state().unwrap().outbox.is_empty());
+    assert_eq!(spooled(&token), 1);
+    let entry = std::fs::read_dir("/pki/smtp-spool")
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry.path().extension().is_some_and(|ext| ext == "eml")
+                && std::fs::read_to_string(entry.path()).is_ok_and(|text| text.contains(&token))
+        })
+        .unwrap();
+    let wire = std::fs::read(entry.path()).unwrap();
+    let parsed = mailparse::parse_mail(&wire).unwrap();
+    assert_eq!(parsed.ctype.mimetype, "multipart/alternative");
+    assert_eq!(parsed.subparts.len(), 2);
+    assert!(!String::from_utf8_lossy(&wire).contains("blind@pigeon.test"));
+    assert_eq!(parsed.subparts[0].ctype.mimetype, "text/plain");
+    assert_eq!(parsed.subparts[1].ctype.mimetype, "text/html");
+    assert!(parsed.subparts[0].get_body().unwrap().contains("café"));
+    assert!(
+        parsed.subparts[1]
+            .get_body()
+            .unwrap()
+            .contains("<b>café</b>")
+    );
+    h.engine.sync_account(&h.account).unwrap();
+    let results = h
+        .engine
+        .search(&SearchQuery {
+            text: token,
+            folder: Some("Sent".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(results.total, 1);
+    let received = h.engine.message(results.messages[0].id).unwrap();
+    assert!(received.body_text.contains("café") && received.body_text.contains("Budget"));
+    assert!(received.body_html.unwrap().contains("<b>café</b>"));
 }

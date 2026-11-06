@@ -9,8 +9,8 @@ use pigeon_core::mail::source::{
     FolderSnapshot, MailConnector, MailSession, RemoteFolder, RemoteMessage,
 };
 use pigeon_core::mail::{
-    AccountConfig, DraftInput, MailEngine, MailError, SendDecision, SendStatus, SendingSettings,
-    SentCopyStatus, TransportSecurity,
+    AccountConfig, DraftInput, MailEngine, MailError, SavedSignature, SendDecision, SendStatus,
+    SendingSettings, SentCopyStatus, TransportSecurity,
 };
 use pigeon_core::secrets::{KeyringState, MemoryStore, Secret};
 use zeroize::Zeroizing;
@@ -148,6 +148,7 @@ fn sending() -> SendingSettings {
         display_name: "Pigeon Tester".into(),
         signature: "Sent from a test".into(),
         save_sent_copy: true,
+        signatures: Vec::new(),
     }
 }
 
@@ -201,10 +202,6 @@ impl Fixture {
             bcc: "dave@pigeon.test".into(),
             subject: "Quarterly receipts".into(),
             body: "Hello\n.leading dot".into(),
-            attachments: vec![
-                pigeon_core::mail::DraftAttachment::from_bytes("receipt.bin", b"receipt\0\xff")
-                    .unwrap(),
-            ],
             ..Default::default()
         }
     }
@@ -216,6 +213,10 @@ impl Fixture {
         assert_eq!(state.outbox.len(), 1);
         state.outbox[0].clone()
     }
+    fn assert_outbox_empty(&self) {
+        let outbox = self.engine.send_state().unwrap().outbox;
+        assert!(outbox.is_empty(), "{outbox:?}");
+    }
 }
 
 #[test]
@@ -223,6 +224,11 @@ fn sending_submits_once_then_saves_a_sent_copy_with_bcc() {
     let f = fixture();
     let queued = f.engine.send_draft(f.draft()).unwrap();
     assert!(matches!(queued.send, SendStatus::Queued { .. }));
+    assert_eq!(queued.sent_copy, SentCopyStatus::NotRequested);
+    assert_eq!(
+        queued.recipients,
+        "Alice, bob@pigeon.test, carol@pigeon.test"
+    );
     assert!(f.engine.send_state().unwrap().drafts.is_empty());
     f.drain();
 
@@ -238,6 +244,13 @@ fn sending_submits_once_then_saves_a_sent_copy_with_bcc() {
             "dave@pigeon.test"
         ]
     );
+    assert_eq!(
+        mailparse::parse_mail(message.as_bytes())
+            .unwrap()
+            .ctype
+            .mimetype,
+        "text/plain"
+    );
     assert!(message.contains("Pigeon Tester"));
     assert!(message.contains("Subject: Quarterly receipts"));
     assert!(message.contains("Sent from a test"));
@@ -251,10 +264,20 @@ fn sending_submits_once_then_saves_a_sent_copy_with_bcc() {
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].0, "Sent Items");
     assert!(appended[0].1.contains("dave@pigeon.test"));
-    let item = f.item();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }));
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
-    assert_eq!(item.recipients, "Alice, bob@pigeon.test, carol@pigeon.test");
+    f.assert_outbox_empty();
+}
+
+#[test]
+fn a_send_without_a_sent_copy_leaves_the_outbox_once_accepted() {
+    let f = fixture();
+    let mut settings = sending();
+    settings.save_sent_copy = false;
+    f.engine.update_sending(&f.account, settings).unwrap();
+    f.engine.send_draft(f.draft()).unwrap();
+    f.drain();
+    assert_eq!(f.smtp.submissions(), 1);
+    assert!(f.imap.appended.lock().unwrap().is_empty());
+    f.assert_outbox_empty();
 }
 
 #[test]
@@ -294,7 +317,8 @@ fn a_failed_sent_copy_never_submits_again() {
 
     f.engine.retry_sent_copy(&queued.id).unwrap();
     f.drain();
-    assert_eq!(f.item().sent_copy, SentCopyStatus::Saved);
+    assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
+    f.assert_outbox_empty();
     assert_eq!(f.smtp.submissions(), 1);
 }
 
@@ -333,9 +357,8 @@ fn an_unknown_outcome_waits_for_a_decision() {
         .resolve_send(&queued.id, SendDecision::MarkSent)
         .unwrap();
     f.drain();
-    let item = f.item();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }));
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
+    f.assert_outbox_empty();
     assert_eq!(f.smtp.submissions(), 1);
 }
 
@@ -343,7 +366,16 @@ fn an_unknown_outcome_waits_for_a_decision() {
 fn send_again_after_unknown_is_explicit() {
     let f = fixture();
     f.smtp.then(Submission::Unknown("timed out".into()));
-    let queued = f.engine.send_draft(f.draft()).unwrap();
+    let queued = f
+        .engine
+        .send_draft(DraftInput {
+            attachments: vec![
+                pigeon_core::mail::DraftAttachment::from_bytes("receipt.bin", b"receipt\0\xff")
+                    .unwrap(),
+            ],
+            ..f.draft()
+        })
+        .unwrap();
     f.drain();
     f.engine
         .resolve_send(&queued.id, SendDecision::SendAgain)
@@ -353,7 +385,7 @@ fn send_again_after_unknown_is_explicit() {
     let submissions = f.smtp.sent.lock().unwrap();
     assert_eq!(submissions[0].1, submissions[1].1);
     drop(submissions);
-    assert!(matches!(f.item().send, SendStatus::Accepted { .. }));
+    f.assert_outbox_empty();
 }
 
 #[test]
@@ -413,6 +445,7 @@ fn drafts_autosave_and_survive_a_restart() {
         .save_draft(DraftInput {
             id: Some(saved.id.clone()),
             body: "Second thoughts".into(),
+            signature: Some("Personal sign-off".into()),
             ..f.draft()
         })
         .unwrap();
@@ -427,6 +460,7 @@ fn drafts_autosave_and_survive_a_restart() {
     let drafts = reopened.send_state().unwrap().drafts;
     assert_eq!(drafts.len(), 1);
     assert_eq!(drafts[0].body, "Second thoughts");
+    assert_eq!(drafts[0].signature.as_deref(), Some("Personal sign-off"));
     reopened.delete_draft(&saved.id).unwrap();
     assert!(reopened.send_state().unwrap().drafts.is_empty());
 }
@@ -496,10 +530,13 @@ fn an_account_with_unsent_mail_cannot_be_removed() {
 #[test]
 fn sent_items_can_be_dismissed_without_resending() {
     let f = fixture();
+    *f.imap.sent_folder.lock().unwrap() = false;
+    f.engine.sync_account(&f.account).unwrap();
     let queued = f.engine.send_draft(f.draft()).unwrap();
     f.drain();
+    assert!(matches!(f.item().sent_copy, SentCopyStatus::Failed { .. }));
     f.engine.dismiss_outbox(&queued.id).unwrap();
-    assert!(f.engine.send_state().unwrap().outbox.is_empty());
+    f.assert_outbox_empty();
     f.drain();
     assert_eq!(f.smtp.submissions(), 1);
 }
@@ -508,7 +545,7 @@ fn sent_items_can_be_dismissed_without_resending() {
 fn a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy() {
     let f = fixture();
     *f.smtp.lock_on_accept.lock().unwrap() = Some(f.secrets.clone());
-    let queued = f.engine.send_draft(f.draft()).unwrap();
+    f.engine.send_draft(f.draft()).unwrap();
     assert!(matches!(
         f.engine.run_next_operation(),
         Err(MailError::Locked)
@@ -518,16 +555,7 @@ fn a_lock_during_acceptance_keeps_the_send_and_still_saves_one_sent_copy() {
 
     f.engine.unlock().unwrap();
     f.drain();
-    let item = f
-        .engine
-        .send_state()
-        .unwrap()
-        .outbox
-        .into_iter()
-        .find(|item| item.id == queued.id)
-        .unwrap();
-    assert!(matches!(item.send, SendStatus::Accepted { .. }), "{item:?}");
-    assert_eq!(item.sent_copy, SentCopyStatus::Saved);
+    f.assert_outbox_empty();
     assert_eq!(f.smtp.submissions(), 1);
     assert_eq!(f.imap.appended.lock().unwrap().len(), 1);
 }
@@ -607,7 +635,7 @@ fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
         panic!("store should open");
     };
     store.connection().execute_batch(
-        "DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; PRAGMA user_version=11;",
+        "DROP TABLE image_trust_hosts; DROP TABLE image_trust; DROP TABLE sender_images; DROP TABLE folder_changes; DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; PRAGMA user_version=11;",
     ).unwrap();
     drop(store);
     let reopened = MailEngine::with_transports(
@@ -728,4 +756,273 @@ fn attachments_reject_header_injection_bad_encoding_and_excess_size() {
             .is_err()
     );
     assert!(f.engine.send_state().unwrap().drafts.is_empty());
+}
+
+#[test]
+fn named_signatures_survive_restart_and_draft_choice_controls_sent_text() {
+    let f = fixture();
+    let mut settings = sending();
+    settings.signatures = vec![SavedSignature {
+        id: "work".into(),
+        name: "Work".into(),
+        body: "Work sign-off".into(),
+    }];
+    f.engine.update_sending(&f.account, settings).unwrap();
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let accounts = reopened.accounts().unwrap();
+    assert_eq!(accounts[0].config.sending.signatures[0].name, "Work");
+    assert_eq!(
+        accounts[0].config.sending.signatures[0].body,
+        "Work sign-off"
+    );
+    for signature in [Some("Work sign-off".to_owned()), Some(String::new())] {
+        reopened
+            .send_draft(DraftInput {
+                signature,
+                ..f.draft()
+            })
+            .unwrap();
+        while reopened.run_next_operation().unwrap() {}
+    }
+    let sent = f.smtp.sent.lock().unwrap();
+    assert_eq!(sent.len(), 2);
+    assert!(sent[0].1.contains("Work sign-off"));
+    assert!(!sent[0].1.contains("Sent from a test"));
+    assert!(!sent[1].1.contains("Work sign-off"));
+    assert!(!sent[1].1.contains("Sent from a test"));
+}
+
+#[test]
+fn rich_draft_recovers_and_sends_safe_alternatives_with_signatures() {
+    let f = fixture();
+    let mut draft = f.draft();
+    draft.body_html = Some("<p>Hello <b>café</b></p><ul><li>Budget</li></ul><img src='https://tracker.test/pixel'><script>bad()</script>".into());
+    let saved = f.engine.save_draft(draft).unwrap();
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let restored = reopened.send_state().unwrap().drafts.remove(0);
+    assert_eq!(restored.id, saved.id);
+    assert!(restored.body_html.as_ref().unwrap().contains("<b>café</b>"));
+    assert!(!restored.body_html.as_ref().unwrap().contains("tracker"));
+    assert!(!restored.body_html.as_ref().unwrap().contains("script"));
+    assert!(restored.body.contains("Budget"));
+    let queued = reopened
+        .send_draft(DraftInput {
+            id: Some(restored.id),
+            body: restored.body,
+            body_html: restored.body_html,
+            ..f.draft()
+        })
+        .unwrap();
+    let editable = reopened.return_to_drafts(&queued.id).unwrap();
+    assert!(editable.body_html.unwrap().contains("<b>café</b>"));
+    reopened
+        .send_draft(DraftInput {
+            id: Some(editable.id),
+            body_html: saved.body_html,
+            ..f.draft()
+        })
+        .unwrap();
+    while reopened.run_next_operation().unwrap() {}
+    let sent = f.smtp.sent.lock().unwrap();
+    let parsed = mailparse::parse_mail(sent[0].1.as_bytes()).unwrap();
+    assert_eq!(parsed.ctype.mimetype, "multipart/alternative");
+    assert_eq!(parsed.subparts.len(), 2);
+    assert_eq!(parsed.subparts[0].ctype.mimetype, "text/plain");
+    assert_eq!(parsed.subparts[1].ctype.mimetype, "text/html");
+    for part in &parsed.subparts {
+        let body = part.get_body().unwrap();
+        assert!(
+            body.contains("café") && body.contains("Budget") && body.contains("Sent from a test")
+        );
+        assert!(!body.contains("tracker") && !body.contains("bad()"));
+    }
+    assert!(!sent[0].1.contains("dave@pigeon.test"));
+    let appended = f.imap.appended.lock().unwrap();
+    let copy = mailparse::parse_mail(appended[0].1.as_bytes()).unwrap();
+    for i in 0..2 {
+        assert_eq!(
+            parsed.subparts[i].get_body().unwrap(),
+            copy.subparts[i].get_body().unwrap()
+        );
+    }
+}
+
+#[test]
+fn encoded_whitespace_survives_in_both_alternatives() {
+    let f = fixture();
+    let mut draft = f.draft();
+    draft.body_html = Some("Total:\u{a0} \u{a0}42<br>\u{a0} \u{a0} indented".into());
+    let saved = f.engine.save_draft(draft.clone()).unwrap();
+    assert!(saved.body.contains("Total:   42"));
+    assert!(saved.body.contains("    indented"));
+    assert!(!saved.body.contains('\u{a0}'));
+    f.engine.send_draft(draft).unwrap();
+    while f.engine.run_next_operation().unwrap() {}
+    let sent = f.smtp.sent.lock().unwrap();
+    let parsed = mailparse::parse_mail(sent[0].1.as_bytes()).unwrap();
+    let text = parsed.subparts[0].get_body().unwrap();
+    assert!(text.contains("Total:   42") && text.contains("    indented"));
+    assert!(!text.contains('\u{a0}'));
+    let html = parsed.subparts[1].get_body().unwrap();
+    assert!(html.contains("&nbsp; &nbsp;") || html.contains("\u{a0} \u{a0}"));
+}
+
+#[test]
+fn old_draft_payloads_default_to_plain_text() {
+    let input: DraftInput = serde_json::from_str(r#"{"body":"Old text"}"#).unwrap();
+    assert!(input.body_html.is_none());
+}
+
+#[test]
+fn rich_formatting_keeps_composer_styles_and_links_but_nothing_active_or_remote() {
+    let f = fixture();
+    let mut draft = f.draft();
+    draft.body_html = Some(concat!(
+        r#"<h1 style="text-align: center; position: fixed">Plan</h1>"#,
+        r#"<p><u>Under</u> <s>gone</s> x<sup>2</sup> H<sub>2</sub>O "#,
+        r#"<span style="color: #d93025; background-color: rgb(255, 242, 168); font-size: 90px">red</span> "#,
+        r#"<span style="background-image: url(https://tracker.test/a)">plain</span> "#,
+        r#"<span style="color: expression(alert(1))">expr</span> "#,
+        r#"<span style="background-color: initial; font-weight: inherit">junk</span></p>"#,
+        r#"<blockquote>Quoted</blockquote>"#,
+        r#"<blockquote style="margin: 0 0 0 40px; border: none; padding: 0px">Indented</blockquote>"#,
+        r#"<pre><code>let x = 1;</code></pre><hr>"#,
+        r#"<a href="https://example.test/docs" onclick="x()" target="_blank">Docs</a> "#,
+        r#"<a href="mailto:alice@pigeon.test">Mail</a> "#,
+        r#"<a href="javascript:alert(1)">Bad</a> <a href="/relative">Rel</a> "#,
+        r#"<img src="https://tracker.test/pixel"><iframe src="https://evil.test"></iframe>"#,
+    ).into());
+    let html = f.engine.save_draft(draft).unwrap().body_html.unwrap();
+    for kept in [
+        r#"<h1 style="text-align: center">Plan</h1>"#,
+        "<u>Under</u>",
+        "<s>gone</s>",
+        "<sup>2</sup>",
+        "<sub>2</sub>",
+        r#"<span style="color: #d93025; background-color: rgb(255, 242, 168)">red</span>"#,
+        "<blockquote>Quoted</blockquote>",
+        r#"<blockquote style="margin: 0 0 0 40px; border: none; padding: 0px">Indented</blockquote>"#,
+        "<pre><code>let x = 1;</code></pre><hr>",
+        r#"<a href="https://example.test/docs">Docs</a>"#,
+        r#"<a href="mailto:alice@pigeon.test">Mail</a>"#,
+    ] {
+        assert!(html.contains(kept), "{kept} missing from {html}");
+    }
+    for dropped in [
+        "position",
+        "font-size",
+        "tracker",
+        "expression",
+        "javascript",
+        "relative",
+        "onclick",
+        "target",
+        "iframe",
+        "evil",
+    ] {
+        assert!(!html.contains(dropped), "{dropped} survived in {html}");
+    }
+    f.engine
+        .send_draft(DraftInput {
+            body_html: Some(html),
+            ..f.draft()
+        })
+        .unwrap();
+    f.drain();
+    let sent = f.smtp.sent.lock().unwrap();
+    let parsed = mailparse::parse_mail(sent[0].1.as_bytes()).unwrap();
+    let text = parsed.subparts[0].get_body().unwrap();
+    for visible in [
+        "Plan",
+        "Quoted",
+        "Indented",
+        "let x = 1;",
+        "Docs",
+        "https://example.test/docs",
+    ] {
+        assert!(text.contains(visible), "{visible} missing from {text}");
+    }
+    assert!(
+        parsed.subparts[1]
+            .get_body()
+            .unwrap()
+            .contains(r#"<a href="https://example.test/docs">Docs</a>"#)
+    );
+}
+
+#[test]
+fn a_rich_draft_uses_its_chosen_signature_in_both_alternatives() {
+    for (choice, expected) in [
+        (Some("Work sign-off"), Some("Work sign-off")),
+        (Some(""), None),
+    ] {
+        let f = fixture();
+        let mut draft = f.draft();
+        draft.body_html = Some("<p>Hello</p>".into());
+        draft.signature = choice.map(Into::into);
+        f.engine.send_draft(draft).unwrap();
+        f.drain();
+        let sent = f.smtp.sent.lock().unwrap();
+        let parsed = mailparse::parse_mail(sent[0].1.as_bytes()).unwrap();
+        for part in &parsed.subparts {
+            let body = part.get_body().unwrap();
+            assert!(!body.contains("Sent from a test"));
+            match expected {
+                Some(signature) => assert!(body.contains("-- ") && body.contains(signature)),
+                None => assert!(!body.contains("-- ")),
+            }
+        }
+    }
+}
+
+#[test]
+fn rich_drafts_keep_attachments_and_signatures_in_both_mime_copies() {
+    use pigeon_core::mail::DraftAttachment;
+    let f = fixture();
+    let attachment = DraftAttachment::from_bytes("receipt.bin", b"receipt\0\xff").unwrap();
+    let queued = f
+        .engine
+        .send_draft(DraftInput {
+            body_html: Some("<p>Hello <b>café</b></p>".into()),
+            signature: Some("Chosen signature".into()),
+            attachments: vec![attachment],
+            ..f.draft()
+        })
+        .unwrap();
+    assert!(matches!(queued.send, SendStatus::Queued { .. }));
+    f.drain();
+    let assert_message = |message: &str| {
+        let parsed = mailparse::parse_mail(message.as_bytes()).unwrap();
+        assert_eq!(parsed.ctype.mimetype, "multipart/mixed");
+        assert_eq!(parsed.subparts.len(), 2);
+        let alternatives = &parsed.subparts[0];
+        assert_eq!(alternatives.ctype.mimetype, "multipart/alternative");
+        assert_eq!(alternatives.subparts[0].ctype.mimetype, "text/plain");
+        assert_eq!(alternatives.subparts[1].ctype.mimetype, "text/html");
+        assert!(
+            alternatives.subparts[1]
+                .get_body()
+                .unwrap()
+                .contains("<b>café</b>")
+        );
+        for part in &alternatives.subparts {
+            let body = part.get_body().unwrap();
+            assert!(body.contains("café") && body.contains("Chosen signature"));
+            assert!(!body.contains("Sent from a test"));
+        }
+        assert_eq!(parsed.subparts[1].get_body_raw().unwrap(), b"receipt\0\xff");
+    };
+    assert_message(&f.smtp.sent.lock().unwrap()[0].1);
+    assert_message(&f.imap.appended.lock().unwrap()[0].1);
+    f.assert_outbox_empty();
 }

@@ -17,6 +17,7 @@ import { Route as MailRouteImport } from './routes/mail'
 import { Route as OutboxRouteImport } from './routes/outbox'
 import { Route as PendingRouteImport } from './routes/pending'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SettingsSignaturesRouteImport } from './routes/settings_.signatures'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -58,6 +59,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsSignaturesRoute = SettingsSignaturesRouteImport.update({
+  id: '/settings_/signatures',
+  path: '/settings/signatures',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -68,6 +74,7 @@ export interface FileRoutesByFullPath {
   '/outbox': typeof OutboxRoute
   '/pending': typeof PendingRoute
   '/settings': typeof SettingsRoute
+  '/settings/signatures': typeof SettingsSignaturesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -78,6 +85,7 @@ export interface FileRoutesByTo {
   '/outbox': typeof OutboxRoute
   '/pending': typeof PendingRoute
   '/settings': typeof SettingsRoute
+  '/settings/signatures': typeof SettingsSignaturesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   '/outbox': typeof OutboxRoute
   '/pending': typeof PendingRoute
   '/settings': typeof SettingsRoute
+  '/settings_/signatures': typeof SettingsSignaturesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
     | '/outbox'
     | '/pending'
     | '/settings'
+    | '/settings/signatures'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
     | '/outbox'
     | '/pending'
     | '/settings'
+    | '/settings/signatures'
   id:
     | '__root__'
     | '/'
@@ -121,6 +132,7 @@ export interface FileRouteTypes {
     | '/outbox'
     | '/pending'
     | '/settings'
+    | '/settings_/signatures'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -132,6 +144,7 @@ export interface RootRouteChildren {
   OutboxRoute: typeof OutboxRoute
   PendingRoute: typeof PendingRoute
   SettingsRoute: typeof SettingsRoute
+  SettingsSignaturesRoute: typeof SettingsSignaturesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -192,6 +205,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings_/signatures': {
+      id: '/settings_/signatures'
+      path: '/settings/signatures'
+      fullPath: '/settings/signatures'
+      preLoaderRoute: typeof SettingsSignaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -204,6 +224,7 @@ const rootRouteChildren: RootRouteChildren = {
   OutboxRoute: OutboxRoute,
   PendingRoute: PendingRoute,
   SettingsRoute: SettingsRoute,
+  SettingsSignaturesRoute: SettingsSignaturesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -40,7 +40,12 @@ struct ShellState {
     probe_results: Mutex<Option<Vec<ProbeResult>>>,
     /// What the embedded-image self-test observed, reported the same way.
     inline_results: Mutex<Option<Vec<ProbeResult>>>,
-    viewer_documents: Mutex<HashMap<String, String>>,
+    /// Message documents by viewer page, with the remote-content choice they
+    /// were built with so the CSP header matches the document.
+    viewer_documents: Mutex<HashMap<String, (String, RemoteContent)>>,
+    /// The open viewer window for each message, replaced when it is reopened
+    /// with images loaded.
+    message_viewers: Mutex<HashMap<i64, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -242,14 +247,16 @@ fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<String, Strin
         .map_err(|e| e.to_string())?;
     let handle = app.clone();
     let page = page.to_owned();
+    let closed = label.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
-            handle
-                .state::<ShellState>()
-                .viewer_documents
+            let state = handle.state::<ShellState>();
+            state.viewer_documents.lock().unwrap().remove(&page);
+            state
+                .message_viewers
                 .lock()
                 .unwrap()
-                .remove(&page);
+                .retain(|_, label| *label != closed);
         }
     });
     Ok(label)
@@ -302,7 +309,7 @@ fn viewer_response(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Cow<
             )
         }
         _ => {
-            if let Some(document) = app
+            if let Some((document, remote)) = app
                 .state::<ShellState>()
                 .viewer_documents
                 .lock()
@@ -314,7 +321,7 @@ fn viewer_response(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Cow<
                     .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
                     .header(
                         header::CONTENT_SECURITY_POLICY,
-                        viewer::content_security_policy(RemoteContent::Blocked),
+                        viewer::content_security_policy(remote),
                     )
                     .header("Referrer-Policy", "no-referrer")
                     .header("X-Content-Type-Options", "nosniff")
@@ -426,11 +433,19 @@ async function attempt(name, cmd, args) {
   await attempt("mail state", "mail_state");
   await attempt("search mail", "search_mail", { query: { text: "" }, requestId: "probe" });
   await attempt("cancel search", "cancel_mail_search", { requestId: "probe" });
+  await attempt("read conversation", "read_mail_conversation", { id: 1, includeJunkTrash: false });
   await attempt("read mail", "read_mail_message", { id: 1 });
+  await attempt("folder management", "change_mail_folder", { id: "probe", change: { type: "create", name: "probe" } });
   await attempt("sync mail", "sync_mail_account", { id: "probe" });
   await attempt("cancel sync", "cancel_mail_sync", { id: "probe" });
   await attempt("unlock mail", "unlock_mail");
   await attempt("open mail", "open_mail_message", { id: 1 });
+  await attempt("load images", "open_mail_message", { id: 1, loadImages: true });
+  await attempt("trusted senders", "trusted_senders");
+  await attempt("trust sender", "trust_sender", { message: 1 });
+  await attempt("distrust sender", "distrust_sender", { email: "probe@pigeon.test" });
+  await attempt("load chosen sources", "open_mail_message", { id: 1, loadSources: ["probe.example"] });
+  await attempt("trust chosen sources", "trust_sender", { message: 1, sources: ["probe.example"] });
   await attempt("save search", "save_mail_search", { name: "Probe", query: { text: "" } });
   await attempt("delete search", "delete_mail_search", { id: "probe" });
   await attempt("remove account", "remove_mail_account", { id: "probe" });
@@ -678,10 +693,16 @@ pub fn run() {
             mail::mail_state,
             mail::add_mail_account,
             mail::sync_mail_account,
+            mail::change_mail_folder,
             mail::cancel_mail_sync,
             mail::search_mail,
             mail::cancel_mail_search,
             mail::read_mail_message,
+            mail::read_mail_conversation,
+            mail::sender_image,
+            mail::trusted_senders,
+            mail::trust_sender,
+            mail::distrust_sender,
             mail::save_mail_search,
             mail::delete_mail_search,
             mail::remove_mail_account,
