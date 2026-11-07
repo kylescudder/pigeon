@@ -507,6 +507,16 @@ pub async fn send_state(
     task(app, |engine| engine.send_state()).await
 }
 
+#[tauri::command]
+pub async fn load_draft(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<Draft, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.load_draft(&id)).await
+}
+
 /// Saves a draft that replies to, or forwards, a stored message.
 #[tauri::command]
 pub async fn reply_to_message(

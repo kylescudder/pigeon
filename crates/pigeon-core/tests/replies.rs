@@ -104,7 +104,10 @@ fn a_reply_is_saved_as_a_threaded_draft_from_the_receiving_account() {
     let saved = engine.send_state().unwrap().drafts;
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].id, draft.id);
-    assert_eq!(saved[0].in_reply_to, "orig-1@pigeon.test");
+    assert_eq!(
+        engine.load_draft(&saved[0].id).unwrap().in_reply_to,
+        "orig-1@pigeon.test"
+    );
 }
 
 #[test]

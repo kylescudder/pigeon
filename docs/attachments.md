@@ -7,7 +7,8 @@ file descriptor, rejecting symlinks, directories and pipes without a stat/open
 race. Source paths are never stored; editing or deleting a
 source file cannot alter the saved copy. The attachment bytes (base64 in the draft
 JSON) live inside SQLCipher along with the existing local draft and outbox data.
-No schema migration is needed, and older drafts default to no attachments.
+Older drafts default to no attachments. Schema 19 adds encrypted listing metadata
+and a covering index, backfilling existing drafts without changing their payloads.
 
 Sending builds multipart MIME with binary-safe transfer encoding, an attachment
 Content-Disposition and encoded filenames. Files use application/octet-stream.
@@ -87,3 +88,21 @@ composer/reader browser suite passed 125 tests with 1 existing skip, followed by
 formatting and diff checks passed. New desktop and narrow screenshots were
 captured from this merged build for PR #25. Native dialog/opening and NixOS runtime
 limitations above still apply. Evidence is in evidence/attachments-pr25.
+
+
+## Review follow-up: lightweight polling
+
+The workspace now polls DraftSummary values containing navigation metadata only.
+Bodies, HTML, signatures, threading headers and attachment bytes are absent.
+Encrypted metadata columns plus a covering index keep the poll off the large
+payload pages; autosave updates metadata and the full payload atomically. The
+main-window-only load_draft command opens the selected full draft once. Its cache
+is removed on unmount or store lock. Polling and window focus do not reload it.
+A failed load shows an explicit retry state instead of starting an empty draft.
+
+Regression coverage checks a response below 4 KiB for a draft with a 1 MiB file,
+full load/recovery, metadata updates, locked-store denial, migration from schema
+18, and unchanged attachment/rich-text sending and encrypted backup/restore.
+Browser fixtures now return summaries only, so reload/undo tests exercise the
+separate load command. A recovery test observes a complete workspace polling
+cycle and asserts no extra draft load or accidental new draft.

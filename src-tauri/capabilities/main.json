@@ -39,6 +39,7 @@
     "allow-send-state",
     "allow-reply-to-message",
     "allow-save-draft",
+    "allow-load-draft",
     "allow-pick-draft-attachment",
     "allow-export-attachment",
     "allow-delete-draft",

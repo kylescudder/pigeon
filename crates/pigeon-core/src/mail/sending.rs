@@ -191,9 +191,21 @@ pub struct SavedRecipient {
     pub name: Option<String>,
 }
 
+/// Lightweight polling/navigation data. Full bodies and attachment bytes are
+/// returned only by load_draft (or a draft mutation), never by send_state.
+#[derive(Debug, Clone, Serialize)]
+pub struct DraftSummary {
+    pub id: String,
+    pub account_id: Option<String>,
+    pub to: String,
+    pub cc: String,
+    pub subject: String,
+    pub updated: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SendState {
-    pub drafts: Vec<Draft>,
+    pub drafts: Vec<DraftSummary>,
     pub outbox: Vec<OutboxItem>,
     pub undo_send_seconds: u32,
     pub recipients: Vec<SavedRecipient>,
@@ -646,9 +658,9 @@ pub(super) fn upsert_draft(conn: &Connection, draft: &DraftInput) -> Result<Draf
         .map_err(|_| MailError::Storage("could not save the draft".into()))?;
     let now = operations::now_ms();
     conn.execute(
-        "INSERT INTO drafts(id,account,payload,created,updated) VALUES (?1,?2,?3,?4,?4)
-         ON CONFLICT(id) DO UPDATE SET account=excluded.account,payload=excluded.payload,updated=excluded.updated",
-        params![id, stored.account_id, payload, now],
+        "INSERT INTO drafts(id,account,payload,created,updated,draft_to,draft_cc,draft_subject) VALUES (?1,?2,?3,?4,?4,?5,?6,?7)
+         ON CONFLICT(id) DO UPDATE SET account=excluded.account,payload=excluded.payload,updated=excluded.updated,draft_to=excluded.draft_to,draft_cc=excluded.draft_cc,draft_subject=excluded.draft_subject",
+        params![id, stored.account_id, payload, now, stored.to, stored.cc, stored.subject],
     )
     .map_err(storage_error)?;
     draft_from_payload(&id, &payload, now)
@@ -873,19 +885,15 @@ impl MailEngine {
     pub fn send_state(&self) -> Result<SendState, MailError> {
         self.with_store(|store| {
             let conn = store.connection();
-            let mut statement = conn
-                .prepare("SELECT id,payload,updated FROM drafts ORDER BY updated DESC")
-                .map_err(storage_error)?;
-            let drafts = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get(2)?))
-                })
-                .map_err(storage_error)?
-                .map(|row| {
-                    let (id, payload, updated) = row.map_err(storage_error)?;
-                    draft_from_payload(&id, &payload, updated)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            // A covering index serves navigation metadata without reading,
+            // parsing or transferring full draft payloads on every poll.
+            let mut statement = conn.prepare(
+                "SELECT id,account,draft_to,draft_cc,draft_subject,updated FROM drafts ORDER BY updated DESC"
+            ).map_err(storage_error)?;
+            let drafts = statement.query_map([], |row| Ok(DraftSummary {
+                id: row.get(0)?, account_id: row.get(1)?, to: row.get(2)?,
+                cc: row.get(3)?, subject: row.get(4)?, updated: row.get(5)?,
+            })).map_err(storage_error)?.collect::<Result<Vec<_>, _>>().map_err(storage_error)?;
             let mut statement = conn
                 .prepare("SELECT id,account,subject,recipients,created,submit_op,sent_copy_op,accepted FROM outbox WHERE dismissed=0 ORDER BY created")
                 .map_err(storage_error)?;
@@ -934,6 +942,22 @@ impl MailEngine {
                 undo_send_seconds: undo_seconds(conn)?,
                 recipients: saved_recipients(conn)?,
             })
+        })
+    }
+
+    pub fn load_draft(&self, id: &str) -> Result<Draft, MailError> {
+        self.with_store(|store| {
+            let row = store
+                .connection()
+                .query_row(
+                    "SELECT payload,updated FROM drafts WHERE id=?1",
+                    [id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()
+                .map_err(storage_error)?
+                .ok_or(MailError::NotFound)?;
+            draft_from_payload(id, &row.0, row.1)
         })
     }
 

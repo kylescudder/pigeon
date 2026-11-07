@@ -318,7 +318,12 @@ test.beforeEach(async ({ page }) => {
             case "update_mail_password":
               return;
             case "send_state":
-              return { drafts: state.drafts ?? [], outbox: [], undo_send_seconds: 10 };
+              return { drafts: (state.drafts ?? []).map(({id, account_id, to, cc, subject, updated}: any) => ({id, account_id, to, cc, subject, updated})), outbox: [], undo_send_seconds: 10 };
+            case "load_draft": {
+              const draft = (state.drafts ?? []).find((draft: any) => draft.id === args.id);
+              if (!draft) throw { message: "Draft not found." };
+              return draft;
+            }
             case "save_draft": {
               const draft = { ...args.draft, id: args.draft.id ?? "draft-1", updated: Date.now() };
               state.drafts = [draft];

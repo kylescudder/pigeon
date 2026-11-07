@@ -311,6 +311,8 @@ export type DraftInput = {
   references?: string;
 };
 export type Draft = DraftInput & { id: string; updated: number };
+export type DraftSummary = Pick<Draft, "id" | "account_id" | "to" | "cc" | "subject" | "updated">;
+export const loadDraft = (id: string) => invoke<Draft>("load_draft", { id });
 export type ReplyKind = "reply" | "reply_all" | "forward";
 export type SendStatus =
   | { state: "queued"; send_at: number; error: string | null }
@@ -337,7 +339,7 @@ export type OutboxItem = {
 export type SavedRecipient = { email: string; name: string | null };
 export type SendState = {
   recipients: SavedRecipient[];
-  drafts: Draft[];
+  drafts: DraftSummary[];
   outbox: OutboxItem[];
   undo_send_seconds: number;
 };

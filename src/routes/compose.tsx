@@ -1,5 +1,5 @@
 import { savedSignatures } from "../lib/signatures";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 import { CompositionBody, plainComposition, textComposition } from "../components/composition-body";
@@ -12,6 +12,7 @@ import {
   deleteDraft,
   errorMessage,
   pickDraftAttachment,
+  loadDraft,
   saveDraft,
   sendDraft,
   type Draft,
@@ -44,16 +45,34 @@ function ComposeLoader() {
     shown.current = draftId ?? null;
     key.current = draftId ?? `new-${Date.now()}`;
   }
-  if (!send.data)
+  // A newly saved draft adopts its URL without loading/remounting the editor.
+  // Reopening an existing draft loads its bytes once, outside workspace polling.
+  const openingSaved = !!draftId && key.current === draftId;
+  const detail = useQuery({
+    queryKey: ["send", "draft", draftId],
+    queryFn: () => loadDraft(draftId!),
+    enabled: openingSaved,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  if (openingSaved && detail.isError) return (
+    <div className="page mail-empty">
+      <h1>Could not open draft</h1>
+      <p role="alert">{errorMessage(detail.error)}</p>
+      <button type="button" className="button button-secondary" onClick={() => void detail.refetch()}>Try again</button>
+      <Link to="/drafts">Back to drafts</Link>
+    </div>
+  );
+  if (!send.data || (openingSaved && detail.isPending))
     return (
       <div className="page mail-empty">
         <Icon name="refresh" className="spinning" size={25} />
         <h1>Opening the composer…</h1>
       </div>
     );
-  const draft = draftId
-    ? send.data.drafts.find((candidate) => candidate.id === draftId)
-    : undefined;
+  const draft = openingSaved ? detail.data : undefined;
   return (
     <Composer
       key={key.current}

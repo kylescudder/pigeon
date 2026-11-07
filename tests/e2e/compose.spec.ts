@@ -119,9 +119,19 @@ async function fixture(
             case "mail_state":
               return { accounts: state.accounts, folders: state.folders, saved_searches: state.saved_searches };
             case "send_state":
+              state.polls = (state.polls ?? 0) + 1;
               settle(state);
               write(state);
-              return { drafts: state.drafts, outbox: state.outbox, undo_send_seconds: state.undo, recipients: state.recipients };
+              return { drafts: state.drafts.map(({id, account_id, to, cc, subject, updated}: any) => ({id, account_id, to, cc, subject, updated})), outbox: state.outbox, undo_send_seconds: state.undo, recipients: state.recipients };
+            case "load_draft": {
+              state.loads ??= [];
+              state.loads.push(args.id);
+              write(state);
+              if (localStorage.getItem("pigeon-test-load-error")) throw { message: "Draft is temporarily unavailable." };
+              const draft = state.drafts.find((draft: any) => draft.id === args.id);
+              if (!draft) throw { message: "Draft not found." };
+              return draft;
+            }
             case "pick_draft_attachment":
               if (localStorage.getItem("pigeon-test-pick-cancel")) return null;
               if (localStorage.getItem("pigeon-test-pick-error")) throw { message: "Could not read the chosen file." };
@@ -872,4 +882,25 @@ test("restored drafts cannot bring active content, remote resources or arbitrary
   await expect(message.locator("a")).toHaveAttribute("href", "https://example.test");
   await expect(message.locator("[style*=url]")).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
+});
+
+
+test("draft detail failures are recoverable and workspace polling does not reload draft bytes", async ({ page }, testInfo) => {
+  await fixture(page, { drafts: [{ subject: "Saved receipt", body: "Original body" }] });
+  await page.addInitScript(() => localStorage.setItem("pigeon-test-load-error", "1"));
+  await page.goto("/compose?draft=saved-1");
+  await expect(page.getByRole("heading", { name: "Could not open draft" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveText("Draft is temporarily unavailable.");
+  await expect(page.getByRole("form", { name: "New message" })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("draft-load-error.png") });
+  await page.evaluate(() => localStorage.removeItem("pigeon-test-load-error"));
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Original body");
+  const before = await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-compose-fixture")!));
+  expect(before.drafts).toHaveLength(1);
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-compose-fixture")!).polls), { timeout: 12000 }).toBeGreaterThan(before.polls);
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-compose-fixture")!));
+  expect(after.loads).toEqual(before.loads);
+  expect(after.drafts).toHaveLength(1);
+  expect(after.drafts[0].body).toBe("Original body");
 });

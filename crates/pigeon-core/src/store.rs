@@ -247,6 +247,14 @@ const MIGRATIONS: &[&str] = &[
     // 18: conversation header facts and resumable backfill of existing rows.
     "ALTER TABLE messages ADD COLUMN in_reply_to TEXT NOT NULL DEFAULT '';
     ALTER TABLE messages ADD COLUMN threading_version INTEGER NOT NULL DEFAULT 0;",
+    // 19: metadata-only, covering draft listing; polling never reads payloads.
+    "ALTER TABLE drafts ADD COLUMN draft_to TEXT NOT NULL DEFAULT '';
+    ALTER TABLE drafts ADD COLUMN draft_cc TEXT NOT NULL DEFAULT '';
+    ALTER TABLE drafts ADD COLUMN draft_subject TEXT NOT NULL DEFAULT '';
+    UPDATE drafts SET draft_to=coalesce(json_extract(payload,'$.to'),''),
+        draft_cc=coalesce(json_extract(payload,'$.cc'),''),
+        draft_subject=coalesce(json_extract(payload,'$.subject'),'');
+    CREATE INDEX drafts_listing ON drafts(updated DESC,id,account,draft_to,draft_cc,draft_subject);",
 ];
 
 /// The schema version a fully migrated store reports in `user_version`.
@@ -378,5 +386,45 @@ impl Store {
                 format!("user_version={schema}"),
             ),
         ])
+    }
+}
+
+#[cfg(test)]
+mod draft_listing_migration_tests {
+    use super::*;
+
+    #[test]
+    fn older_drafts_keep_listing_metadata_and_payloads_after_upgrade() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mail.db");
+        let key = DbKey::generate().unwrap();
+        let payload = r#"{"to":"friend@example.test","cc":"copy@example.test","subject":"Kept draft","body":"Private body","attachments":[{"filename":"receipt.bin","data":"cmVjZWlwdA=="}]}"#;
+        {
+            let old = Store::open_at_version(&path, &key, 18).unwrap();
+            old.connection()
+                .execute(
+                    "INSERT INTO drafts(id,payload,created,updated) VALUES ('draft',?1,1,1)",
+                    [payload],
+                )
+                .unwrap();
+        }
+        let upgraded = Store::open(&path, &key).unwrap();
+        let row: (String, String, String, String) = upgraded
+            .connection()
+            .query_row(
+                "SELECT draft_to,draft_cc,draft_subject,payload FROM drafts WHERE id='draft'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "friend@example.test".into(),
+                "copy@example.test".into(),
+                "Kept draft".into(),
+                payload.into()
+            )
+        );
     }
 }
