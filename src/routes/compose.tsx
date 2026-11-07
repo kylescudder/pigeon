@@ -1,5 +1,5 @@
 import { savedSignatures } from "../lib/signatures";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 import { CompositionBody, plainComposition, textComposition } from "../components/composition-body";
@@ -11,6 +11,8 @@ import { useRefreshSend, useSendState } from "../components/send-state";
 import {
   deleteDraft,
   errorMessage,
+  pickDraftAttachment,
+  loadDraft,
   saveDraft,
   sendDraft,
   type Draft,
@@ -43,16 +45,34 @@ function ComposeLoader() {
     shown.current = draftId ?? null;
     key.current = draftId ?? `new-${Date.now()}`;
   }
-  if (!send.data)
+  // A newly saved draft adopts its URL without loading/remounting the editor.
+  // Reopening an existing draft loads its bytes once, outside workspace polling.
+  const openingSaved = !!draftId && key.current === draftId;
+  const detail = useQuery({
+    queryKey: ["send", "draft", draftId],
+    queryFn: () => loadDraft(draftId!),
+    enabled: openingSaved,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  if (openingSaved && detail.isError) return (
+    <div className="page mail-empty">
+      <h1>Could not open draft</h1>
+      <p role="alert">{errorMessage(detail.error)}</p>
+      <button type="button" className="button button-secondary" onClick={() => void detail.refetch()}>Try again</button>
+      <Link to="/drafts">Back to drafts</Link>
+    </div>
+  );
+  if (!send.data || (openingSaved && detail.isPending))
     return (
       <div className="page mail-empty">
         <Icon name="refresh" className="spinning" size={25} />
         <h1>Opening the composer…</h1>
       </div>
     );
-  const draft = draftId
-    ? send.data.drafts.find((candidate) => candidate.id === draftId)
-    : undefined;
+  const draft = openingSaved ? detail.data : undefined;
   return (
     <Composer
       key={key.current}
@@ -91,6 +111,7 @@ function Composer({
     bcc: initial?.bcc ?? "",
     subject: initial?.subject ?? "",
     body: initial?.body ?? "",
+    attachments: initial?.attachments ?? [],
     body_html: initial?.body_html ?? null,
     signature: initial?.signature ?? null,
     // Kept as they are so a reply stays threaded through every autosave.
@@ -201,6 +222,21 @@ function Composer({
     setDirty(true);
     setSaveState("idle");
   };
+  const attach = useMutation({
+    mutationFn: pickDraftAttachment,
+    onSuccess: (attachment) => {
+      if (!attachment) return;
+      const attachments = [...(formRef.current.attachments ?? []), attachment];
+      const bytes = attachments.reduce((sum, file) => {
+        const padding = file.data.endsWith("==") ? 2 : file.data.endsWith("=") ? 1 : 0;
+        return sum + Math.floor(file.data.length * 3 / 4) - padding;
+      }, 0);
+      if (attachments.length > 32 || bytes > 20 * 1024 * 1024) {
+        throw new Error("Attach at most 32 files totalling 20 MiB.");
+      }
+      update({ attachments });
+    },
+  });
   const account = accounts.find((candidate) => candidate.id === form.account_id);
   const signatures = savedSignatures(account?.config.sending);
   const signature = form.signature ?? account?.config.sending?.signature ?? "";
@@ -209,7 +245,7 @@ function Composer({
     : form.signature === "" ? "none"
     : selectedSignature ? `saved:${selectedSignature.id}` : "custom";
   const canSend = !!account?.config.sending?.smtp;
-  const busy = submit.isPending || discard.isPending;
+  const busy = submit.isPending || discard.isPending || attach.isPending;
 
   if (!accounts.length)
     return (
@@ -233,7 +269,7 @@ function Composer({
         aria-label="New message"
         onSubmit={(event) => {
           event.preventDefault();
-          submit.mutate();
+          if (!busy) submit.mutate();
         }}
         onKeyDown={(event) => {
           if (
@@ -255,7 +291,7 @@ function Composer({
               : saveState === "saved"
                 ? "Draft saved on this device"
                 : saveState === "idle"
-                  ? ""
+                  ? (dirty ? "Unsaved changes" : "")
                   : `Draft not saved: ${saveState.error}`}
           </span>
         </header>
@@ -328,6 +364,17 @@ function Composer({
               maxLength={998}
             />
           </div>
+          <section className="compose-attachments" aria-label="Attachments">
+            <button type="button" className="button button-secondary" onClick={() => attach.mutate()}>Attach file</button>
+            <small>Up to 32 files, 20 MiB total. Copies stay in the encrypted draft. Forwards include text only; add attachments separately.</small>
+            {(form.attachments ?? []).map((attachment, index) => (
+              <div key={index} className="compose-attachment">
+                <span>{attachment.filename}</span>
+                <button type="button" className="button button-quiet" aria-label={`Remove ${attachment.filename}`}
+                  onClick={() => update({ attachments: form.attachments?.filter((_, i) => i !== index) })}>Remove</button>
+              </div>
+            ))}
+          </section>
           <div className="composition-format">
             <div className="segmented-control" role="group" aria-label="Message format">
               {([["plain", "Plain text"], ["rich", "Rich text"]] as const).map(([format, label]) => (
@@ -380,10 +427,10 @@ function Composer({
             </button>
           </div>
         )}
-        {(submit.isError || discard.isError) && (
+        {(submit.isError || discard.isError || attach.isError) && (
           <div className="notice notice-error" role="alert">
             <Icon name="alert" size={17} />
-            <p>{errorMessage(submit.error ?? discard.error)}</p>
+            <p>{errorMessage(submit.error ?? discard.error ?? attach.error)}</p>
           </div>
         )}
         <footer className="composer-actions">

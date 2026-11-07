@@ -3940,6 +3940,7 @@ dependencies = [
  "html2text",
  "imap",
  "imap-proto",
+ "libc",
  "mail-builder",
  "mailparse",
  "native-tls",

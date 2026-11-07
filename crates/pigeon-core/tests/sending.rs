@@ -366,13 +366,25 @@ fn an_unknown_outcome_waits_for_a_decision() {
 fn send_again_after_unknown_is_explicit() {
     let f = fixture();
     f.smtp.then(Submission::Unknown("timed out".into()));
-    let queued = f.engine.send_draft(f.draft()).unwrap();
+    let queued = f
+        .engine
+        .send_draft(DraftInput {
+            attachments: vec![
+                pigeon_core::mail::DraftAttachment::from_bytes("receipt.bin", b"receipt\0\xff")
+                    .unwrap(),
+            ],
+            ..f.draft()
+        })
+        .unwrap();
     f.drain();
     f.engine
         .resolve_send(&queued.id, SendDecision::SendAgain)
         .unwrap();
     f.drain();
     assert_eq!(f.smtp.submissions(), 2);
+    let submissions = f.smtp.sent.lock().unwrap();
+    assert_eq!(submissions[0].1, submissions[1].1);
+    drop(submissions);
     f.assert_outbox_empty();
 }
 
@@ -404,6 +416,9 @@ fn offline_sends_wait_and_permanent_refusals_go_back_to_drafts() {
     let draft = f.engine.return_to_drafts(&queued.id).unwrap();
     assert_eq!(draft.to, f.draft().to);
     assert_eq!(f.smtp.submissions(), 2);
+    let submissions = f.smtp.sent.lock().unwrap();
+    assert_eq!(submissions[0].1, submissions[1].1);
+    drop(submissions);
 }
 
 #[test]
@@ -444,8 +459,18 @@ fn drafts_autosave_and_survive_a_restart() {
     );
     let drafts = reopened.send_state().unwrap().drafts;
     assert_eq!(drafts.len(), 1);
-    assert_eq!(drafts[0].body, "Second thoughts");
-    assert_eq!(drafts[0].signature.as_deref(), Some("Personal sign-off"));
+    assert_eq!(
+        reopened.load_draft(&drafts[0].id).unwrap().body,
+        "Second thoughts"
+    );
+    assert_eq!(
+        reopened
+            .load_draft(&drafts[0].id)
+            .unwrap()
+            .signature
+            .as_deref(),
+        Some("Personal sign-off")
+    );
     reopened.delete_draft(&saved.id).unwrap();
     assert!(reopened.send_state().unwrap().drafts.is_empty());
 }
@@ -620,7 +645,7 @@ fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
         panic!("store should open");
     };
     store.connection().execute_batch(
-        "DROP TABLE image_trust_hosts; DROP TABLE image_trust; DROP TABLE sender_images; DROP TABLE folder_changes; DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; PRAGMA user_version=11;",
+        "DROP TABLE image_trust_hosts; DROP TABLE image_trust; DROP TABLE sender_images; DROP TABLE folder_changes; DROP TABLE recipient_history; DELETE FROM settings WHERE key='recipient_history_imported'; ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; DROP INDEX drafts_listing; ALTER TABLE drafts DROP COLUMN draft_to; ALTER TABLE drafts DROP COLUMN draft_cc; ALTER TABLE drafts DROP COLUMN draft_subject; PRAGMA user_version=11;",
     ).unwrap();
     drop(store);
     let reopened = MailEngine::with_transports(
@@ -642,6 +667,105 @@ fn upgrading_imports_older_confirmed_recipients_even_after_dismissal() {
             .as_deref(),
         Some("Alice")
     );
+}
+
+#[test]
+fn attachment_bytes_survive_restart_undo_and_smtp_and_sent_copy() {
+    use pigeon_core::mail::DraftAttachment;
+    let f = fixture();
+    let bytes = b"receipt\0\xff\r\n";
+    let attachment = DraftAttachment::from_bytes("caf\u{e9}.bin", bytes).unwrap();
+    let saved = f
+        .engine
+        .save_draft(DraftInput {
+            attachments: vec![attachment.clone()],
+            ..f.draft()
+        })
+        .unwrap();
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    assert_eq!(
+        reopened.load_draft(&saved.id).unwrap().attachments,
+        vec![attachment.clone()]
+    );
+    reopened.set_undo_send_seconds(60).unwrap();
+    let input = DraftInput {
+        id: Some(saved.id),
+        attachments: vec![attachment.clone()],
+        ..f.draft()
+    };
+    let queued = reopened.send_draft(input.clone()).unwrap();
+    drop(reopened);
+    let reopened = MailEngine::with_transports(
+        f._dir.path().join("mail.db"),
+        f.secrets.clone(),
+        Arc::new(Connector(f.imap.clone())),
+        f.smtp.clone(),
+    );
+    let restored = reopened.return_to_drafts(&queued.id).unwrap();
+    assert_eq!(restored.attachments, vec![attachment]);
+    reopened.set_undo_send_seconds(0).unwrap();
+    reopened
+        .send_draft(DraftInput {
+            id: Some(restored.id),
+            ..input
+        })
+        .unwrap();
+    while reopened.run_next_operation().unwrap() {}
+    let assert_mime = |message: &str| {
+        let parsed = mailparse::parse_mail(message.as_bytes()).unwrap();
+        assert_eq!(parsed.ctype.mimetype, "multipart/mixed");
+        assert_eq!(parsed.subparts.len(), 2);
+        assert_eq!(parsed.subparts[1].get_body_raw().unwrap(), bytes);
+        assert_eq!(
+            parsed.subparts[1]
+                .get_content_disposition()
+                .params
+                .get("filename")
+                .unwrap(),
+            "caf\u{e9}.bin"
+        );
+    };
+    assert_eq!(f.smtp.submissions(), 1);
+    assert_mime(&f.smtp.sent.lock().unwrap()[0].1);
+    assert_mime(&f.imap.appended.lock().unwrap()[0].1);
+}
+
+#[test]
+fn attachments_reject_header_injection_bad_encoding_and_excess_size() {
+    use pigeon_core::mail::{DraftAttachment, MAX_OUTGOING_ATTACHMENT_BYTES};
+    let f = fixture();
+    for filename in ["../secret", "a\r\nBcc: injected", "..", "a\\b"] {
+        assert!(DraftAttachment::from_bytes(filename, b"test").is_err());
+    }
+    let invalid = DraftAttachment {
+        filename: "test.bin".into(),
+        data: "!invalid!".into(),
+    };
+    assert!(
+        f.engine
+            .save_draft(DraftInput {
+                attachments: vec![invalid],
+                ..f.draft()
+            })
+            .is_err()
+    );
+    let large =
+        DraftAttachment::from_bytes("large.bin", &vec![0; MAX_OUTGOING_ATTACHMENT_BYTES / 2 + 1])
+            .unwrap();
+    assert!(
+        f.engine
+            .save_draft(DraftInput {
+                attachments: vec![large.clone(), large],
+                ..f.draft()
+            })
+            .is_err()
+    );
+    assert!(f.engine.send_state().unwrap().drafts.is_empty());
 }
 
 #[test]
@@ -695,7 +819,7 @@ fn rich_draft_recovers_and_sends_safe_alternatives_with_signatures() {
         Arc::new(Connector(f.imap.clone())),
         f.smtp.clone(),
     );
-    let restored = reopened.send_state().unwrap().drafts.remove(0);
+    let restored = reopened.load_draft(&saved.id).unwrap();
     assert_eq!(restored.id, saved.id);
     assert!(restored.body_html.as_ref().unwrap().contains("<b>café</b>"));
     assert!(!restored.body_html.as_ref().unwrap().contains("tracker"));
@@ -869,4 +993,95 @@ fn a_rich_draft_uses_its_chosen_signature_in_both_alternatives() {
             }
         }
     }
+}
+
+#[test]
+fn rich_drafts_keep_attachments_and_signatures_in_both_mime_copies() {
+    use pigeon_core::mail::DraftAttachment;
+    let f = fixture();
+    let attachment = DraftAttachment::from_bytes("receipt.bin", b"receipt\0\xff").unwrap();
+    let queued = f
+        .engine
+        .send_draft(DraftInput {
+            body_html: Some("<p>Hello <b>café</b></p>".into()),
+            signature: Some("Chosen signature".into()),
+            attachments: vec![attachment],
+            ..f.draft()
+        })
+        .unwrap();
+    assert!(matches!(queued.send, SendStatus::Queued { .. }));
+    f.drain();
+    let assert_message = |message: &str| {
+        let parsed = mailparse::parse_mail(message.as_bytes()).unwrap();
+        assert_eq!(parsed.ctype.mimetype, "multipart/mixed");
+        assert_eq!(parsed.subparts.len(), 2);
+        let alternatives = &parsed.subparts[0];
+        assert_eq!(alternatives.ctype.mimetype, "multipart/alternative");
+        assert_eq!(alternatives.subparts[0].ctype.mimetype, "text/plain");
+        assert_eq!(alternatives.subparts[1].ctype.mimetype, "text/html");
+        assert!(
+            alternatives.subparts[1]
+                .get_body()
+                .unwrap()
+                .contains("<b>café</b>")
+        );
+        for part in &alternatives.subparts {
+            let body = part.get_body().unwrap();
+            assert!(body.contains("café") && body.contains("Chosen signature"));
+            assert!(!body.contains("Sent from a test"));
+        }
+        assert_eq!(parsed.subparts[1].get_body_raw().unwrap(), b"receipt\0\xff");
+    };
+    assert_message(&f.smtp.sent.lock().unwrap()[0].1);
+    assert_message(&f.imap.appended.lock().unwrap()[0].1);
+    f.assert_outbox_empty();
+}
+
+#[test]
+fn polling_drafts_does_not_return_attachment_payloads_or_message_bodies() {
+    let f = fixture();
+    let saved = f
+        .engine
+        .save_draft(DraftInput {
+            body: "Private draft body".into(),
+            attachments: vec![
+                pigeon_core::mail::DraftAttachment::from_bytes(
+                    "receipt.bin",
+                    &vec![42; 1024 * 1024],
+                )
+                .unwrap(),
+            ],
+            ..f.draft()
+        })
+        .unwrap();
+    let state = serde_json::to_value(f.engine.send_state().unwrap()).unwrap();
+    let draft = &state["drafts"][0];
+    assert_eq!(draft["subject"], "Quarterly receipts");
+    assert!(draft.get("attachments").is_none());
+    assert!(draft.get("body").is_none());
+    assert!(serde_json::to_vec(&state).unwrap().len() < 4096);
+    let loaded = f.engine.load_draft(&saved.id).unwrap();
+    assert_eq!(loaded.body, "Private draft body");
+    assert_eq!(loaded.attachments, saved.attachments);
+    assert!(matches!(
+        f.engine.load_draft("missing"),
+        Err(MailError::NotFound)
+    ));
+    f.engine
+        .save_draft(DraftInput {
+            id: Some(saved.id.clone()),
+            subject: "Revised receipt".into(),
+            attachments: loaded.attachments,
+            ..f.draft()
+        })
+        .unwrap();
+    assert_eq!(
+        f.engine.send_state().unwrap().drafts[0].subject,
+        "Revised receipt"
+    );
+    f.secrets.set_state(KeyringState::Locked);
+    assert!(matches!(
+        f.engine.load_draft(&saved.id),
+        Err(MailError::Locked)
+    ));
 }

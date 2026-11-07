@@ -1464,6 +1464,15 @@ h1 {
     scroll-behavior: auto !important;
   }
 }
+
+.compose-attachments { padding: 12px 20px; display: grid; gap: 8px; border-bottom: 1px solid var(--line); }
+.compose-attachments > button { justify-self: start; }
+.compose-attachment { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.compose-attachment > span { overflow-wrap: anywhere; min-width: 0; }
+.attachment-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.message-attachments > div { flex-wrap: wrap; }
+.message-attachments > div > svg { flex-shrink: 0; }
+.message-attachments > div > span:not(.attachment-actions) { flex: 1 1 140px; min-width: 0; }
 .trusted-senders {
   list-style: none;
   margin: 14px 0 0;

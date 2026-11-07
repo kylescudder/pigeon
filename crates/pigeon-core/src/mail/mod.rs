@@ -37,8 +37,9 @@ pub mod source;
 mod threading;
 pub use actions::{ActionCounts, ActionKind, PendingAction};
 pub use sending::{
-    Draft, DraftInput, OutboxItem, SavedRecipient, SavedSignature, SendDecision, SendState,
-    SendStatus, SendingSettings, SentCopyStatus,
+    Draft, DraftAttachment, DraftInput, DraftSummary, MAX_OUTGOING_ATTACHMENT_BYTES, OutboxItem,
+    SavedRecipient, SavedSignature, SendDecision, SendState, SendStatus, SendingSettings,
+    SentCopyStatus,
 };
 static NEXT_ACCESS: AtomicU64 = AtomicU64::new(0);
 static NEXT_SEARCH: AtomicU64 = AtomicU64::new(0);

@@ -230,6 +230,12 @@ test.beforeEach(async ({ page }) => {
               const selected = messageById(args.id);
               return { messages: state.messages.filter((m: any) => !m.hidden && !m.deleted && m.account_id === selected.account_id && (args.includeJunkTrash || !["Trash", "Junk"].includes(m.folder)) && (selected.thread ? m.thread === selected.thread : m.id === selected.id)).sort((a: any,b: any) => a.date-b.date), incomplete: !!selected.thread && !state.thread_complete };
             }
+            case "export_attachment":
+              state.exports ??= [];
+              state.exports.push({ id: args.id, part: args.part, open: args.open });
+              write(state);
+              if (localStorage.getItem("pigeon-export-error")) throw { message: "Could not save attachment." };
+              return !localStorage.getItem("pigeon-export-cancel");
             case "read_mail_message":
               return {
                 summary: messageById(args.id),
@@ -312,7 +318,12 @@ test.beforeEach(async ({ page }) => {
             case "update_mail_password":
               return;
             case "send_state":
-              return { drafts: state.drafts ?? [], outbox: [], undo_send_seconds: 10 };
+              return { drafts: (state.drafts ?? []).map(({id, account_id, to, cc, subject, updated}: any) => ({id, account_id, to, cc, subject, updated})), outbox: [], undo_send_seconds: 10 };
+            case "load_draft": {
+              const draft = (state.drafts ?? []).find((draft: any) => draft.id === args.id);
+              if (!draft) throw { message: "Draft not found." };
+              return draft;
+            }
             case "save_draft": {
               const draft = { ...args.draft, id: args.draft.id ?? "draft-1", updated: Date.now() };
               state.drafts = [draft];
@@ -605,11 +616,26 @@ test("formatted view reports embedded images it could not download", async ({ pa
   await page.goto("/mail");
   await page.getByRole("button", { name: /Release planning/ }).click();
   await expect(page.getByText("plan.pdf")).toBeVisible();
-  await expect(page.getByText(/Embedded images appear in the formatted view/)).toBeVisible();
+  await expect(page.getByText(/Saving creates a file outside encrypted storage/)).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).exports ?? [])).toEqual([]);
+  const attachment = page.locator(".message-attachments > div").filter({ hasText: "plan.pdf" });
+  await page.evaluate(() => localStorage.setItem("pigeon-export-cancel", "1"));
+  await attachment.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(attachment.getByRole("status")).toHaveCount(0);
+  await page.evaluate(() => { localStorage.removeItem("pigeon-export-cancel"); localStorage.setItem("pigeon-export-error", "1"); });
+  await attachment.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(attachment.getByRole("alert")).toContainText("Could not save attachment");
+  await page.evaluate(() => localStorage.removeItem("pigeon-export-error"));
+  await attachment.getByRole("button", { name: "Save and open", exact: true }).click();
+  await expect(attachment.getByRole("status")).toContainText("Saved outside encrypted storage");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).exports)).toEqual([
+    { id: 2, part: "2", open: false }, { id: 2, part: "2", open: false }, { id: 2, part: "2", open: true },
+  ]);
   await page.getByRole("button", { name: "Open formatted view", exact: true }).click();
   await expect(page.getByText(/could not be downloaded/)).toHaveText(
     "1 embedded image could not be downloaded, so the formatted view shows its description instead. Reconnect and open it again to try once more.",
   );
+  await attachment.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("missing-embedded-image.png") });
   // The note belongs to that opening; choosing another message clears it.
   const back = page.getByRole("button", { name: "Messages", exact: true });

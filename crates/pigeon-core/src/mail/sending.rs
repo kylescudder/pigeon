@@ -2,6 +2,7 @@
 //! SMTP submission, then saving a copy to the Sent folder. The second step
 //! can fail and be retried on its own; it never submits the message again.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -55,6 +56,47 @@ impl Default for SendingSettings {
     }
 }
 
+/// Attachment bytes travel with the encrypted draft/outbox, never as file paths.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DraftAttachment {
+    pub filename: String,
+    pub data: String,
+}
+pub const MAX_OUTGOING_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+
+impl DraftAttachment {
+    pub fn from_bytes(filename: &str, bytes: &[u8]) -> Result<Self, MailError> {
+        if bytes.len() > MAX_OUTGOING_ATTACHMENT_BYTES {
+            return Err(invalid("attachments must total at most 20 MiB"));
+        }
+        let attachment = Self {
+            filename: filename.to_owned(),
+            data: STANDARD.encode(bytes),
+        };
+        attachment.decode()?;
+        Ok(attachment)
+    }
+
+    fn decode(&self) -> Result<Vec<u8>, MailError> {
+        if self.filename.is_empty()
+            || self.filename.len() > 255
+            || self
+                .filename
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '/' | '\\'))
+            || matches!(self.filename.as_str(), "." | "..")
+        {
+            return Err(invalid("choose an attachment with a safe filename"));
+        }
+        if self.data.len() > MAX_OUTGOING_ATTACHMENT_BYTES.div_ceil(3) * 4 {
+            return Err(invalid("attachments must total at most 20 MiB"));
+        }
+        STANDARD
+            .decode(&self.data)
+            .map_err(|_| invalid("attachment data is invalid"))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(default)]
 pub struct DraftInput {
@@ -65,6 +107,7 @@ pub struct DraftInput {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    pub attachments: Vec<DraftAttachment>,
     /// None means plain text. Some carries the restricted authored HTML.
     pub body_html: Option<String>,
     /// None uses the account default; Some("") omits the signature.
@@ -84,6 +127,7 @@ pub struct Draft {
     pub bcc: String,
     pub subject: String,
     pub body: String,
+    pub attachments: Vec<DraftAttachment>,
     /// None means plain text. Some carries the restricted authored HTML.
     pub body_html: Option<String>,
     pub signature: Option<String>,
@@ -147,9 +191,21 @@ pub struct SavedRecipient {
     pub name: Option<String>,
 }
 
+/// Lightweight polling/navigation data. Full bodies and attachment bytes are
+/// returned only by load_draft (or a draft mutation), never by send_state.
+#[derive(Debug, Clone, Serialize)]
+pub struct DraftSummary {
+    pub id: String,
+    pub account_id: Option<String>,
+    pub to: String,
+    pub cc: String,
+    pub subject: String,
+    pub updated: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SendState {
-    pub drafts: Vec<Draft>,
+    pub drafts: Vec<DraftSummary>,
     pub outbox: Vec<OutboxItem>,
     pub undo_send_seconds: u32,
     pub recipients: Vec<SavedRecipient>,
@@ -194,6 +250,16 @@ pub(super) fn invalid(message: &str) -> MailError {
 }
 
 fn check_draft(draft: &DraftInput) -> Result<(), MailError> {
+    if draft.attachments.len() > 32 {
+        return Err(invalid("attach at most 32 files"));
+    }
+    let mut total = 0;
+    for attachment in &draft.attachments {
+        total += attachment.decode()?.len();
+        if total > MAX_OUTGOING_ATTACHMENT_BYTES {
+            return Err(invalid("attachments must total at most 20 MiB"));
+        }
+    }
     if draft
         .signature
         .as_ref()
@@ -488,6 +554,13 @@ fn build(account: &Account, draft: &DraftInput, now_secs: i64) -> Result<Built, 
         if with_bcc && !bcc.is_empty() {
             builder = builder.bcc(addresses(&bcc));
         }
+        for attachment in &draft.attachments {
+            builder = builder.attachment(
+                "application/octet-stream",
+                attachment.filename.clone(),
+                attachment.decode()?,
+            );
+        }
         builder
             .write_to_vec()
             .map_err(|_| MailError::Storage("could not build the message".into()))
@@ -557,6 +630,7 @@ fn draft_from_payload(id: &str, payload: &str, updated: i64) -> Result<Draft, Ma
         bcc: input.bcc,
         subject: input.subject,
         body: input.body,
+        attachments: input.attachments,
         body_html: input.body_html,
         signature: input.signature,
         in_reply_to: input.in_reply_to,
@@ -584,9 +658,9 @@ pub(super) fn upsert_draft(conn: &Connection, draft: &DraftInput) -> Result<Draf
         .map_err(|_| MailError::Storage("could not save the draft".into()))?;
     let now = operations::now_ms();
     conn.execute(
-        "INSERT INTO drafts(id,account,payload,created,updated) VALUES (?1,?2,?3,?4,?4)
-         ON CONFLICT(id) DO UPDATE SET account=excluded.account,payload=excluded.payload,updated=excluded.updated",
-        params![id, stored.account_id, payload, now],
+        "INSERT INTO drafts(id,account,payload,created,updated,draft_to,draft_cc,draft_subject) VALUES (?1,?2,?3,?4,?4,?5,?6,?7)
+         ON CONFLICT(id) DO UPDATE SET account=excluded.account,payload=excluded.payload,updated=excluded.updated,draft_to=excluded.draft_to,draft_cc=excluded.draft_cc,draft_subject=excluded.draft_subject",
+        params![id, stored.account_id, payload, now, stored.to, stored.cc, stored.subject],
     )
     .map_err(storage_error)?;
     draft_from_payload(&id, &payload, now)
@@ -811,19 +885,15 @@ impl MailEngine {
     pub fn send_state(&self) -> Result<SendState, MailError> {
         self.with_store(|store| {
             let conn = store.connection();
-            let mut statement = conn
-                .prepare("SELECT id,payload,updated FROM drafts ORDER BY updated DESC")
-                .map_err(storage_error)?;
-            let drafts = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get(2)?))
-                })
-                .map_err(storage_error)?
-                .map(|row| {
-                    let (id, payload, updated) = row.map_err(storage_error)?;
-                    draft_from_payload(&id, &payload, updated)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            // A covering index serves navigation metadata without reading,
+            // parsing or transferring full draft payloads on every poll.
+            let mut statement = conn.prepare(
+                "SELECT id,account,draft_to,draft_cc,draft_subject,updated FROM drafts ORDER BY updated DESC"
+            ).map_err(storage_error)?;
+            let drafts = statement.query_map([], |row| Ok(DraftSummary {
+                id: row.get(0)?, account_id: row.get(1)?, to: row.get(2)?,
+                cc: row.get(3)?, subject: row.get(4)?, updated: row.get(5)?,
+            })).map_err(storage_error)?.collect::<Result<Vec<_>, _>>().map_err(storage_error)?;
             let mut statement = conn
                 .prepare("SELECT id,account,subject,recipients,created,submit_op,sent_copy_op,accepted FROM outbox WHERE dismissed=0 ORDER BY created")
                 .map_err(storage_error)?;
@@ -872,6 +942,22 @@ impl MailEngine {
                 undo_send_seconds: undo_seconds(conn)?,
                 recipients: saved_recipients(conn)?,
             })
+        })
+    }
+
+    pub fn load_draft(&self, id: &str) -> Result<Draft, MailError> {
+        self.with_store(|store| {
+            let row = store
+                .connection()
+                .query_row(
+                    "SELECT payload,updated FROM drafts WHERE id=?1",
+                    [id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()
+                .map_err(storage_error)?
+                .ok_or(MailError::NotFound)?;
+            draft_from_payload(id, &row.0, row.1)
         })
     }
 
@@ -928,6 +1014,7 @@ impl MailEngine {
             bcc: saved.bcc.clone(),
             subject: saved.subject.clone(),
             body: saved.body.clone(),
+            attachments: saved.attachments.clone(),
             body_html: saved.body_html.clone(),
             signature: saved.signature.clone(),
             in_reply_to: saved.in_reply_to.clone(),

@@ -31,6 +31,9 @@ psl = "2.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 secret-service.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile.workspace = true
 

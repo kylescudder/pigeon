@@ -289,7 +289,12 @@ export const discardMailAction = (id: number) =>
 
 // Composing and sending. Drafts and queued messages stay in the encrypted
 // store; outcomes are reported without server reply text.
+export type DraftAttachment = { filename: string; data: string };
+export const pickDraftAttachment = () => invoke<DraftAttachment | null>("pick_draft_attachment");
+export const exportAttachment = (id: number, part: string, open: boolean) =>
+  invoke<boolean>("export_attachment", { id, part, open });
 export type DraftInput = {
+  attachments?: DraftAttachment[];
   /** Null uses the account default; an empty string omits the signature. */
   signature?: string | null;
   id: string | null;
@@ -306,6 +311,8 @@ export type DraftInput = {
   references?: string;
 };
 export type Draft = DraftInput & { id: string; updated: number };
+export type DraftSummary = Pick<Draft, "id" | "account_id" | "to" | "cc" | "subject" | "updated">;
+export const loadDraft = (id: string) => invoke<Draft>("load_draft", { id });
 export type ReplyKind = "reply" | "reply_all" | "forward";
 export type SendStatus =
   | { state: "queued"; send_at: number; error: string | null }
@@ -332,7 +339,7 @@ export type OutboxItem = {
 export type SavedRecipient = { email: string; name: string | null };
 export type SendState = {
   recipients: SavedRecipient[];
-  drafts: Draft[];
+  drafts: DraftSummary[];
   outbox: OutboxItem[];
   undo_send_seconds: number;
 };

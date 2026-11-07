@@ -507,6 +507,16 @@ pub async fn send_state(
     task(app, |engine| engine.send_state()).await
 }
 
+#[tauri::command]
+pub async fn load_draft(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: String,
+) -> Result<Draft, MailApiError> {
+    guard(&webview)?;
+    task(app, move |engine| engine.load_draft(&id)).await
+}
+
 /// Saves a draft that replies to, or forwards, a stored message.
 #[tauri::command]
 pub async fn reply_to_message(
@@ -691,6 +701,123 @@ async fn choose_file(app: &AppHandle, save: bool) -> Result<Option<PathBuf>, Mai
             })
         })
         .transpose()
+}
+
+fn attachment_file_error(message: &str) -> MailApiError {
+    MailApiError {
+        code: "attachment_file",
+        message: message.into(),
+    }
+}
+
+/// The caller can request a chooser, never supply an arbitrary native path.
+#[tauri::command]
+pub async fn pick_draft_attachment(
+    app: AppHandle,
+    webview: tauri::Webview,
+) -> Result<Option<pigeon_core::mail::DraftAttachment>, MailApiError> {
+    guard(&webview)?;
+    // Require an unlocked store before reading a personal file.
+    task(app.clone(), |engine| engine.keep_attachments().map(|_| ())).await?;
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Attach file (20 MiB total maximum)");
+    if let Some(window) = app.get_webview_window(crate::MAIN) {
+        dialog = dialog.set_parent(&window);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file())
+        .await
+        .map_err(|_| attachment_file_error("The file chooser was interrupted."))?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|_| attachment_file_error("Choose a local file."))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        pigeon_core::attachment_files::import(&path)
+            .map(Some)
+            .map_err(MailApiError::from)
+    })
+    .await
+    .map_err(|_| attachment_file_error("Reading the file was interrupted."))?
+}
+
+/// Export is always user initiated, with a native destination chooser. No
+/// plaintext preview/cache file is created behind the user's back.
+#[tauri::command]
+pub async fn export_attachment(
+    app: AppHandle,
+    webview: tauri::Webview,
+    id: i64,
+    part: String,
+    open: bool,
+) -> Result<bool, MailApiError> {
+    guard(&webview)?;
+    use tauri_plugin_dialog::DialogExt;
+    let lookup_part = part.clone();
+    let filename = task(app.clone(), move |engine| {
+        let message = engine.message(id)?;
+        message
+            .attachments
+            .into_iter()
+            .find(|attachment| attachment.part == lookup_part)
+            .map(|attachment| attachment.filename)
+            .ok_or(MailError::NotFound)
+    })
+    .await?;
+    // Server metadata is only a suggested basename, never a native path.
+    let filename: String = filename
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '/' | '\\' | ':'))
+        .take(180)
+        .collect();
+    let filename = if filename.trim_matches('.').is_empty() {
+        "attachment"
+    } else {
+        &filename
+    };
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Save attachment outside encrypted storage (choose a new file)")
+        .set_file_name(filename);
+    if let Some(window) = app.get_webview_window(crate::MAIN) {
+        dialog = dialog.set_parent(&window);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
+        .await
+        .map_err(|_| attachment_file_error("The file chooser was interrupted."))?;
+    let Some(picked) = picked else {
+        return Ok(false);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|_| attachment_file_error("Choose a local file."))?;
+    let target = path.clone();
+    task(app.clone(), move |engine| {
+        let attachment = engine.attachment(id, &part, engine.keep_attachments()?)?;
+        pigeon_core::attachment_files::export_new(&target, &attachment.data).map_err(|_| {
+            MailError::InvalidConfig(
+                "could not save attachment; choose a new writable filename".into(),
+            )
+        })
+    })
+    .await?;
+    if open {
+        use tauri_plugin_opener::OpenerExt;
+        let path = path.to_str().ok_or_else(|| attachment_file_error(
+            "Attachment was saved, but its filename cannot be opened. Open the saved file manually.",
+        ))?;
+        app.opener().open_path(path, None::<&str>).map_err(|_| {
+            attachment_file_error(
+                "Attachment was saved, but could not be opened. Open the saved file manually.",
+            )
+        })?;
+    }
+    Ok(true)
 }
 
 #[tauri::command]

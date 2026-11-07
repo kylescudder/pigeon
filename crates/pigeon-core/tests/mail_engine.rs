@@ -1077,7 +1077,7 @@ fn legacy_header_backfill_preserves_ids_bodies_without_new_arrivals() {
         let UnlockOutcome::Opened { store, .. } = open_store(secrets.as_ref(), &path) else {
             panic!("open")
         };
-        store.connection().execute_batch("ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; DROP TABLE image_trust_hosts; DROP TABLE image_trust; DROP TABLE sender_images; DROP TABLE folder_changes; PRAGMA user_version=12;").unwrap();
+        store.connection().execute_batch("ALTER TABLE messages DROP COLUMN in_reply_to; ALTER TABLE messages DROP COLUMN threading_version; DROP TABLE image_trust_hosts; DROP TABLE image_trust; DROP TABLE sender_images; DROP TABLE folder_changes; DROP INDEX drafts_listing; ALTER TABLE drafts DROP COLUMN draft_to; ALTER TABLE drafts DROP COLUMN draft_cc; ALTER TABLE drafts DROP COLUMN draft_subject; PRAGMA user_version=12;").unwrap();
     }
     let engine = MailEngine::with_connector(path, secrets, Arc::new(ThreadServer));
     assert_eq!(engine.conversation(id, false).unwrap().messages.len(), 1);

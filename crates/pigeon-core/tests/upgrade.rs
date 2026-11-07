@@ -296,7 +296,10 @@ fn restore_keeps_real_drafts_outbox_and_mailbox_work_but_never_runs_them() {
     let state = restored.send_state().unwrap();
     assert_eq!(state.drafts.len(), 1);
     assert_eq!(state.drafts[0].id, saved.id);
-    assert_eq!(state.drafts[0].body, "Draft canary");
+    assert_eq!(
+        restored.load_draft(&state.drafts[0].id).unwrap().body,
+        "Draft canary"
+    );
     let item = state
         .outbox
         .iter()
