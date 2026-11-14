@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "prHourlyLimit": 5,
+  "prBodyNotes": [
+    "If this PR changes `bun.lock` or the Bun version provided by `flake.lock`, run `tools/update-node-modules-hash.sh` and commit both updated hashes in `nix/package.nix`. CI recomputes the hashes before building, so stale cached dependencies cannot pass validation."
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "rangeStrategy": "update-lockfile"
+    },
+    {
+      "matchManagers": ["bun"],
+      "rangeStrategy": "replace"
+    },
+    {
+      "matchManagers": ["npm", "bun"],
+      "matchUpdateTypes": ["pin"],
+      "enabled": false
+    }
+  ],
+  "bun": {
+    "lockFileMaintenance": {
+      "enabled": true
+    }
+  }
+}

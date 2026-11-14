@@ -10,7 +10,9 @@ compute='
 set -e
 git config --global --add safe.directory /repo 2>/dev/null || true
 nixx() { nix --extra-experimental-features "nix-command flakes" "$@"; }
-bun=$(nixx eval --raw /repo#pigeon.nodeModules.nativeBuildInputs --apply "x: toString x")
+# Realise Bun before using its store path on a fresh machine or CI runner.
+bun_drv=$(nixx eval --raw /repo#pigeon.nodeModules.nativeBuildInputs --apply "x: (builtins.head x).drvPath")
+bun=$(nixx build --no-link --print-out-paths "$bun_drv^out")
 for pair in x86_64-linux:x64 aarch64-linux:arm64; do
   d=$(mktemp -d); cp /repo/package.json /repo/bun.lock "$d"/
   (cd "$d" && HOME="$d" "$bun/bin/bun" install --frozen-lockfile --ignore-scripts --no-progress \

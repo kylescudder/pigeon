@@ -22,6 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31
+      - name: Verify frontend dependency hashes
+        run: |
+          tools/update-node-modules-hash.sh
+          if ! git diff --exit-code -- nix/package.nix; then
+            echo 'Dependency hashes are stale. Run tools/update-node-modules-hash.sh and commit nix/package.nix.' >&2
+            exit 1
+          fi
       - name: Flake checks (package, core and keyring tests, frontend, native self-test)
         run: nix flake check -L
       - name: Formatting
