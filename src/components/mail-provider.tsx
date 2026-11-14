@@ -20,6 +20,7 @@ import {
   type MailState,
 } from "../lib/native";
 import { AccountDialog } from "./account-dialog";
+import { AccountPasswordPrompt } from "./account-password-prompt";
 import { Icon } from "./icon";
 
 type MailContextValue = {
@@ -151,6 +152,7 @@ export function MailProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      <AccountPasswordPrompt />
       <AccountDialog
         open={connectOpen}
         onDismiss={() => setConnectOpen(false)}
