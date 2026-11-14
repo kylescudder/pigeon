@@ -315,8 +315,14 @@ test.beforeEach(async ({ page }) => {
               localStorage.setItem("pigeon-test-trust", JSON.stringify(trust));
               return;
             }
-            case "update_mail_password":
+            case "update_mail_password": {
+              if (args.password === "incorrect") throw { code: "authentication", message: "The mail server rejected your sign-in." };
+              const account = state.accounts.find((account: any) => account.id === args.id);
+              account.error = null;
+              account.status = "idle";
+              write(state);
               return;
+            }
             case "send_state":
               return { drafts: (state.drafts ?? []).map(({id, account_id, to, cc, subject, updated}: any) => ({id, account_id, to, cc, subject, updated})), outbox: [], undo_send_seconds: 10 };
             case "load_draft": {
@@ -747,6 +753,7 @@ test("a Home Manager account is read-only apart from its password", async ({ pag
     );
   });
   await page.goto("/");
+  await page.getByRole("button", { name: "Not now", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "bad name!" }).first()).toBeVisible();
   await expect(page.getByText("enter this account’s password to start syncing").first()).toBeVisible();
   await page.getByRole("button", { name: "Manage Personal", exact: true }).click();
@@ -1095,3 +1102,59 @@ for (const folder of ["Trash", "Junk"]) {
     await expect(page.locator(".message-text")).toHaveText("Cached message 1");
   });
 }
+
+
+test.describe("missing account passwords on startup", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      if (localStorage.getItem("pigeon-fixture-state")) return;
+      const accounts = ["Personal", "Work"].map((name, index) => ({
+        id: `missing-${index}`,
+        config: { name, address: `${name.toLowerCase()}@example.test`, host: "imap.example.test", port: 993, username: `${name.toLowerCase()}@example.test`, security: "tls", managed: true },
+        status: "error", error: "enter this account’s password to start syncing",
+        last_synced: null, sync_folder: null, sync_cached: 0, sync_total: 0,
+      }));
+      localStorage.setItem("pigeon-fixture-state", JSON.stringify({ accounts, folders: [], saved_searches: [] }));
+    });
+  });
+
+  test("prompts immediately on any route, retries rejected passwords and advances through accounts", async ({ page }, testInfo) => {
+    await page.goto("/settings");
+    const dialog = page.getByRole("dialog", { name: "Enter account password", exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("personal@example.test");
+    const password = dialog.getByLabel("Password or app password", { exact: true });
+    await expect(password).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath("startup-password-prompt.png") });
+    await password.fill("incorrect");
+    await dialog.getByRole("button", { name: "Save password", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText("rejected your sign-in");
+    await password.fill("fixture-password");
+    await dialog.getByRole("button", { name: "Save password", exact: true }).click();
+    await expect(dialog).toContainText("work@example.test");
+    await expect(password).toHaveValue("");
+    await dialog.getByRole("button", { name: "Not now", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await page.reload();
+    await expect(dialog).toContainText("work@example.test");
+    await password.fill("fixture-password");
+    await dialog.getByRole("button", { name: "Save password", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await page.reload();
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test("does not prompt for unrelated connection errors", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => {
+      const state = JSON.parse(localStorage.getItem("pigeon-fixture-state")!);
+      for (const account of state.accounts) account.error = "The mail server could not be reached.";
+      localStorage.setItem("pigeon-fixture-state", JSON.stringify(state));
+    });
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Your accounts", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Enter account password", exact: true })).not.toBeVisible();
+  });
+});
