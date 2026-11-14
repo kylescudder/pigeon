@@ -165,7 +165,12 @@ bun run tauri dev    # run the desktop app
 nix flake check -L   # package, tests, and native self-test
 ```
 
-After changing `bun.lock`, run `tools/update-node-modules-hash.sh`.
+After changing `bun.lock` (including Renovate updates), run
+`tools/update-node-modules-hash.sh` and commit both updated hashes in
+`nix/package.nix` on the same branch. Do this after changing `flake.lock` if it
+changes the Bun version, too. CI recomputes both hashes before building, so a
+cached dependency output cannot hide stale hashes. Renovate PRs include this
+reminder; hash updates are a maintainer step rather than a hosted Renovate task.
 
 Run `bun run test` for typecheck and the production-build browser suite,
 or `bun run test:e2e` for the browser suite alone. Install Chromium with
