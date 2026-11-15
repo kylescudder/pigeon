@@ -43,9 +43,6 @@ struct ShellState {
     /// Message documents by viewer page, with the remote-content choice they
     /// were built with so the CSP header matches the document.
     viewer_documents: Mutex<HashMap<String, (String, RemoteContent)>>,
-    /// The open viewer window for each message, replaced when it is reopened
-    /// with images loaded.
-    message_viewers: Mutex<HashMap<i64, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -247,18 +244,49 @@ fn open_viewer(app: &AppHandle, page: &str, title: &str) -> Result<String, Strin
         .map_err(|e| e.to_string())?;
     let handle = app.clone();
     let page = page.to_owned();
-    let closed = label.clone();
     window.on_window_event(move |event| {
         if matches!(event, WindowEvent::Destroyed) {
             let state = handle.state::<ShellState>();
             state.viewer_documents.lock().unwrap().remove(&page);
-            state
-                .message_viewers
-                .lock()
-                .unwrap()
-                .retain(|_, label| *label != closed);
         }
     });
+    Ok(label)
+}
+
+/// A native child webview is visually embedded but keeps a separate label/ACL.
+/// Unlike an HTML iframe, Linux can distinguish its native command requests.
+fn open_inline_viewer(
+    app: &AppHandle,
+    page: &str,
+    position: tauri::LogicalPosition<f64>,
+    size: tauri::LogicalSize<f64>,
+) -> Result<String, String> {
+    let label = format!("{VIEWER_PREFIX}{page}");
+    let url =
+        Url::parse(&format!("{VIEWER_SCHEME}://localhost/{page}")).map_err(|e| e.to_string())?;
+    let handle = app.clone();
+    let popup_handle = app.clone();
+    let builder =
+        tauri::webview::WebviewBuilder::new(label.clone(), WebviewUrl::CustomProtocol(url))
+            .on_navigation(move |url| {
+                if url.scheme() == VIEWER_SCHEME {
+                    return true;
+                }
+                if matches!(url.scheme(), "https" | "http" | "mailto") {
+                    let _ = handle.opener().open_url(url.as_str(), None::<&str>);
+                }
+                false
+            })
+            .on_new_window(move |url, _| {
+                if matches!(url.scheme(), "https" | "http" | "mailto") {
+                    let _ = popup_handle.opener().open_url(url.as_str(), None::<&str>);
+                }
+                tauri::webview::NewWindowResponse::Deny
+            });
+    app.get_window(MAIN)
+        .ok_or("Main window unavailable")?
+        .add_child(builder, position, size)
+        .map_err(|e| e.to_string())?;
     Ok(label)
 }
 
@@ -439,6 +467,8 @@ async function attempt(name, cmd, args) {
   await attempt("sync mail", "sync_mail_account", { id: "probe" });
   await attempt("cancel sync", "cancel_mail_sync", { id: "probe" });
   await attempt("unlock mail", "unlock_mail");
+  await attempt("position inline body", "place_mail_body", { page: "fixture", bounds: null });
+  await attempt("close inline body", "close_mail_body", { page: "fixture" });
   await attempt("open mail", "open_mail_message", { id: 1 });
   await attempt("load images", "open_mail_message", { id: 1, loadImages: true });
   await attempt("trusted senders", "trusted_senders");
@@ -504,9 +534,44 @@ fn start_selftest(app: AppHandle) {
         {
             std::thread::sleep(Duration::from_millis(200));
         }
+        // Exercise the exact child context used by the reader, including IPC
+        // attempts with scripts and connections deliberately permitted by the probe.
+        let standalone = state.probe_results.lock().unwrap().take();
+        let child = open_inline_viewer(
+            &app,
+            "probe",
+            tauri::LogicalPosition::new(0.0, 0.0),
+            tauri::LogicalSize::new(800.0, 500.0),
+        );
+        let child_deadline = Instant::now() + Duration::from_secs(30);
+        while child.is_ok()
+            && state.probe_results.lock().unwrap().is_none()
+            && Instant::now() < child_deadline
+        {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let child_results = state.probe_results.lock().unwrap().take();
+        if let Ok(label) = &child
+            && let Some(view) = app.get_webview(label)
+        {
+            let _ = view.close();
+        }
+        *state.probe_results.lock().unwrap() = standalone;
         let inline = run_inline_check(&app, &state);
         let mut checks = tauri::async_runtime::block_on(collect_checks(&app))
             .unwrap_or_else(|e| vec![Check::new("Collect checks", false, e)]);
+        let child_ok = child.is_ok()
+            && child_results.as_ref().is_some_and(|results| {
+                !results.is_empty() && results.iter().all(|result| result.ok)
+            });
+        checks.push(Check::new(
+            "Inline viewer: native command isolation",
+            child_ok,
+            match child {
+                Err(error) => error,
+                Ok(_) => serde_json::to_string(&child_results).unwrap_or_default(),
+            },
+        ));
         if let Err(e) = opened {
             checks.push(Check::new("Open probe viewer", false, e));
         }
@@ -552,7 +617,7 @@ fn run_inline_check(app: &AppHandle, state: &ShellState) -> Result<(), String> {
 /// Prints a redacted sync report and exits. Needs no window, and shares the
 /// normal store and keyring, so it retries exactly what "Sync now" would.
 fn start_sync_diagnostic(app: AppHandle, engine: Arc<MailEngine>) {
-    if let Some(window) = app.get_webview_window(MAIN) {
+    if let Some(window) = app.get_window(MAIN) {
         let _ = window.hide();
     }
     std::thread::spawn(move || {
@@ -594,7 +659,7 @@ fn sync_and_notify(app: &AppHandle, engine: &MailEngine) {
     }
     newest.sort_by_key(|message| std::cmp::Reverse(message.date));
     let looking = app
-        .get_webview_window(MAIN)
+        .get_window(MAIN)
         .is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
     if !looking && let Some(note) = notify::compose(policy, total, &newest) {
         notifier::show(&note);
@@ -710,6 +775,8 @@ pub fn run() {
             mail::update_mail_password,
             mail::unlock_mail,
             mail::open_mail_message,
+            mail::place_mail_body,
+            mail::close_mail_body,
             mail::backup_mail,
             mail::restore_mail,
             mail::queue_mail_actions,

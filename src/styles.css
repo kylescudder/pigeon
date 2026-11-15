@@ -1530,3 +1530,11 @@ h1 {
 .trusted-hosts button:hover {
   color: var(--text);
 }
+
+/* Space for the isolated native email webview. */
+.message-html {
+  display: block;
+  width: 100%;
+  border: 0;
+  height: clamp(280px, 48vh, 520px);
+}

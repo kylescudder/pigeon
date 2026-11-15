@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 const port = Number(process.env.PIGEON_E2E_PORT ?? 1422);
+const recordEvidence = process.env.PIGEON_E2E_EVIDENCE === "1";
 const artifacts = process.env.PIGEON_E2E_ARTIFACTS ?? "evidence/playwright";
 
 export default defineConfig({
@@ -11,12 +12,15 @@ export default defineConfig({
   outputDir: `${artifacts}/results`,
   reporter: [
     ["list"],
+    ...(recordEvidence ? [["json", { outputFile: `${artifacts}/results.json` }] as const] : []),
     ["html", { outputFolder: `${artifacts}/report`, open: "never" }],
   ],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    screenshot: recordEvidence ? "on" : "only-on-failure",
+    // Pace browser input for legible evidence, preserving the recording timing.
+    launchOptions: recordEvidence ? { slowMo: 150 } : {},
   },
   projects: [
     {
@@ -24,6 +28,7 @@ export default defineConfig({
       use: {
         browserName: "chromium",
         viewport: { width: 1440, height: 900 },
+        video: recordEvidence ? { mode: "on", size: { width: 1440, height: 900 } } : "off",
         colorScheme: "dark",
       },
     },
@@ -32,6 +37,7 @@ export default defineConfig({
       use: {
         browserName: "chromium",
         viewport: { width: 1000, height: 1100 },
+        video: recordEvidence ? { mode: "on", size: { width: 1000, height: 1100 } } : "off",
         colorScheme: "light",
       },
     },
@@ -40,6 +46,7 @@ export default defineConfig({
       use: {
         browserName: "chromium",
         viewport: { width: 390, height: 844 },
+        video: recordEvidence ? { mode: "on", size: { width: 390, height: 844 } } : "off",
         colorScheme: "dark",
       },
     },

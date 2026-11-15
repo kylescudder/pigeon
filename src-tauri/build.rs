@@ -29,6 +29,8 @@ fn main() {
             "update_mail_password",
             "unlock_mail",
             "open_mail_message",
+            "place_mail_body",
+            "close_mail_body",
             "backup_mail",
             "restore_mail",
             "queue_mail_actions",
