@@ -223,6 +223,8 @@ export type ImageSource = {
   trusted: boolean;
 };
 export type OpenedMessage = {
+  /** Opaque document handle for a separate unprivileged native webview. */
+  page: string;
   /** Embedded images that could not be downloaded, for example while offline. */
   missing_inline: number;
   /** Remote images that were not loaded. */
@@ -235,13 +237,16 @@ export type OpenedMessage = {
 };
 /** Which remote images to load this time, beyond what is trusted. */
 export type LoadImages = { all?: boolean; sources?: string[] };
-/** Opens the formatted view, replacing any already open for this message. */
+/** Prepares the formatted body without opening a separate window. */
 export const openMailMessage = (id: number, load: LoadImages = {}) =>
   invoke<OpenedMessage>("open_mail_message", {
     id,
     loadImages: load.all ?? false,
     loadSources: load.sources ?? [],
   });
+export type MailBodyBounds = { x: number; y: number; width: number; height: number };
+export const placeMailBody = (page: string, bounds: MailBodyBounds | null) => invoke<void>("place_mail_body", { page, bounds });
+export const closeMailBody = (page: string) => invoke<void>("close_mail_body", { page });
 /** A sender whose remote images load from every source, or chosen hosts. */
 export type TrustedSender = {
   email: string;

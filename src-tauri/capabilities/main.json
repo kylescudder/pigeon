@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Privileged application window. Message viewers are deliberately absent: they get no capabilities at all.",
-  "windows": ["main"],
+  "webviews": ["main"],
   "permissions": [
     "core:default",
     "allow-foundation-report",
@@ -30,6 +30,8 @@
     "allow-update-mail-password",
     "allow-unlock-mail",
     "allow-open-mail-message",
+    "allow-place-mail-body",
+    "allow-close-mail-body",
     "allow-backup-mail",
     "allow-restore-mail",
     "allow-queue-mail-actions",

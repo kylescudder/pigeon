@@ -5,6 +5,7 @@ import { MailGate, useMail } from "../components/mail-provider";
 import { Modal } from "../components/modal";
 import { Icon } from "../components/icon";
 import { useRefreshSend } from "../components/send-state";
+import { FormattedBody } from "../components/formatted-mail-body";
 import { SenderAvatar } from "../components/sender-avatar";
 import {
   handleActionKey,
@@ -18,6 +19,7 @@ import {
   errorMessage,
   exportAttachment,
   openMailMessage,
+  closeMailBody,
   type LoadImages,
   type OpenedMessage,
   replyToMessage,
@@ -98,6 +100,10 @@ function Mailbox({
   const [selected, setSelected] = useState<number | null>(null);
   const [checked, setChecked] = useState(new Set<number>());
   const [anchor, setAnchor] = useState<number | null>(null);
+  const currentSelection = useRef(selected);
+  currentSelection.current = selected;
+  useEffect(() => () => { currentSelection.current = null; }, []);
+  const formatGeneration = useRef(0);
   const markedRead = useRef(new Set<number>());
   const [saveOpen, setSaveOpen] = useState(false);
   const [searchName, setSearchName] = useState("");
@@ -148,7 +154,9 @@ function Mailbox({
   const openMessage = (id: number) => {
     setSelected(id);
     setConversationId(id);
+    formattedFor.current = null;
     formatted.reset();
+    trust.reset();
   };
   const detail = useQuery({
     queryKey: ["mail", "message", selected],
@@ -163,11 +171,23 @@ function Mailbox({
   // Results carry the message they are for, so a note about remote images
   // never shows against a different message.
   const formatted = useMutation({
-    mutationFn: async (load: LoadImages) => ({
-      ...(await openMailMessage(selected!, load)),
-      id: selected!,
-    }),
+    onSuccess: (result) => {
+      if (result.id !== currentSelection.current || result.generation !== formatGeneration.current) void closeMailBody(result.page);
+    },
+    mutationFn: async (load: LoadImages) => {
+      const generation = ++formatGeneration.current;
+      const id = selected!;
+      return { ...(await openMailMessage(id, load)), id, generation };
+    },
   });
+  const formattedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (selected === null) formattedFor.current = null;
+    if (detail.data?.summary.id === selected && detail.data?.has_html && formattedFor.current !== selected) {
+      formattedFor.current = selected;
+      formatted.mutate({});
+    }
+  }, [selected, detail.data?.summary.id, detail.data?.has_html, formatted.isIdle]);
   /** Sources loaded this once and not trusted, kept when the view reopens. */
   const onceLoaded = () =>
     formatted.data?.id === selected
@@ -176,8 +196,9 @@ function Mailbox({
           .map((source) => source.host)
       : [];
   const trust = useMutation({
-    mutationFn: (sources?: string[]) => trustSender(selected!, sources),
-    onSuccess: () => {
+    mutationFn: async (sources?: string[]) => ({ sender: await trustSender(selected!, sources), id: selected! }),
+    onSuccess: (result) => {
+      if (result.id !== currentSelection.current) return;
       void queryClient.invalidateQueries({ queryKey: ["mail", "trusted-senders"] });
       formatted.mutate({ sources: onceLoaded() });
     },
@@ -717,7 +738,7 @@ function Mailbox({
                 contextError={context.error}
                 incomplete={context.data?.incomplete ?? false}
                 onRetry={() => void context.refetch()}
-                onSelect={(id) => { setSelected(id); formatted.reset(); trust.reset(); }}
+                onSelect={(id) => { formattedFor.current = null; setSelected(id); formatted.reset(); trust.reset(); }}
                 actions={reader}
                 onBack={() => setSelected(null)}
                 onFormatted={() => formatted.mutate({})}
@@ -870,7 +891,6 @@ function ConversationReader(props: MessageReaderProps & {
           <div id={`thread-body-${member.id}`} className="thread-body" tabIndex={0} role="region" aria-label={`Message from ${name}`}>
             <div className="thread-message-tools">
               {message.summary.sender !== senderName(message.summary.sender) && <span>{message.summary.sender}</span>}
-              {message.has_html && <button type="button" className="button button-quiet" onClick={props.onFormatted} disabled={props.formattedPending}>{props.formattedPending ? "Opening…" : "Open formatted view"}</button>}
               <details className="thread-action-menu">
                 <summary>Message actions</summary>
                 <div className="thread-action-popover"><MessageActionButtons actions={actions} /></div>
@@ -937,19 +957,9 @@ function MessageReader({
           <Icon name="chevron" size={14} className="chevron-back" />
           Messages
         </button>
-        {message.has_html && (
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={onFormatted}
-            disabled={formattedPending}
-          >
-            {formattedPending ? "Opening…" : "Open formatted view"}
-          </button>
-        )}
         <ReplyButtons messageId={message.summary.id} />
         <MessageActionButtons actions={actions} compact />
-        <span>Plain text</span>
+        {!message.has_html && <span>Plain text</span>}
       </div>}
       <div className="reader-content">
         {!embedded && <h2>{message.summary.subject || "(No subject)"}</h2>}
@@ -969,7 +979,8 @@ function MessageReader({
         }
         {formattedError != null && (
           <p role="alert" className="mail-inline-error">
-            {errorMessage(formattedError)}
+            Could not display formatted email. {errorMessage(formattedError)}{" "}
+            <button type="button" className="button button-quiet" onClick={onFormatted} disabled={formattedPending}>Try again</button>
           </p>
         )}
         {missingInline > 0 && (
@@ -977,7 +988,7 @@ function MessageReader({
             {missingInline === 1
               ? "1 embedded image"
               : `${missingInline} embedded images`}{" "}
-            could not be downloaded, so the formatted view shows{" "}
+            could not be downloaded, so this email shows{" "}
             {missingInline === 1 ? "its" : "their"} description instead.
             Reconnect and open it again to try once more.
           </p>
@@ -1000,7 +1011,7 @@ function MessageReader({
                 onClick={() => finish(() => onLoadImages())}
                 disabled={formattedPending}
               >
-                Load all images
+                Show images
               </button>
               {opened?.sender && (
                 <button
@@ -1077,9 +1088,16 @@ function MessageReader({
             </Link>
           </p>
         )}
-        <div className="message-text">
-          {message.body_text || "This message has no text body."}
-        </div>
+        {message.has_html && opened ? (
+          <FormattedBody key={opened.page} page={opened.page} onRetry={onFormatted} text={message.body_text} />
+        ) : (
+          <>
+            {message.has_html && formattedPending && <p role="status">Loading email…</p>}
+            <div className="message-text">
+              {message.body_text || "This message has no text body."}
+            </div>
+          </>
+        )}
         {!!message.attachments.length && (
           <section className="message-attachments">
             <h3>

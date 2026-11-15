@@ -279,7 +279,33 @@ test.beforeEach(async ({ page }) => {
             case "unlock_mail":
               localStorage.removeItem("pigeon-test-locked");
               return;
+            // Model the native child at the IPC boundary. Production uses an
+            // independent native webview; no iframe or email HTML enters the app DOM.
+            case "place_mail_body": {
+              let frame = document.getElementById(args.page) as HTMLIFrameElement | null;
+              if (!args.bounds) { if (frame) frame.style.display = "none"; return; }
+              if (!frame) {
+                frame = document.createElement("iframe");
+                frame.id = args.page;
+                frame.title = "Email content";
+                frame.sandbox.add("allow-same-origin");
+                frame.srcdoc = localStorage.getItem(args.page)!;
+                frame.onload = () => frame!.contentDocument!.addEventListener("click", event => {
+                  const link = (event.target as Element)?.closest("a");
+                  if (link) { event.preventDefault(); localStorage.setItem("pigeon-test-opened-link", link.href); }
+                });
+                document.body.appendChild(frame);
+              }
+              Object.assign(frame.style, { position: "fixed", display: "block", border: "0", zIndex: "10", left: `${args.bounds.x}px`, top: `${args.bounds.y}px`, width: `${args.bounds.width}px`, height: `${args.bounds.height}px` });
+              return;
+            }
+            case "close_mail_body":
+              document.getElementById(args.page)?.remove();
+              localStorage.removeItem(args.page);
+              return;
             case "open_mail_message": {
+              if (localStorage.getItem("pigeon-test-format-error")) throw { message: "Email could not be prepared." };
+              if (localStorage.getItem("pigeon-test-format-delay")) await new Promise(resolve => setTimeout(resolve, 600));
               // Message 2 models opening while its embedded image is unreachable.
               // Every message has three remote images from two hosts, from news@example.test.
               const trust = JSON.parse(localStorage.getItem("pigeon-test-trust") ?? "{}");
@@ -293,7 +319,21 @@ test.beforeEach(async ({ page }) => {
                 return { host, images, trusted: isTrusted, loaded: everything || isTrusted || args.loadSources.includes(host) };
               });
               const blocked = sources.filter((source) => !source.loaded).reduce((sum, source) => sum + (source.images as number), 0);
-              return { missing_inline: args.id === 2 ? 1 : 0, blocked_remote: blocked, sources, sender, trusted: trusted.all };
+              const allowed = sources.filter(s => s.loaded).map(s => `https://${s.host}`).join(" ");
+              const html = `<!doctype html><html><head>
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: ${allowed}; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
+                <style>body{font-family:system-ui,sans-serif;margin:1rem;overflow-wrap:anywhere}img{max-width:100%}</style>
+                </head><body><h2>Release planning</h2><p>The delivery plan is ready.</p>
+                <p><strong>Launch review</strong> is scheduled for Thursday.</p>
+                <a href="https://example.test/plan">Read the plan</a>
+                <img alt="Embedded logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==">
+                ${sources.map(source => `<img alt="${source.host}" ${source.loaded ? `src="https://${source.host}/image.png"` : ""}>`).join("")}
+                <!-- Deliberately unsanitised probes: even a sanitiser miss must not execute. -->
+                <script>parent.mailInjected=true</script><img src="bad:" onerror="parent.mailInjected=true">
+                </body></html>`;
+              const documentPage = `test-mail-body-${crypto.randomUUID()}`;
+              localStorage.setItem(documentPage, html);
+              return { page: documentPage, missing_inline: args.id === 2 ? 1 : 0, blocked_remote: blocked, sources, sender, trusted: trusted.all };
             }
             case "trusted_senders": {
               const trust = JSON.parse(localStorage.getItem("pigeon-test-trust") ?? "{}");
@@ -637,9 +677,8 @@ test("formatted view reports embedded images it could not download", async ({ pa
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-fixture-state")!).exports)).toEqual([
     { id: 2, part: "2", open: false }, { id: 2, part: "2", open: false }, { id: 2, part: "2", open: true },
   ]);
-  await page.getByRole("button", { name: "Open formatted view", exact: true }).click();
   await expect(page.getByText(/could not be downloaded/)).toHaveText(
-    "1 embedded image could not be downloaded, so the formatted view shows its description instead. Reconnect and open it again to try once more.",
+    "1 embedded image could not be downloaded, so this email shows its description instead. Reconnect and open it again to try once more.",
   );
   await attachment.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("missing-embedded-image.png") });
@@ -651,6 +690,99 @@ test("formatted view reports embedded images it could not download", async ({ pa
   await expect(page.getByText(/could not be downloaded/)).toHaveCount(0);
 });
 
+async function seedReader(page: Page) {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("pigeon-fixture-state")) localStorage.setItem("pigeon-fixture-state", JSON.stringify({
+      accounts: [{ id: "acc-1", config: { name: "Personal", address: "mail@example.test", host: "imap.example.test", port: 993, username: "mail@example.test", security: "tls" }, status: "idle", error: null, last_synced: 1793008800, sync_folder: null, sync_cached: 2, sync_total: 2 }],
+      folders: [{ id: "folder-1", account_id: "acc-1", name: "INBOX", kind: "inbox", total: 2, cached: 2, unread: 1 }], saved_searches: [],
+    }));
+  });
+}
+
+test("emails display formatted content inline and only fetch remote images after consent", async ({ page }, testInfo) => {
+  await seedReader(page);
+  const requests: string[] = [];
+  await page.route(/^https:\/\/(tracker\.example|cdn\.news\.example)\//, async route => {
+    requests.push(route.request().url());
+    await route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64") });
+  });
+  await page.goto("/mail");
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  const content = page.frameLocator('iframe[title="Email content"]');
+  await expect(content.getByText("Launch review")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open formatted view" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toBeVisible();
+  await expect(content.getByAltText("Embedded logo")).toBeVisible();
+  expect(requests).toEqual([]);
+  expect(await page.evaluate(() => (window as any).mailInjected)).toBeUndefined();
+  await expect(page.locator("iframe")).toHaveAttribute("sandbox", "allow-same-origin");
+  const inline_email_blocked = testInfo.outputPath("inline-email-blocked.png");
+  await page.screenshot({ path: inline_email_blocked });
+  await testInfo.attach("inline-email-blocked", { path: inline_email_blocked, contentType: "image/png" });
+  // The native child must not cover app dialogs, and returns when they close.
+  await page.getByRole("button", { name: "Search commands", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator('iframe[title="Email content"]')).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(page.locator('iframe[title="Email content"]')).toBeVisible();
+  await content.getByRole("link", { name: "Read the plan" }).click();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("pigeon-test-opened-link"))).toBe("https://example.test/plan");
+  await expect(content.getByText("Launch review")).toBeVisible();
+  await page.getByRole("button", { name: "Show images", exact: true }).click();
+  await expect.poll(() => requests.length).toBe(2);
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toHaveCount(0);
+  await expect(content.getByAltText("tracker.example")).toBeVisible();
+  expect(page.context().pages()).toHaveLength(1);
+  const inline_email_images_shown = testInfo.outputPath("inline-email-images-shown.png");
+  await page.screenshot({ path: inline_email_images_shown });
+  await testInfo.attach("inline-email-images-shown", { path: inline_email_images_shown, contentType: "image/png" });
+  // Consent applies to this opening; reopening blocks the sources again.
+  await page.reload();
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toBeVisible();
+  expect(requests).toHaveLength(2);
+  // Re-selecting the open row prepares the body again, including cached details.
+  const back = page.getByRole("button", { name: "Messages", exact: true });
+  if (await back.isVisible()) await back.click();
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await expect(content.getByText("Launch review")).toBeVisible();
+  await expect(page.locator('iframe[title="Email content"]')).toHaveCount(1);
+});
+
+test("formatted email failures retain readable text and can be retried", async ({ page }, testInfo) => {
+  await seedReader(page);
+  await page.addInitScript(() => localStorage.setItem("pigeon-test-format-error", "on"));
+  await page.goto("/mail");
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Could not display formatted email" })).toContainText("Email could not be prepared.");
+  await expect(page.locator(".message-text")).toHaveText("The delivery plan is ready.");
+  const failed = testInfo.outputPath("formatted-email-failed.png");
+  await page.screenshot({ path: failed });
+  await testInfo.attach("formatted-email-failed", { path: failed, contentType: "image/png" });
+  await page.evaluate(() => localStorage.removeItem("pigeon-test-format-error"));
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.frameLocator('iframe[title="Email content"]').getByText("Launch review")).toBeVisible();
+  const recovered = testInfo.outputPath("formatted-email-recovered.png");
+  await page.screenshot({ path: recovered });
+  await testInfo.attach("formatted-email-recovered", { path: recovered, contentType: "image/png" });
+});
+
+test("switching messages while formatting never puts HTML or image controls on a plain email", async ({ page }) => {
+  await seedReader(page);
+  await page.addInitScript(() => localStorage.setItem("pigeon-test-format-delay", "on"));
+  await page.goto("/mail");
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await expect(page.getByText("Loading email…")).toBeVisible();
+  const back = page.getByRole("button", { name: "Messages", exact: true });
+  if (await back.isVisible()) await back.click();
+  await page.getByRole("button", { name: /Invoice 4471/ }).click();
+  await expect(page.locator(".message-text")).toContainText("Please find the café receipt.");
+  // Wait for the other IPC request to settle, using its recorded completion.
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-test-opens") ?? "[]").length)).toBe(1);
+  await expect(page.locator('iframe[title="Email content"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toHaveCount(0);
+});
+
 test("remote images load all, chosen sources, or from trusted senders", async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     if (!localStorage.getItem("pigeon-fixture-state")) localStorage.setItem("pigeon-fixture-state", JSON.stringify({
@@ -660,8 +792,10 @@ test("remote images load all, chosen sources, or from trusted senders", async ({
   });
   await page.goto("/mail");
   await page.getByRole("button", { name: /Release planning/ }).click();
-  const open = page.getByRole("button", { name: "Open formatted view", exact: true });
-  await open.click();
+  const reopen = async () => {
+    await page.reload();
+    await page.getByRole("button", { name: /Release planning/ }).click();
+  };
   const note = page.getByText(/remote images? from/);
   await expect(note).toHaveText(
     "3 remote images from 2 sources were not loaded. Loading images tells those servers that you opened this message.",
@@ -689,15 +823,15 @@ test("remote images load all, chosen sources, or from trusted senders", async ({
   await expect(page.getByText("From news@example.test, images from tracker.example always load.")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("remote-images-trusted-source.png") });
 
-  // Reopening loads only the trusted source; Load all images is this once.
-  await open.click();
+  // Reopening loads only the trusted source; Show images is this once.
+  await reopen();
   await expect(note).toHaveText(/^2 remote images from 1 source were not loaded/);
-  await page.getByRole("button", { name: "Load all images", exact: true }).click();
+  await page.getByRole("button", { name: "Show images", exact: true }).click();
   await expect(note).toHaveCount(0);
   expect((await opens()).at(-1)).toMatchObject({ loadImages: true });
 
   // Always load all replaces the chosen sources.
-  await open.click();
+  await reopen();
   await page.getByRole("button", { name: "Always load all from news@example.test" }).click();
   await expect(page.getByText("Images from news@example.test always load.")).toBeVisible();
 
@@ -724,7 +858,6 @@ test("remote images load all, chosen sources, or from trusted senders", async ({
   await expect(choice.getByRole("button", { name: "Always load" })).toHaveAttribute("aria-pressed", "true");
   await page.goto("/mail");
   await page.getByRole("button", { name: /Release planning/ }).click();
-  await page.getByRole("button", { name: "Open formatted view", exact: true }).click();
   await expect(page.getByText(/remote images? from/)).toHaveCount(0);
 });
 
@@ -971,7 +1104,7 @@ test("conversations expose offline context, preserve flat search and isolate mes
   await page.reload();
   await page.locator(".message-row-open").click();
   await expect(context.getByRole("alert")).toContainText("Message no longer cached");
-  await expect(page.locator(".message-text")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Email content", exact: true })).toBeVisible();
 });
 
 test("long conversations keep the open body visible and earlier and later messages reachable", async ({page}, testInfo) => {

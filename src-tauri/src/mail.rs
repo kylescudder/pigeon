@@ -97,14 +97,13 @@ async fn task<T: Send + 'static>(
         // Do not leave decrypted message windows visible after store access is lost.
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
-            for (label, window) in handle.webview_windows() {
+            for (label, window) in handle.webviews() {
                 if label.starts_with(crate::VIEWER_PREFIX) {
                     let _ = window.close();
                 }
             }
             let state = handle.state::<crate::ShellState>();
             state.viewer_documents.lock().unwrap().clear();
-            state.message_viewers.lock().unwrap().clear();
         });
     }
     result.map_err(Into::into)
@@ -333,6 +332,8 @@ pub async fn unlock_mail(app: AppHandle, webview: tauri::Webview) -> Result<(), 
 
 #[derive(Serialize)]
 pub struct OpenedMessage {
+    /// Opaque handle; email HTML never enters the privileged application webview.
+    page: String,
     /// Embedded images that could not be downloaded, such as while offline.
     missing_inline: u32,
     /// Remote images that were not loaded.
@@ -345,10 +346,9 @@ pub struct OpenedMessage {
     trusted: bool,
 }
 
-/// Opens a message's formatted view. Remote images load when asked for (all
+/// Prepares a message's inline formatted body. Remote images load when asked for (all
 /// of them, or from `load_sources`), when the user's setting loads them
-/// everywhere, or as far as the sender is trusted. Reopening a message
-/// replaces its viewer window.
+/// everywhere, or as far as the sender is trusted. No separate window is opened.
 #[tauri::command]
 pub async fn open_mail_message(
     app: AppHandle,
@@ -378,13 +378,6 @@ pub async fn open_mail_message(
         engine.viewer_document(id, load_remote)
     })
     .await?;
-    let opened = OpenedMessage {
-        missing_inline: document.missing_inline,
-        blocked_remote: document.blocked_remote,
-        sources: document.sources,
-        sender: document.sender,
-        trusted: document.trusted,
-    };
     let token = app
         .state::<crate::ShellState>()
         .viewer_count
@@ -395,45 +388,14 @@ pub async fn open_mail_message(
         .lock()
         .unwrap()
         .insert(page.clone(), (document.html, document.remote));
-    tauri::async_runtime::spawn_blocking(move || {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let handle = app.clone();
-        app.run_on_main_thread(move || {
-            let state = handle.state::<crate::ShellState>();
-            let previous = state.message_viewers.lock().unwrap().remove(&id);
-            if let Some(window) = previous.and_then(|label| handle.get_webview_window(&label)) {
-                let _ = window.close();
-            }
-            let opened = crate::open_viewer(&handle, &page, "Message · Pigeon");
-            if let Ok(label) = &opened {
-                state
-                    .message_viewers
-                    .lock()
-                    .unwrap()
-                    .insert(id, label.clone());
-            }
-            let _ = tx.send(opened);
-        })
-        .map_err(|error| MailApiError {
-            code: "viewer",
-            message: error.to_string(),
-        })?;
-        rx.recv_timeout(std::time::Duration::from_secs(10))
-            .map_err(|_| MailApiError {
-                code: "viewer",
-                message: "The message viewer did not open. Try again.".into(),
-            })?
-            .map_err(|message| MailApiError {
-                code: "viewer",
-                message,
-            })
+    Ok(OpenedMessage {
+        page,
+        missing_inline: document.missing_inline,
+        blocked_remote: document.blocked_remote,
+        sources: document.sources,
+        sender: document.sender,
+        trusted: document.trusted,
     })
-    .await
-    .map_err(|_| MailApiError {
-        code: "viewer",
-        message: "The message viewer was interrupted.".into(),
-    })??;
-    Ok(opened)
 }
 
 /// Queues a change and starts applying it in the background. Returns how many
@@ -673,7 +635,7 @@ async fn choose_file(app: &AppHandle, save: bool) -> Result<Option<PathBuf>, Mai
         .dialog()
         .file()
         .add_filter("Pigeon backup", &[backup::FILE_EXTENSION]);
-    if let Some(window) = app.get_webview_window(crate::MAIN) {
+    if let Some(window) = app.get_window(crate::MAIN) {
         dialog = dialog.set_parent(&window);
     }
     let picked = tauri::async_runtime::spawn_blocking(move || {
@@ -724,7 +686,7 @@ pub async fn pick_draft_attachment(
         .dialog()
         .file()
         .set_title("Attach file (20 MiB total maximum)");
-    if let Some(window) = app.get_webview_window(crate::MAIN) {
+    if let Some(window) = app.get_window(crate::MAIN) {
         dialog = dialog.set_parent(&window);
     }
     let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file())
@@ -784,7 +746,7 @@ pub async fn export_attachment(
         .file()
         .set_title("Save attachment outside encrypted storage (choose a new file)")
         .set_file_name(filename);
-    if let Some(window) = app.get_webview_window(crate::MAIN) {
+    if let Some(window) = app.get_window(crate::MAIN) {
         dialog = dialog.set_parent(&window);
     }
     let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
@@ -829,4 +791,79 @@ pub async fn change_mail_folder(
 ) -> Result<(), MailApiError> {
     guard(&webview)?;
     task(app, move |engine| engine.change_folder(&id, change)).await
+}
+
+/// Positions a separately unprivileged webview inside the reader. No message
+/// markup is ever inserted into the main webview (Linux shares iframe ACLs).
+#[derive(serde::Deserialize)]
+pub struct BodyBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[tauri::command]
+pub async fn place_mail_body(
+    app: AppHandle,
+    webview: tauri::Webview,
+    page: String,
+    bounds: Option<BodyBounds>,
+) -> Result<(), String> {
+    crate::require_main(&webview)?;
+    if !app
+        .state::<crate::ShellState>()
+        .viewer_documents
+        .lock()
+        .unwrap()
+        .contains_key(&page)
+    {
+        return Err("Email content is no longer available. Reopen the message.".into());
+    }
+    let label = format!("{}{}", crate::VIEWER_PREFIX, page);
+    if bounds.is_none() {
+        if let Some(view) = app.get_webview(&label) {
+            view.hide().map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+    let bounds = bounds.unwrap();
+    if ![bounds.x, bounds.y, bounds.width, bounds.height]
+        .iter()
+        .all(|n| n.is_finite())
+        || bounds.width <= 0.0
+        || bounds.height <= 0.0
+    {
+        return Err("Invalid email content bounds.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let position = tauri::LogicalPosition::new(bounds.x, bounds.y);
+        let size = tauri::LogicalSize::new(bounds.width, bounds.height);
+        if let Some(view) = app.get_webview(&label) {
+            view.set_position(position).map_err(|e| e.to_string())?;
+            view.set_size(size).map_err(|e| e.to_string())?;
+            return view.show().map_err(|e| e.to_string());
+        }
+        crate::open_inline_viewer(&app, &page, position, size).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn close_mail_body(
+    app: AppHandle,
+    webview: tauri::Webview,
+    page: String,
+) -> Result<(), String> {
+    crate::require_main(&webview)?;
+    app.state::<crate::ShellState>()
+        .viewer_documents
+        .lock()
+        .unwrap()
+        .remove(&page);
+    if let Some(view) = app.get_webview(&format!("{}{}", crate::VIEWER_PREFIX, page)) {
+        view.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
