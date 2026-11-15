@@ -887,8 +887,10 @@ function ConversationReader(props: MessageReaderProps & {
           </span>
           <Icon name="chevron" size={13} className={active && !collapsed ? "thread-chevron-open" : undefined} />
         </button>
-        {active && !collapsed && (
-          <div id={`thread-body-${member.id}`} className="thread-body" tabIndex={0} role="region" aria-label={`Message from ${name}`}>
+        {/* Keep the active body alive while collapsed: unmounting releases its
+            native document handle, including this opening's image consent. */}
+        {active && (
+          <div id={`thread-body-${member.id}`} className="thread-body" hidden={collapsed} tabIndex={0} role="region" aria-label={`Message from ${name}`}>
             <div className="thread-message-tools">
               {message.summary.sender !== senderName(message.summary.sender) && <span>{message.summary.sender}</span>}
               <details className="thread-action-menu">

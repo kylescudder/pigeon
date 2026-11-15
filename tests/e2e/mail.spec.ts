@@ -767,6 +767,63 @@ test("formatted email failures retain readable text and can be retried", async (
   await testInfo.attach("formatted-email-recovered", { path: recovered, contentType: "image/png" });
 });
 
+test("collapsing a formatted message preserves its body and image consent until leaving", async ({ page }, testInfo) => {
+  await seedReader(page);
+  await page.route(/^https:\/\/(tracker\.example|cdn\.news\.example)\//, route => route.fulfill({
+    contentType: "image/png",
+    body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64"),
+  }));
+  await page.goto("/mail");
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  const heading = page.getByRole("button", { name: "Read message from Bob", exact: true });
+  const frame = page.locator('iframe[title="Email content"]');
+  const content = page.frameLocator('iframe[title="Email content"]');
+  await expect(content.getByText("Launch review")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toBeVisible();
+
+  const cycle = async () => {
+    await heading.click();
+    await expect(heading).toHaveAttribute("aria-expanded", "false");
+    await expect(frame).toBeHidden();
+    await heading.click();
+    await expect(heading).toHaveAttribute("aria-expanded", "true");
+    await expect(content.getByText("Launch review")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again", exact: true })).toHaveCount(0);
+  };
+  await cycle();
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toBeVisible();
+  const restored = testInfo.outputPath("expanded-formatted-message.png");
+  await page.screenshot({ path: restored });
+  await testInfo.attach("expanded-formatted-message", { path: restored, contentType: "image/png" });
+
+  await page.getByRole("button", { name: "Show images", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toHaveCount(0);
+  await expect(content.getByAltText("tracker.example")).toBeVisible();
+  await heading.click();
+  await expect(heading).toHaveAttribute("aria-expanded", "false");
+  await expect(frame).toBeHidden();
+  const collapsed = testInfo.outputPath("collapsed-formatted-message.png");
+  await page.screenshot({ path: collapsed });
+  await testInfo.attach("collapsed-formatted-message", { path: collapsed, contentType: "image/png" });
+  await heading.click();
+  await expect(content.getByText("Launch review")).toBeVisible();
+  await cycle();
+  await expect(page.getByRole("button", { name: "Show images", exact: true })).toHaveCount(0);
+  await expect(content.getByAltText("tracker.example")).toBeVisible();
+  // Expanding reuses the opening, including its once-only consent.
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("pigeon-test-opens") ?? "[]").length)).toBe(2);
+  const consent = testInfo.outputPath("expanded-image-consent-preserved.png");
+  await page.screenshot({ path: consent });
+  await testInfo.attach("expanded-image-consent-preserved", { path: consent, contentType: "image/png" });
+
+  const back = page.getByRole("button", { name: "Messages", exact: true });
+  if (await back.isVisible()) await back.click();
+  await page.getByRole("button", { name: /Invoice 4471/ }).click();
+  await expect(page.locator(".message-text")).toContainText("Please find the café receipt.");
+  await expect(frame).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("test-mail-body-")).length)).toBe(0);
+});
+
 test("switching messages while formatting never puts HTML or image controls on a plain email", async ({ page }) => {
   await seedReader(page);
   await page.addInitScript(() => localStorage.setItem("pigeon-test-format-delay", "on"));
@@ -1088,7 +1145,10 @@ test("conversations expose offline context, preserve flat search and isolate mes
   await context.getByRole("button", {name: "Read message from Me", exact:true}).click();
   await expect(page.locator(".thread-message-active")).toContainText("Sent");
   await context.getByRole("button", {name: "Read message from Me", exact:true}).click();
-  await expect(page.locator(".message-text")).toHaveCount(0);
+  await expect(page.locator(".message-text")).toBeHidden();
+  const collapsed = testInfo.outputPath("conversation-collapsed.png");
+  await page.screenshot({ path: collapsed });
+  await testInfo.attach("conversation-collapsed", { path: collapsed, contentType: "image/png" });
   await context.getByRole("button", {name: "Read message from Alice", exact:true}).click();
   await expect(page.locator(".message-text")).toContainText("café receipt");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
