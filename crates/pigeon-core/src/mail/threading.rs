@@ -172,10 +172,15 @@ impl MailEngine {
             let account: String = db.query_row("SELECT account FROM messages WHERE id=?1", [id], |r| r.get(0)).map_err(|_| MailError::NotFound)?;
             let graph = graph(db, true, Some(&account))?;
             let key = graph.roots.get(&id).ok_or(MailError::NotFound)?;
-            let sql = format!("SELECT {SUMMARY} FROM messages m JOIN mail_folders f ON f.account=m.account AND f.name=m.folder WHERE m.account=(SELECT account FROM messages WHERE id=?1) AND {VISIBLE} AND (?2 OR f.kind NOT IN ('junk','trash')) ORDER BY m.date,m.id");
-            let messages = db.prepare(&sql).map_err(storage_error)?.query_map(rusqlite::params![id, include_junk_trash], summary).map_err(storage_error)?
-                .collect::<rusqlite::Result<Vec<_>>>().map_err(storage_error)?
-                .into_iter().filter(|m| graph.roots.get(&m.id) == Some(key)).collect();
+            // Restrict wide rows (including body previews) before reading them.
+            // Scanning every account body here also blocks the reader's body
+            // request on the store mutex.
+            let members: Vec<i64> = graph.roots.iter()
+                .filter_map(|(id, root)| (root == key).then_some(*id)).collect();
+            let members = serde_json::to_string(&members).map_err(|_| MailError::Protocol)?;
+            let sql = format!("SELECT {SUMMARY} FROM messages m JOIN mail_folders f ON f.account=m.account AND f.name=m.folder WHERE m.id IN (SELECT value FROM json_each(?1)) AND {VISIBLE} AND (?2 OR f.kind NOT IN ('junk','trash')) ORDER BY m.date,m.id");
+            let messages = db.prepare(&sql).map_err(storage_error)?.query_map(rusqlite::params![members, include_junk_trash], summary).map_err(storage_error)?
+                .collect::<rusqlite::Result<Vec<_>>>().map_err(storage_error)?;
             Ok(Conversation { messages, incomplete: graph.incomplete.contains(key) })
         })
     }

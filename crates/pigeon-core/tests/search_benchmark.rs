@@ -352,3 +352,60 @@ fn managing_a_100k_message_folder_leaves_other_views_responsive() {
     assert_eq!(matches("Renamed"), 0);
     assert!(delete_wait < Duration::from_millis(250), "{delete_wait:?}");
 }
+
+#[test]
+#[ignore = "explicit encrypted-cache reader performance gate; run with --ignored --nocapture"]
+fn opening_a_cached_message_with_conversation_context_stays_under_200_ms() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mail.db");
+    let secrets = Arc::new(MemoryStore::new(KeyringState::Unlocked));
+    let engine = MailEngine::with_connector(path.clone(), secrets.clone(), Arc::new(Corpus));
+    let account = engine
+        .add_account(
+            AccountConfig {
+                managed: false,
+                name: "Reader benchmark".into(),
+                address: "reader@example.test".into(),
+                host: "imap.example.test".into(),
+                port: 993,
+                username: "reader@example.test".into(),
+                security: TransportSecurity::Tls,
+                ca_certificate: None,
+                sending: Default::default(),
+            },
+            Secret::new(b"benchmark-only".to_vec()),
+        )
+        .unwrap();
+    engine.sync_account(&account.id).unwrap();
+    let id = engine.search(&SearchQuery::default()).unwrap().messages[0].id;
+    drop(engine);
+    // Large unrelated bodies must not be read to display one conversation.
+    // Seed outside the timed interval through the encrypted store.
+    {
+        use pigeon_core::unlock::{UnlockOutcome, open_store};
+        let UnlockOutcome::Opened { store, .. } = open_store(secrets.as_ref(), &path) else {
+            panic!("open")
+        };
+        store
+            .connection()
+            .execute(
+                "UPDATE messages SET body_text=?1",
+                ["Unrelated cached body. ".repeat(1500)],
+            )
+            .unwrap();
+    }
+    let engine = MailEngine::with_connector(path, secrets, Arc::new(Corpus));
+    engine.message(id).unwrap(); // exclude connection/key derivation
+    let start = Instant::now();
+    let context = engine.conversation(id, false).unwrap();
+    assert_eq!(context.messages.len(), 1);
+    assert_eq!(context.messages[0].id, id);
+    let message = engine.message(id).unwrap();
+    assert_eq!(message.summary.id, id);
+    let elapsed = start.elapsed();
+    eprintln!("Open cached message + context, 25000 messages, 33KB bodies: {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "cached reader blocked for {elapsed:?}"
+    );
+}
