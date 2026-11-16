@@ -19,7 +19,7 @@ imap-proto = "0.10"
 chrono = "0.4"
 native-tls = "0.2"
 mailparse = "0.17"
-html2text = "0.16"
+html2text = "0.17"
 serde_json = "1"
 base64 = "0.22"
 mail-builder = { version = "0.4", default-features = false }
