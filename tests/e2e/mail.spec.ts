@@ -1141,7 +1141,9 @@ test("conversations expose offline context, preserve flat search and isolate mes
   const body = await page.locator(".message-text").boundingBox();
   expect(body).not.toBeNull();
   expect(body!.y + 25).toBeLessThan(testInfo.project.use.viewport!.height);
-  await page.screenshot({path: testInfo.outputPath("conversation-offline.png")});
+  const offlineScreenshot = testInfo.outputPath("conversation-offline.png");
+  await page.screenshot({path: offlineScreenshot});
+  await testInfo.attach("Opened cached conversation", {path: offlineScreenshot, contentType: "image/png"});
   await context.getByRole("button", {name: "Read message from Me", exact:true}).click();
   await expect(page.locator(".thread-message-active")).toContainText("Sent");
   await context.getByRole("button", {name: "Read message from Me", exact:true}).click();
@@ -1165,6 +1167,9 @@ test("conversations expose offline context, preserve flat search and isolate mes
   await page.locator(".message-row-open").click();
   await expect(context.getByRole("alert")).toContainText("Message no longer cached");
   await expect(page.getByRole("region", { name: "Email content", exact: true })).toBeVisible();
+  const unavailableScreenshot = testInfo.outputPath("context-unavailable-body-readable.png");
+  await page.screenshot({path: unavailableScreenshot});
+  await testInfo.attach("Context failure preserves readable body", {path: unavailableScreenshot, contentType: "image/png"});
 });
 
 test("long conversations keep the open body visible and earlier and later messages reachable", async ({page}, testInfo) => {
